@@ -1,30 +1,59 @@
 # Kill condition verdict — W0 gate
 
-**Date:** 2026-08-07. Evidence in `prior_art.md`. BucketServe read in full; everything else
-is docs and abstracts.
+**Date:** 2026-08-07. Evidence in `prior_art.md`. **BucketServe and LAPS both read in full**
+(9 and 12 pages); everything else is docs and abstracts.
 
 The plan's stated gate: *"A negative on the prior-art check or the oracle-gap probe stops
 the project in week 0."* All checks runnable without hardware are now run.
 
 ---
 
-## Verdict: the gate fires. The spine is substantially published — at MLSys 2026.
+## Verdict: the gate does NOT fire. Reframing is mandatory; the spine survives.
 
-**This supersedes the verdict I wrote earlier today.** That one said "the spine is clear,
-nothing found makes the promote-vs-queue decision." It was based on BucketServe plus keyword
-search over the plan's reading list. The forward-citation sweep — run afterwards, and the
-one thing the plan flagged as the top risk — surfaced **LAPS / PLA-Serve (MLSys 2026)**,
-which does most of the spine. See `prior_art.md` §4b.
+**This is the third verdict today and it supersedes both earlier ones.** History, because it
+matters more than the conclusion:
+
+1. Keyword search over the plan's reading list → "spine is clear." **Wrong** — the reading
+   list is not the search.
+2. Forward-citation sweep surfaced LAPS; assessed from its **12-slide deck** → "gate fires,
+   spine is published." **Also wrong** — I treated a presentation slide's framing as the
+   paper's contribution.
+3. **Full 12-page paper read** → the deck's "memory first vs latency first" comparison **does
+   not exist in the paper.** Algorithm 1 has one policy: greedily group by length to
+   *minimise* padding, then pad to the nearest captured shape.
 
 | Check | Result |
 |---|---|
-| Shape polymorphism removes the ladder | **No.** Ladder is real, documented, configurable. Premise survives. |
+| Shape polymorphism removes the ladder | **No.** Ladder is real, documented, configurable. |
 | Chunked prefill deletes L1 | **Yes.** Default-on in vLLM V1, validated in `tpu-inference`. |
-| Prior art claims ladder optimisation | **Partly.** BucketServe publishes the Lloyd–Max condition (Eq. 4), rejects exact optimisation as "computationally expensive," uses midpoint bisection. |
-| **Prior art claims the spine** | **Yes, largely — LAPS.** A CUDA-Graph bucket grid over (length × batch); nearest-bucket padding; *both* promote and queue implemented as "latency first" / "memory first"; an Adaptive Wait-Depth scheduler whose `W_GR` is literally "expected time to fill a bucket"; an analytic cost model giving a length boundary; adaptation to observed arrival rate. |
+| Prior art claims ladder optimisation | **No — and two papers say why they didn't.** BucketServe derives the Lloyd–Max condition then rejects computing it as "computationally expensive." LAPS says "the number of graphs must be limited" and uses a fixed power-of-two grid. |
+| **Prior art claims the spine (promote vs queue)** | **No.** LAPS's AWD *waits* for a bucket to fill (`W_GR`) and then pads to nearest. It never asks whether dispatching now into a larger already-warm bucket beats waiting. Untouched. |
 
-LAPS is not a distant neighbour. It is the plan's Phase 2 and Phase 3, on GPU, published
-four months ago at the previous edition of the venue this was aimed at.
+### Why LAPS is not the scoop I called it
+
+- **Short prefill only, ≤256 tokens, by explicit design.** Their stated reason: for general
+  prefill, "graph capture [is] expensive and rarely amortized. Hence, mainstream serving
+  systems **avoid CUDA Graphs in prefill**." On GPU, compiled-shape bucketing is an opt-in
+  optimisation for a cheap corner. **On TPU it is mandatory at every length for every
+  request.** Difference in kind, and LAPS supplies the reason.
+- **There is a fallback.** Algorithm 1: `if G* exists then pad B to G* else use standard
+  prefill kernel`. **XLA has no uncaptured path.**
+- **Their own ablation shows bucketing alone is a wash on GPU** — "enabling CUDA Graphs alone
+  yields limited improvements and can even degrade throughput." Figure 6's Graph-only arm
+  tracks baseline; the wins come from disaggregation. On TPU you cannot turn it off.
+- **The grid is fixed powers of two**, `L ∈ {8…256}`, `B ∈ {1…64}`, captured at init. No
+  optimisation, no adaptation to workload.
+
+### The strongest single finding: LAPS §4.2 names our problem and declines it
+
+> "Each graph is bound to a fixed kernel configuration… **the number of graphs must be
+> limited to balance memory usage and performance.**" — with measurements: 228/240/277 MB per
+> graph, and **8–12 seconds to capture one**.
+
+One correction against myself: capture is **not** milliseconds, so the XLA cost asymmetry is
+~3–10×, not orders of magnitude. But this strengthens the position rather than weakening it —
+**both closest papers state the cardinality constraint explicitly and neither solves it.**
+That is about as clean an opening as prior art ever provides.
 
 ## What survives, and it is the part the plan already called the spine
 
@@ -69,11 +98,11 @@ found so far — and it came from the closest competing work.
 
 Ranked by probability × cost:
 
-1. **The forward-citation sweep has not been run.** This is the search that killed
-   `gapcache` — five systems its reading list never anticipated. Keyword search found no
-   successor doing promote-vs-queue on compiled shapes, but keyword search is exactly what
-   missed those five. **Until this runs, the verdict is provisional in the same way
-   `gapcache`'s pre-search optimism was.** Now the top risk.
+1. **The forward-citation sweep is only half done.** BucketServe's citation list was
+   enumerated and produced LAPS. **RPA's returned HTTP 429 and was never retrieved.** One
+   citation list alone overturned the verdict twice today, so the missing half is the top
+   risk. Also unexamined: **Multi-Bin Batching** ([2412.04504](https://arxiv.org/abs/2412.04504)),
+   which LAPS names alongside BucketServe as the most related length-bucketing work.
 2. **Oracle headroom turns out small.** Untestable without hardware. §1 of `prior_art.md`
    cuts in our favour — the default ladder is powers of two, which is coarse — but that is
    an argument, not a measurement.
@@ -84,69 +113,48 @@ Ranked by probability × cost:
    <9% error. If it models compiled-shape ladders, the simulator contribution evaporates and
    the right move is to build on it. Not checked against its extension points.
 
-## What is genuinely still open
+## Recommendation: continue. Reframe, do not narrow the venue.
 
-Stated as narrowly and honestly as I can. LAPS **offers** promote and queue as two
-configuration strategies; it does not **study** them.
+The pre-committed response is **not** triggered — the gate did not fire. What is required is
+a reframing, and the prior art now dictates it fairly precisely:
 
-1. **Nobody has answered "when does promoting beat waiting, and by how much?"** LAPS gives
-   memory-first and latency-first as choices, with no cost model for the promotion, no
-   comparison, and no workload-dependence result. This is real, and it is the question v3
-   was built around — but it is a *characterisation* result, not a new mechanism, and the
-   mechanism is what MLSys industrial-track papers are usually made of.
-2. **Nobody optimises the grid under a cardinality budget.** LAPS uses powers of two adjusted
-   by hit frequency; BucketServe derives the Lloyd–Max condition and then rejects computing
-   it. A DP that is globally optimal in `O(K·N²)` refutes BucketServe's stated reason. Small,
-   sharp, defensible — and roughly one section, not a paper.
-3. **Nobody does this on TPU/XLA, and the cost asymmetry is real.** LAPS lets its grid
-   "dynamically change based on hit frequency" because CUDA Graph capture is cheap;
-   BucketServe reports bucketing overhead <1% and splits/merges at runtime. On XLA every
-   boundary is a 30–120 s compile plus HBM, and vLLM's own docs warn of HBM OOM from too many
-   graphs. **The cardinality budget is a hardware constraint neither faces.** This is the
-   strongest remaining differentiator — and it is the same "port it to TPU" argument
-   `gapcache`'s verdict called "genuine and substantive" but declined to treat as sufficient
-   on its own.
-4. **LAPS partitions short vs long prefill; TPU does not permit that partition.** Their
-   design rests on short prefill having "stable compact shapes." On TPU everything is
-   compiled, so the problem does not decompose the same way. Possibly a real structural
-   difference; possibly a detail.
+1. **LAPS is the primary related work** and must be distinguished in the paper's first
+   paragraph, not buried. The distinction is clean and factual: they bucket a cheap corner of
+   the workload on hardware where bucketing is optional and has a fallback; TPU compiles
+   every shape for every request with no fallback.
+2. **The spine is narrower and sharper than v3 wrote it.** Not "promote-vs-queue is
+   unstudied" but: *LAPS waits for a bucket to fill and then pads to nearest; nobody asks
+   whether dispatching now into a larger already-warm bucket beats waiting.* That is the
+   contribution, and it is defensible because the closest system implements exactly one half
+   of it.
+3. **The DP now has two independent invitations**, both quotable: BucketServe's "computa-
+   tionally expensive to calculate in practice" and LAPS's "the number of graphs must be
+   limited." Frame it as answering a stated open cost concern, not as novelty.
+4. **The compile-budget argument is the paper's spine, not a differentiator.** Both papers
+   name the constraint; on TPU it binds hardest and cannot be escaped.
 
-## Recommendation
+Still do not provision hardware — but for a different reason than before. The remaining
+prior-art work is cheap, and `e10_latency_steps` needs respecifying after the chunked-prefill
+finding regardless. Nothing is lost by closing those first.
 
-**Do not provision hardware. Do not start building. Read LAPS in full first, then decide.**
+## What is genuinely still open — after the full read
 
-§4b rests on a 12-slide deck plus an abstract — the most consequential finding in this gate
-is also the thinnest-evidenced, and it would be wrong to kill or continue the project on
-that basis. The paper is 12 pages and free. Two outcomes:
-
-- **If the full read confirms the deck**, then items 1–4 above are the entire remaining
-  contribution, and the honest description is *"a characterisation study of a tradeoff LAPS
-  exposed but did not analyse, plus a DP, ported to TPU."* That is a workshop paper or a
-  short paper. It is not, in my judgement, an MLSys industrial-track submission — and this is
-  exactly the situation the plan's pre-committed response was written for.
-- **If the full read shows LAPS's bucketization is narrower than the deck suggests** — short
-  prefill only, no real promotion policy, grid fixed at powers of two — then item 1 grows
-  back toward a paper, and the TPU cardinality-budget argument (item 3) carries more weight.
-
-**The pre-committed response now applies, and I am not going to quietly walk it back.**
-`DECISIONS.md`, 2026-08-07: *"if the gate fires, the response is narrow the venue — a
-workshop submission, or skip this cycle and target the next — not pivot to a fourth topic."*
-That was written before the outcome was known, precisely so it would not be renegotiated
-under deadline pressure. It should be honoured, and the options are:
-
-- **(a) Narrow the venue.** Take items 1–3 as a workshop paper or short paper. Cheap, honest,
-  finishes something. Some hardware spend, well under the ceiling.
-- **(b) Skip the cycle.** Target the next MLSys with a properly scoped problem, using the
-  ~$0 spent so far and three gates' worth of hard-won judgement about this area.
-- **(c) Re-aim at the one thing LAPS cannot do** — the TPU/XLA cardinality budget as the
-  *central* claim rather than a differentiator, i.e. "recompilation cost makes bucket
-  selection a fundamentally different problem on compiled-shape accelerators, and here is
-  the theory and the measurement." This is the most interesting option and the least
-  proven; it needs its own prior-art pass before it is anything more than a hunch.
-
-**This is not my decision to make.** The gate fired; what to do about it is the author's
-call. What I would push back on is a fourth pivot to an unrelated topic — that pattern is
-what produced three gates in six days, and the pre-commitment exists to stop it.
+1. **Nobody compares promoting into a larger already-warm bucket against waiting for the
+   right one.** LAPS's AWD computes `W_GR`, the expected time to fill the target depth,
+   waits, then pads to the nearest captured shape. It never evaluates dispatching *now* into
+   a bigger bucket instead. This is the spine, and it is untouched by the closest system —
+   which implements exactly one half of it.
+2. **Nobody optimises the ladder under a cardinality budget**, and both closest papers say
+   why not, quotably. BucketServe: the optimal boundary is "computationally expensive to
+   calculate in practice." LAPS: "the number of graphs must be limited to balance memory
+   usage and performance," then a fixed power-of-two grid. A globally-optimal `O(K·N²)` DP
+   answers a stated open cost concern.
+3. **Nobody covers the full length range, because on GPU nobody has to.** LAPS caps at 256
+   tokens by design; general prefill makes "graph capture expensive and rarely amortized."
+   On TPU every request at every length is compiled, with no fallback kernel.
+4. **No measured cost curve.** LAPS's `L_m` is analytic/roofline; BucketServe's objective is
+   token count. v3's `C(B) − C(L)` on a measured superlinear curve is differentiated from
+   both.
 
 ## What does not change
 

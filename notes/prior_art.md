@@ -234,43 +234,98 @@ They also derive an analytic length boundary from a latency model —
 Baselines: vanilla SGLang under PD disaggregation, SGLang router. >30% prefill latency
 reduction, 28% fewer SLO violations multi-instance, 35% throughput on Qwen2.5-32B.
 
-### Assessment — this is very bad for the plan as written
+### CORRECTION — full paper read. My deck-based assessment was wrong.
 
-Compare against v3's stated contributions:
+I first assessed LAPS from its 12-slide MLSys deck and concluded the gate fired. **Having
+read the 12-page paper, that was an over-call, and the specific error was treating a
+presentation slide's framing as the paper's contribution.** The deck shows a "memory first
+vs latency first" grouping choice. **That comparison does not exist in the paper.**
+Algorithm 1 has exactly one policy: greedily group short requests by input length to
+*minimise* padding, then pad the batch to the nearest captured shape.
 
-| v3 claim | LAPS status |
-|---|---|
-| Requests are padded to one of N precompiled shapes | **Done** — CUDA Graph grid, nearest-bucket padding |
-| Bucket ladder over length **and** batch | **Done** — the (L × B) grid *is* L1 × L2 |
-| Promote-and-pad vs queue-and-wait | **Both implemented**, as memory-first / latency-first |
-| Wait for the right bucket vs dispatch now | **Done** — AWD, and `W_GR` is literally "time to fill the bucket" |
-| Cost model deriving a length boundary | **Done** — `L_m` from an analytic roofline-style model |
-| Adaptive to arrival rate | **Done** — `W`, `D` update from observed rate |
+What the paper actually says:
 
-**The spine, as v3 phrases it, is substantially published — at the immediately preceding
-edition of the target venue.** My earlier verdict that "nothing found makes the
-promote-vs-queue decision" was based on BucketServe and keyword search; it does not survive
-this paper.
+**Scope is explicitly short-prefill only, and the grid is fixed.** §3.1: LAPS "pre-defines a
+grid of *power-of-two* prompt-length-batch-size buckets (e.g., `L ∈ {8, 16, 32, 64, 128,
+256}` and `B ∈ {1, 2, 4, 8, 16, 32, 64}`)", captured at system init. Their justification for
+not covering general prefill is the important part:
 
-### What LAPS does *not* do — the remaining sliver, stated honestly
+> "Prefill is also dominated by large attention GEMMs, making graph capture expensive and
+> rarely amortized. Hence, mainstream serving systems **avoid CUDA Graphs in prefill** and
+> instead rely on conventional kernel launches or fused-kernel optimizations."
 
-1. **It offers both strategies; it does not study which wins when.** Memory-first and
-   latency-first are presented as configuration choices, not as a policy question with a
-   workload-dependent answer, a cost model for the promotion, or a comparison. "When does
-   promoting beat waiting, and by how much in dollars" is not answered.
-2. **No cardinality-budgeted optimisation of the grid.** Boundaries are powers of two,
-   adjusted by hit frequency. No optimality claim, no DP, no budget constraint.
-3. **Short prefills only.** The whole design rests on short prefill behaving like decode
-   ("stable compact shapes → perfect for CUDA Graph"); long prefill goes to an uncaptured LP
-   instance. On TPU *everything* is compiled, so the problem does not partition this way.
-4. **GPU / CUDA Graph, not TPU / XLA** — and the cost asymmetry still favours us. LAPS can
-   let the grid "dynamically change based on hit frequency" because capture is cheap. An XLA
-   recompile is 30–120 s plus HBM. **The cardinality budget remains a real constraint that
-   LAPS does not face** — the same argument that differentiates us from BucketServe.
-5. Their `L_m` is analytic (roofline); v3 proposes a **measured** cost curve.
+So on GPU, compiled-shape bucketing is an *opt-in optimisation for a cheap corner of the
+workload* (short re-prefills, ≤256 tokens, which they show are 63–81% of multi-turn traffic).
+**On TPU it is mandatory for every request at every length.** That is a difference in kind,
+and LAPS states the reason itself.
 
-Whether that sliver is an MLSys paper is a judgement call, not a search result. See
-`kill_condition.md`.
+**Algorithm 1 has a fallback that TPU does not have.** Lines 7–11:
+`G* ← NearestGraph(B, H, M); if G* exists then pad B to G*; else use standard prefill
+kernel`. When no captured shape fits, GPU falls back to an uncaptured kernel. **On XLA there
+is no uncaptured path.**
+
+**Their own ablation shows shape bucketing alone is roughly a wash on GPU:**
+
+> "in some configurations, enabling CUDA Graphs alone yields limited improvements and **can
+> even degrade throughput**, as the overhead of graph eligibility checking and graph
+> launching becomes non-negligible."
+
+Figure 6's "Graph only" arm tracks the baseline; the wins come from disaggregation. On TPU
+the bucketing is not an arm you can turn off.
+
+### §4.2 is the opening — they name our exact problem and decline to solve it
+
+LAPS's cost analysis:
+
+> "Each graph is bound to a fixed kernel configuration and cannot adapt to dynamic kernel
+> sizes, so multiple graphs must be captured to cover different token lengths and batch
+> sizes. Each prefill step introduces lookup and selection overhead, and thus, **the number
+> of graphs must be limited to balance memory usage and performance.**"
+
+With measurements: single-graph sizes **228 / 240 / 277 MB** (7B / 14B / 32B), and
+**"capturing a single prefill graph incurs an initialization overhead of approximately
+8–12 seconds."**
+
+Note this cuts against a claim I made earlier — capture is **not** milliseconds. A 6×7 grid
+is ~42 graphs, ~6–8 minutes of capture and ~10 GB. So the cost asymmetry versus XLA
+(30–120 s per bucket) is roughly 3–10×, not orders of magnitude.
+
+**But that makes the opening better, not worse.** LAPS has the cardinality-budget problem,
+names it explicitly, quantifies it — and then uses a fixed power-of-two grid anyway. Neither
+LAPS nor BucketServe optimises boundaries under a budget: BucketServe derives the optimality
+condition and rejects computing it as "computationally expensive"; LAPS says the graph count
+"must be limited" and picks powers of two. **Two independent papers state the constraint and
+neither solves it.**
+
+### Evaluation
+
+H200 single-GPU and 8×H200; built on SGLang, ~2K LOC; Qwen2.5-7B/14B/32B; LMsys-Chat-1M and
+ShareGPT. Baselines: SGLang (PD-disagg, vanilla DP, with router) and vLLM. Up to 20%/33%
+higher RPS single- and 8-instance, ~20% lower average latency, ~8% on offline distillation.
+Ablation arms are Baseline / Graph-only / Disaggregation-only / Full LAPS — **not**
+promote-versus-queue.
+
+### What remains genuinely open, after the full read
+
+1. **Nobody compares promoting into a larger already-warm bucket against waiting for the
+   right one.** LAPS's AWD waits (`W_GR` = expected time to fill the target depth) and then
+   pads to nearest; it never asks whether dispatching *now* into a bigger bucket beats
+   waiting. That question is untouched, and it is the spine.
+2. **Nobody optimises the ladder under a cardinality budget** — stated as an open cost
+   concern by both closest papers.
+3. **Nobody covers the full length range**, because on GPU nobody has to.
+4. **No measured cost curve** — LAPS's `L_m` is analytic/roofline; BucketServe's objective is
+   token-count.
+
+### New lead from LAPS's related work
+
+> "The most related line of work is *length bucketing* … (e.g., **Multi-Bin Batching**
+> (Guldogan et al., 2024), BucketServe (Zheng et al., 2025)). However, these methods only
+> optimize intra-batch length variance."
+
+**Multi-Bin Batching ([2412.04504](https://arxiv.org/abs/2412.04504))** — not yet examined.
+Also **TBDB** (Gao et al. 2023), token-bucket dynamic batching, cited as the grid's
+inspiration. Both are open threads.
 
 ## 5. Admission control and batch composition
 
