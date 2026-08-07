@@ -108,29 +108,84 @@ to satisfy `block_table.shape[1] % NUM_KV_PAGES_PER_BLOCK == 0`, later removed i
 [PR #14846](https://github.com/vllm-project/vllm/pull/14846) once the kernel was fixed.
 Useful colour: shape-alignment padding in this stack is real, tracked, and iterated on.
 
-## 4. BucketServe — the closest work, and the main novelty threat
+## 4. BucketServe — full read, 9 pages. The spine survives; the ladder claim changes.
 
-[BucketServe (2507.17120)](https://arxiv.org/abs/2507.17120), Jul 2025. Groups requests
-into size-homogeneous buckets by sequence length to minimise padding; **dynamically
-adjusts bucket boundaries (split/merge)**; determines safe batch sizes from real-time GPU
-memory state; **priority-aware scheduling to meet latency SLOs**. Baselines UELLM and
-DistServe; 3.58× throughput, 1.93× load under 80% SLO attainment.
+[BucketServe (2507.17120)](https://arxiv.org/abs/2507.17120) — Zheng, Xu, Song, Ye
+(SUSTech + Shenzhen Institutes of Advanced Technology, CAS), 23 Jul 2025. **Read in full.**
 
-**v2's characterisation — "BucketServe designs ladders, it does not study admission
-against a fixed ladder" — is too comfortable.** BucketServe does bucket design *and*
-scheduling, on a GPU, with SLO-aware prioritisation. The distinguishing claims available
-to us are narrower than v2 implied:
+Setup: built on vLLM, disaggregated prefill/decode, **4× NVIDIA A100 40 GB**, LLaMA-2-13B
+and OPT, datasets Stanford Alpaca (mean 83.7 / median 69 tokens) and LongBench (median
+41,417, truncated to 1024). Baselines **UELLM** and **DistServe**. Three-tier architecture:
+Request Bucketing Manager → Dynamic Batching Controller → P/D Scheduler, with a Global
+Monitor feeding memory/queue telemetry.
 
-1. BucketServe's buckets are a **runtime batching abstraction on GPU**, where any batch
-   shape is legal. Ours are **compiled executables** under a hard cardinality budget —
-   changing the ladder costs an XLA recompile, which is precisely why the cardinality
-   constraint exists. That is a genuinely different problem.
-2. It is GPU-only (abstract references GPU memory and OOM).
-3. Whether it makes the **promote-vs-queue** decision explicitly is not determinable from
-   the abstract.
+### The spine is clear — no promote-vs-queue
 
-**Point 3 must be settled by a full read before any code is written.** This is the single
-highest-value remaining action in the gate.
+Algorithm 1, lines 2–6: each request is assigned to the bucket whose range *contains* its
+length (`if b_low ≤ S < b_up then add r to b.requests; break`). **A request is never placed
+in a larger bucket than it needs.** The adaptive machinery moves *boundaries* (split when
+>50% of a bucket's requests fall below its midpoint and the bucket exceeds `N_max`
+requests; merge everything back to one bucket when total load drops below `N_max`), not
+requests. Ordering within a bucket is SJF or LJF for offline, earliest-arrival for online;
+FCFS governs the P/D handoff.
+
+So the decision this paper is about — *when your bucket is saturated, promote and pay the
+padding, or queue and pay the wait* — **is not made by BucketServe.** Its answer is always
+"stay in your bucket, and we will move the bucket." Confirmed across the full text.
+
+### But the ladder-design claim now has a named opponent, and it is close
+
+BucketServe formalises padding waste and derives the optimal boundary:
+
+- Eq (2): `Waste_Ratio = (S_max − S_avg) / S_max`
+- Eq (3): `E[Waste] = Σ_{b=1..K} ∫_{L_b}^{U_b} (1 − S/U_b) f(S) dS`
+- Eq (4): `U_b* = ∫_{L_b}^{U_b} S f(S) dS / ∫_{L_b}^{U_b} f(S) dS`
+
+— "the upper bound of each bucket should be set to the **conditional expectation** of
+sequence lengths within that bucket." **That is the Lloyd–Max centroid condition**, already
+published for this exact problem.
+
+Then they decline to solve it:
+
+> "Although the optimal bucket boundary that minimizes E[Waste] is theoretically defined as
+> the conditional expectation of sequence lengths within a bucket, it is **computationally
+> expensive to calculate in practice**. Moreover, since request length distributions can
+> change over time, maintaining such boundaries dynamically introduces significant overhead
+> and algorithmic complexity. To address this challenge, we adopt a simple but efficient
+> approach based on **interval bisection**, which approximates the optimal boundary."
+
+Midpoint splitting, threshold θ = 0.5, overall complexity `O(n·k + 4k)`.
+
+**This is simultaneously the biggest threat and the clearest opening found so far.**
+
+- *Threat:* "we optimise the bucket ladder" is no longer novel framing. The stationarity
+  condition is published. v3's plan to "keep Lloyd–Max as a baseline to beat" must now be
+  written as *"beat BucketServe's stated fallback,"* with the citation, or a reviewer will
+  supply it.
+- *Opening:* they rejected exact optimisation as **computationally expensive**. A 1-D DP
+  over a discretised length axis is `O(K·N²)` — milliseconds for a few thousand candidate
+  edges — and returns the **global** optimum, not a stationary point. That directly refutes
+  the stated reason for the heuristic. It is a small, sharp, defensible contribution.
+- *Also differentiating:* their objective is **token-based** (`1 − S/U_b`). v3 already
+  argues this is the wrong objective — padding from `L` to `B` costs `C(B) − C(L)` on a
+  superlinear cost curve, not `B − L` tokens. That critique now has a concrete target.
+
+### The differentiator, and BucketServe's own data makes it crisp
+
+BucketServe reports **bucketing overhead below 1% of execution time**, and Fig. 6b shows
+per-bucket processing time flat (0.12 s) as bucket count grows 1→8. On a GPU **a bucket is
+nearly free**, which is exactly why they can afford to split and merge boundaries at
+runtime.
+
+On a compiled-shape accelerator that is false. Every boundary is an XLA executable: 30–120 s
+to compile, plus HBM to hold the graph, and vLLM's own TPU docs warn that too many compiled
+graphs "may lead to HBM OOM." **The cardinality budget is not a modelling convenience — it
+is a hardware constraint that makes BucketServe's central mechanism (dynamic split/merge)
+inapplicable.** That contrast, stated with both papers' numbers, is the cleanest framing of
+this project's contribution found so far.
+
+Their future work is "multi-level load balancing on multi-node clusters" — not our
+direction.
 
 ## 5. Admission control and batch composition
 
@@ -161,18 +216,61 @@ Searched: Sarathi-Serve, QLM, Andes, Llumnix, SLOs-Serve, FairBatching, AlignedS
 but did not surface with usable detail in this pass. Forward citations of RPA and
 BucketServe were not systematically enumerated. Both are Open threads.
 
-## 6. Compiled-shape bucketing outside LLMs
+## 6. Compiled-shape bucketing outside LLMs — old, and it gives us our vocabulary
 
-Not yet searched. TensorRT optimisation-profile selection, ONNX Runtime dynamic shapes, TF
-Serving batch buckets, `tf.data.bucket_by_sequence_length`. Expect these to be genuine
-prior art for *the idea of bucketing shapes* — the defensible novelty is the cost model and
-the admission decision, never the bucketing itself. The related-work section must concede
-this early and clearly. Open thread.
+As expected: bucketing shapes is **not novel and must be conceded early**. Two findings are
+more useful than that concession, though.
 
-## 7. Varlen serving (ByteTransformer, Effective Transformer) and Vidur
+**`tf.data.experimental.bucket_by_sequence_length` has a `pad_to_bucket_boundary` flag.**
+That single API distinguishes the two regimes this project is about:
 
-Not yet searched. Both were on the plan's list. Vidur matters methodologically — a reviewer
-will ask why we built a simulator instead of using it. Open threads.
+| Flag | Padding target | Who lives here |
+|---|---|---|
+| `False` (default) | max length **in the batch** | GPU runtime batching — **BucketServe's `Waste_Ratio = (S_max − S_avg)/S_max`** |
+| `True` | the **bucket boundary** | compiled-shape accelerators — us |
+
+This is a clean, citable way to say what the paper is about in one sentence, and it shows
+the distinction is recognised in a decade-old API rather than invented here.
+
+**TensorRT optimisation profiles are the same problem in another stack.** Dynamic dims are
+declared with `-1`; you must supply one or more profiles at build time, each a
+`(min, opt, max)` range; profiles may be disjoint or overlapping; and the practitioner
+guidance is to "ensure that all requests fall within the `opt` range." Docs are explicit
+that "dynamic shapes are convenient but not performance-friendly" and that fixed shapes
+permit more aggressive optimisation.
+
+So: a **cardinality-budgeted set of compiled shape ranges chosen against a workload
+distribution** is a live engineering problem in TensorRT and ONNX Runtime too. Nothing found
+formalises profile selection as an optimisation problem. That widens the paper's claimed
+scope from "TPU" to "compiled-shape accelerators generally" *and* raises the bar — the
+related-work section must state plainly that bucketing is old and that the contribution is
+the cost model, the cardinality-budgeted optimum, and the admission policy.
+
+## 7. Vidur — the methodological precedent, and the "why not use it" answer
+
+[Vidur (2405.05465)](https://arxiv.org/abs/2405.05465), **MLSys 2024**, Microsoft Research.
+Models operator performance by combining experimental profiling with predictive modelling;
+estimates end-to-end latency and throughput. Reported fidelity: **<9% error** overall, TTFT
+within 5–10%, throughput within 10–15%. Vidur-Search finds the best deployment config for
+LLaMA-2-70B **in one hour on a CPU** versus ~42K GPU-hours of real exploration.
+
+Two consequences, both important:
+
+1. **It validates the method.** Calibrate-then-simulate with reported fidelity is an
+   established MLSys contribution shape, at the same venue being targeted. v3's MAPE < 15%
+   bar sits right at Vidur's own throughput error band — defensible, and worth citing as
+   the precedent rather than presenting as our own invention.
+2. **A reviewer will ask why we did not just use Vidur, and we need the answer written
+   down.** The honest answer as far as this pass goes: Vidur models GPU operators and
+   parallelism configs; nothing found indicates it models compiled-shape bucket ladders,
+   XLA executables, or TPU. But this has **not** been verified against Vidur's actual
+   extension points, and "we didn't check" is not an answer. Open thread.
+
+Also surfaced: **Frontier ([2605.21312](https://arxiv.org/pdf/2605.21312))**, "Towards
+Comprehensive and Accurate LLM Inference Simulation" — newer, unexamined. Check it.
+
+**Varlen serving (ByteTransformer, Effective Transformer)** — still not searched. Open
+thread.
 
 ---
 
@@ -191,21 +289,29 @@ Recorded in `DECISIONS.md` as an open item; not decided here.
 
 ## Open threads — what this pass did not close
 
-1. **Full read of BucketServe.** Does it make the promote-vs-queue decision explicitly?
-   Highest-value remaining action.
-2. **Pin the "sorts pending queue by prompt length" system** and the 60–80% padding-overhead
-   figure to primary sources.
-3. **Sarathi-Serve, Andes, Llumnix** — proper searches.
-4. **Forward citations of RPA and BucketServe** — systematic enumeration, the search that
-   killed `gapcache`.
-5. **Compiled-shape bucketing outside LLMs** (§6) and **varlen serving + Vidur** (§7).
+1. **Forward citations of RPA and BucketServe** — systematic enumeration. **The search that
+   killed `gapcache`, and it is still the largest unquantified risk here.** Keyword search
+   found no successor doing promote-vs-queue on compiled shapes, but keyword search is
+   exactly what missed five systems last time.
+2. **Can Vidur be extended to compiled-shape ladders?** "We didn't check" is not an answer
+   to the question a reviewer will ask. Also examine **Frontier**
+   ([2605.21312](https://arxiv.org/pdf/2605.21312)).
+3. **Pin the "sorts pending queue by prompt length" system** and the 60–80% padding-overhead
+   figure to primary sources. Nearest published neighbours to our claim.
+4. **Sarathi-Serve, Andes, Llumnix** — proper reads. All three appear in BucketServe's
+   bibliography as related work (Sarathi-Serve [11] OSDI'24, Llumnix [19] OSDI'24), so they
+   are in the neighbourhood but not obviously doing this.
+5. **Varlen serving** — ByteTransformer, Effective Transformer. The
+   "eliminate padding rather than bucket it" answer.
 6. **Confirm on hardware:** chunked prefill's TPU-specific default and TPU
    `max_num_batched_tokens`; prefix caching default.
 
 ## Confidence
 
-Everything above is from abstracts, official documentation, and HTML renders — not full
-paper reads. `gapcache` died because forward/keyword search surfaced five systems its
-reading list never anticipated, and **item 4 of the open threads is exactly that search,
-still outstanding.** Treat this pass as sufficient to justify continuing to spend *time*,
-and not yet sufficient to justify spending *money* on hardware.
+BucketServe was read in full (9 pages) and its findings are firm. Everything else is
+abstracts, official documentation, and HTML renders.
+
+`gapcache` died because forward/keyword search surfaced five systems its reading list never
+anticipated, and **open thread 1 is exactly that search, still outstanding.** This pass is
+sufficient to justify continuing to spend *time*. It is not yet sufficient to justify
+spending *money* on hardware.
