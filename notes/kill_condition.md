@@ -98,20 +98,29 @@ found so far — and it came from the closest competing work.
 
 Ranked by probability × cost:
 
-1. **The forward-citation sweep is only half done.** BucketServe's citation list was
-   enumerated and produced LAPS. **RPA's returned HTTP 429 and was never retrieved.** One
-   citation list alone overturned the verdict twice today, so the missing half is the top
-   risk. Also unexamined: **Multi-Bin Batching** ([2412.04504](https://arxiv.org/abs/2412.04504)),
-   which LAPS names alongside BucketServe as the most related length-bucketing work.
+1. **`e10_latency_steps` is largely pre-empted by LENS**
+   ([2606.18042](https://arxiv.org/abs/2606.18042)). It characterises "latency non-linearity
+   induced by bucketing" on NPUs — *"the compiler emits binaries only for a set of predefined
+   lengths… inputs are padded up to the nearest bucket size"* — with two measurements per
+   bucket, 2.15% mean error, cross-vendor. The staircase figure is published. **This is not a
+   kill; it is a redirection**: cite LENS, adopt its composition method for `C(B)`, and spend
+   hardware budget on the promotion/queue primitives instead. Read it properly before W1.
+   It also *confirms the premise independently* on non-TPU compiled-shape hardware.
+2. **Multi-Bin Batching** ([2412.04504](https://arxiv.org/abs/2412.04504)) has a
+   **throughput-optimal control policy** over predetermined bins, queueing-theoretic. Its
+   bins are over predicted *execution time* (straggler waste), not input length padded to a
+   compiled shape — a different axis — but it is the nearest thing to a theoretical result on
+   bin-based admission. **Read before writing the DP.**
 2. **Oracle headroom turns out small.** Untestable without hardware. §1 of `prior_art.md`
    cuts in our favour — the default ladder is powers of two, which is coarse — but that is
    an argument, not a measurement.
-3. **Length-aware admission is already published.** At least one surveyed system "sorts the
-   pending queue by prompt length to reduce padding overhead." Nearest published neighbour;
-   source still not pinned.
-4. **Vidur already does this, or extends to it cheaply.** MLSys'24, same venue family,
-   <9% error. If it models compiled-shape ladders, the simulator contribution evaporates and
-   the right move is to build on it. Not checked against its extension points.
+3. **Oracle headroom turns out small.** Untestable without hardware; the power-of-two default
+   ladder argues in our favour, but that is an argument, not a measurement.
+4. **Vidur already does this, or extends to it cheaply.** MLSys'24, <9% error. If it models
+   compiled-shape ladders, the simulator contribution evaporates and the right move is to
+   build on it. Not checked against its extension points.
+5. Unpinned: the system that "sorts the pending queue by prompt length"; the 60–80% padding
+   figure; **Beyond Prediction: Tail-Aware Scheduling** ([2606.18431](https://arxiv.org/abs/2606.18431)).
 
 ## Recommendation: continue. Reframe, do not narrow the venue.
 

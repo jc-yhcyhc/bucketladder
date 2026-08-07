@@ -427,10 +427,75 @@ Recorded in `DECISIONS.md` as an open item; not decided here.
 
 ---
 
+## 4c. LENS — someone else independently found this exact setting, on NPUs
+
+**[Latency Prediction for LLM Inference on NPU Systems](https://arxiv.org/abs/2606.18042)**
+(2606.18042, 17 Jun 2026) — surfaced by RPA's forward citations. Abstract-level only.
+
+> "NPU-based LLM serving systems adopt a **bucketing strategy where the compiler emits
+> binaries only for a set of predefined lengths** (e.g., 256, 512, 1024, 2048, …), and
+> **incoming inputs are padded up to the nearest bucket size**."
+
+They name "**latency non-linearity induced by bucketing**" as one of three core challenges,
+alongside undisclosed microarchitecture and unpredictable compiler optimisations. LENS
+profiles **each bucket with two end-to-end measurements** and composes them to predict
+latency for arbitrary input/output length combinations: **2.15% mean error**, validated
+across NPUs from multiple vendors, several LLMs, and diverse workloads.
+
+**This cuts both ways and both are significant.**
+
+*In our favour — the premise is independently confirmed.* An unrelated group, on different
+hardware, identified compiled-shape bucketing with nearest-bucket padding as a first-class
+phenomenon worth a paper. "Compiler emits binaries only for predefined lengths, inputs padded
+up" is our setting, stated by someone else, two months ago. The generalisation from TPU to
+"compiled-shape accelerators" (§6) is now supported by NPU evidence too, not just TensorRT
+docs.
+
+*Against — it substantially pre-empts `e10_latency_steps` as a contribution.* The staircase
+measurement and the per-bucket cost curve `C(B)` are close to what LENS already does, and
+better: two measurements per bucket, composed, 2.15% error, cross-vendor validation. If the
+paper's motivating figure is "latency is a staircase in prompt length," **that figure is
+published.**
+
+**The right response is to use it, not to compete with it.** LENS is a *predictor*; it does
+no admission, no promotion, no ladder design, no optimisation. It is the measurement
+methodology for the cost model this project needs. Cite it as the basis for `C(B)`, adopt its
+two-measurements-per-bucket composition if it holds up on TPU, and spend the hardware budget
+on the promotion/queue primitives instead of re-deriving a staircase someone has already
+characterised to 2.15%.
+
+**Read this one properly before W1** — it is the paper most likely to save hardware money,
+and possibly to supply `C(B)` outright.
+
+Also surfaced, unexamined: **Beyond Prediction: Tail-Aware Scheduling for LLM Inference**
+([2606.18431](https://arxiv.org/abs/2606.18431)).
+
+## 4d. Multi-Bin Batching — different axis, but a queueing-theoretic optimality result
+
+**[Multi-Bin Batching](https://arxiv.org/abs/2412.04504)** (Guldogan et al., 2412.04504) —
+named by LAPS alongside BucketServe as the most related length-bucketing work. Abstract only.
+
+Groups requests with similar **predicted execution times** into *predetermined bins*, because
+"hardware must wait for the longest-running request in the batch to complete." Formalises this
+"from a queueing-theoretic perspective" and proposes a **throughput-optimal control policy**.
+
+Different axis from ours: bins are over *predicted execution / generation length* to reduce
+straggler waste in the batch-max regime, not over *input length padded to a compiled shape*.
+The waste being removed is "wait for the slowest in the batch," not "pad to the executable's
+shape." **But it has a throughput-optimal control policy over bins**, which is the nearest
+thing found to a theoretical result on bin-based admission. **Read before the DP is written.**
+
 ## Forward-citation sweep — what it surfaced
 
-Run via Semantic Scholar citations of BucketServe. RPA's citation list returned HTTP 429 and
-**has not been retrieved — still outstanding.**
+Run via Semantic Scholar citations of **both** BucketServe and RPA. Both lists now retrieved.
+
+**RPA's citing papers — only two, and neither is a policy competitor:** *Latency Prediction
+for LLM Inference on NPU Systems* (LENS — §4c, the most consequential find of the sweep) and
+*JAXBench: Benchmarking Autonomous TPU Kernel Optimization* (TPU kernel autotuning, 1.36×
+geomean over XLA — relevant to the L3 discussion, not competitive).
+
+That RPA has so few forward citations is itself informative: **the compiled-shape serving
+problem on TPU is not crowded.**
 
 Citing BucketServe: *Generative AI at the Edge* (survey); *ASAP* (MoE prefill
 disaggregation); *RouteBalance* (model routing / load balancing); ***Requests of a Feather
