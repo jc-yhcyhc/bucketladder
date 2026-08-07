@@ -187,6 +187,91 @@ this project's contribution found so far.
 Their future work is "multi-level load balancing on multi-node clusters" — not our
 direction.
 
+## 4b. LAPS / PLA-Serve — found by forward citation. The closest work by a wide margin.
+
+**[PLA-Serve / LAPS](https://arxiv.org/abs/2601.11589)** — She, Li, Du, Wu, Zheng, Xing,
+Liu, Yao, Xue, Ho (MBZUAI + UNC Chapel Hill). **MLSys 2026, Seattle — oral.** Surfaced by
+the forward-citation sweep of BucketServe, not by any keyword search in the plan's reading
+list. Read from the MLSys slide deck (12 slides) plus abstract; **full paper not yet read.**
+
+This is the outcome the forward sweep exists to catch, and it is much closer than
+BucketServe.
+
+### What LAPS does
+
+**Innovation 2 — "CUDA Graph Bucketization for Batched Short Prefills."** A **2-D bucket
+grid over (length L × batch B)**: L ∈ {8, 16, 32, 64, …}, B ∈ {1, 2, 4, 8, 16}, with **one
+CUDA Graph captured per cell** at init, stored by key `(L, B)`, "allowed to dynamically
+change based on hit frequency." At replay, each request does a **nearest-bucket lookup and
+is padded up**: their example is 29→32, 47→64, 13→16, 58→64.
+
+Their stated rationale is our rationale: *"Prefill length varies every request → tensor
+shapes change → attention kernel cannot be captured."* CUDA Graphs are captured per fixed
+shape. **This is compiled-shape bucketing, on GPU.**
+
+**They present both sides of the promote-vs-queue decision, as named strategies:**
+
+| Strategy | Grouping of {64, 64, 32, 16} | Description |
+|---|---|---|
+| **Memory first** | `batch(2×64) + batch(1×32) + batch(1×16)` | "minimal padding, length-homogeneous" — *queue in your own bucket* |
+| **Latency first** | `batch(4×64)` | "same length" — ***promote 32 and 16 into the 64 bucket and eat the padding*** |
+
+**Innovation 3 — Adaptive Wait-Depth (AWD) Scheduler.** Two adaptive thresholds per
+scheduling round:
+
+- `W_SLA` — "latest moment we can dispatch without any request missing its deadline"
+- `W_GR` — **"Graph Fill Window: expected time for enough requests to arrive and fill a CUDA
+  Graph bucket"**
+- `W = clip(min{W_SLA, W_GR})`; wait up to `W` accumulating requests until batch depth `D`;
+  dispatch immediately if any request's SLA slack ≤ σ; `W` and `D` update from observed
+  arrival rate. Reported optimum ≈ 6 ms.
+
+They also derive an analytic length boundary from a latency model —
+`T_compute ≈ αL(L+2H) + βL`, `T_memory ≈ γ_w·L + γ_r·H`, giving
+`L_m = (γ_w − β)/α ≈ 256 tokens` on H200 — and an M/G/1 head-of-line-blocking penalty
+`ΔW = λp(1−p)(S_L−S_s)² / 2(1−ρ)`.
+
+Baselines: vanilla SGLang under PD disaggregation, SGLang router. >30% prefill latency
+reduction, 28% fewer SLO violations multi-instance, 35% throughput on Qwen2.5-32B.
+
+### Assessment — this is very bad for the plan as written
+
+Compare against v3's stated contributions:
+
+| v3 claim | LAPS status |
+|---|---|
+| Requests are padded to one of N precompiled shapes | **Done** — CUDA Graph grid, nearest-bucket padding |
+| Bucket ladder over length **and** batch | **Done** — the (L × B) grid *is* L1 × L2 |
+| Promote-and-pad vs queue-and-wait | **Both implemented**, as memory-first / latency-first |
+| Wait for the right bucket vs dispatch now | **Done** — AWD, and `W_GR` is literally "time to fill the bucket" |
+| Cost model deriving a length boundary | **Done** — `L_m` from an analytic roofline-style model |
+| Adaptive to arrival rate | **Done** — `W`, `D` update from observed rate |
+
+**The spine, as v3 phrases it, is substantially published — at the immediately preceding
+edition of the target venue.** My earlier verdict that "nothing found makes the
+promote-vs-queue decision" was based on BucketServe and keyword search; it does not survive
+this paper.
+
+### What LAPS does *not* do — the remaining sliver, stated honestly
+
+1. **It offers both strategies; it does not study which wins when.** Memory-first and
+   latency-first are presented as configuration choices, not as a policy question with a
+   workload-dependent answer, a cost model for the promotion, or a comparison. "When does
+   promoting beat waiting, and by how much in dollars" is not answered.
+2. **No cardinality-budgeted optimisation of the grid.** Boundaries are powers of two,
+   adjusted by hit frequency. No optimality claim, no DP, no budget constraint.
+3. **Short prefills only.** The whole design rests on short prefill behaving like decode
+   ("stable compact shapes → perfect for CUDA Graph"); long prefill goes to an uncaptured LP
+   instance. On TPU *everything* is compiled, so the problem does not partition this way.
+4. **GPU / CUDA Graph, not TPU / XLA** — and the cost asymmetry still favours us. LAPS can
+   let the grid "dynamically change based on hit frequency" because capture is cheap. An XLA
+   recompile is 30–120 s plus HBM. **The cardinality budget remains a real constraint that
+   LAPS does not face** — the same argument that differentiates us from BucketServe.
+5. Their `L_m` is analytic (roofline); v3 proposes a **measured** cost curve.
+
+Whether that sliver is an MLSys paper is a judgement call, not a search result. See
+`kill_condition.md`.
+
 ## 5. Admission control and batch composition
 
 Searched: Sarathi-Serve, QLM, Andes, Llumnix, SLOs-Serve, FairBatching, AlignedServe.
@@ -287,31 +372,43 @@ Recorded in `DECISIONS.md` as an open item; not decided here.
 
 ---
 
+## Forward-citation sweep — what it surfaced
+
+Run via Semantic Scholar citations of BucketServe. RPA's citation list returned HTTP 429 and
+**has not been retrieved — still outstanding.**
+
+Citing BucketServe: *Generative AI at the Edge* (survey); *ASAP* (MoE prefill
+disaggregation); *RouteBalance* (model routing / load balancing); ***Requests of a Feather
+Must Flock Together*** ([2605.06046](https://arxiv.org/abs/2605.06046), ISCA 2026 — FEATHER,
+an RL scheduler trading batch size against *prefix* homogeneity, 2–10× throughput; different
+axis from ours, but the same "batch composition is a learned tradeoff" shape); *InversePep*
+(irrelevant); and ***LAPS / PLA-Serve*** — §4b, which changes the verdict.
+
 ## Open threads — what this pass did not close
 
-1. **Forward citations of RPA and BucketServe** — systematic enumeration. **The search that
-   killed `gapcache`, and it is still the largest unquantified risk here.** Keyword search
-   found no successor doing promote-vs-queue on compiled shapes, but keyword search is
-   exactly what missed five systems last time.
-2. **Can Vidur be extended to compiled-shape ladders?** "We didn't check" is not an answer
-   to the question a reviewer will ask. Also examine **Frontier**
+1. **RPA's forward citations** — blocked on rate limit, not yet retrieved. Given that
+   BucketServe's list alone produced LAPS, this is not a formality.
+2. **Read the LAPS paper in full** (12 pages, arXiv 2601.11589). §4b is from the MLSys slide
+   deck. Every "what LAPS does not do" claim there needs confirming against the paper before
+   anything is built on it.
+3. **Can Vidur be extended to compiled-shape ladders?** Also **Frontier**
    ([2605.21312](https://arxiv.org/pdf/2605.21312)).
-3. **Pin the "sorts pending queue by prompt length" system** and the 60–80% padding-overhead
-   figure to primary sources. Nearest published neighbours to our claim.
-4. **Sarathi-Serve, Andes, Llumnix** — proper reads. All three appear in BucketServe's
-   bibliography as related work (Sarathi-Serve [11] OSDI'24, Llumnix [19] OSDI'24), so they
-   are in the neighbourhood but not obviously doing this.
-5. **Varlen serving** — ByteTransformer, Effective Transformer. The
-   "eliminate padding rather than bucket it" answer.
+4. **Pin the "sorts pending queue by prompt length" system** and the 60–80% padding-overhead
+   figure to primary sources.
+5. **Sarathi-Serve, Andes, Llumnix** — proper reads (all in BucketServe's bibliography).
+   **Varlen serving** — ByteTransformer, Effective Transformer.
 6. **Confirm on hardware:** chunked prefill's TPU-specific default and TPU
    `max_num_batched_tokens`; prefix caching default.
 
 ## Confidence
 
-BucketServe was read in full (9 pages) and its findings are firm. Everything else is
+BucketServe was read in full (9 pages); its findings are firm. **LAPS is from a 12-slide
+MLSys deck plus abstract — the single most consequential finding here rests on the
+thinnest evidence, and reading the paper is the top priority.** Everything else is
 abstracts, official documentation, and HTML renders.
 
-`gapcache` died because forward/keyword search surfaced five systems its reading list never
-anticipated, and **open thread 1 is exactly that search, still outstanding.** This pass is
-sufficient to justify continuing to spend *time*. It is not yet sufficient to justify
-spending *money* on hardware.
+The `gapcache` pattern repeated exactly: keyword search over the plan's own reading list
+found nothing doing promote-vs-queue, and the first forward-citation query surfaced a paper
+that does most of it, at the target venue's previous edition. **The lesson is that the
+reading list is not the search.** RPA's forward citations are still unretrieved, so the
+sweep is incomplete and the current verdict could still get worse.
