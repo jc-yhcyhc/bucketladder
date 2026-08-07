@@ -111,9 +111,6 @@ Ranked by probability × cost:
    bins are over predicted *execution time* (straggler waste), not input length padded to a
    compiled shape — a different axis — but it is the nearest thing to a theoretical result on
    bin-based admission. **Read before writing the DP.**
-2. **Oracle headroom turns out small.** Untestable without hardware. §1 of `prior_art.md`
-   cuts in our favour — the default ladder is powers of two, which is coarse — but that is
-   an argument, not a measurement.
 3. **Oracle headroom turns out small.** Untestable without hardware; the power-of-two default
    ladder argues in our favour, but that is an argument, not a measurement.
 4. **Vidur already does this, or extends to it cheaply.** MLSys'24, <9% error. If it models
