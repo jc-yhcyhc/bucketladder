@@ -44,7 +44,7 @@ done
 : "${TPU_INFERENCE_VERSION:=}"
 : "${MAX_MODEL_LEN:=8192}"
 : "${MAX_NUM_BATCHED_TOKENS:=8192}"
-: "${TP_SIZE:=4}"
+: "${TP_SIZE:=1}"
 : "${SERVER_PORT:=8000}"
 : "${WARMUP_LOG:=/tmp/vllm_warmup.log}"
 # Empty = vLLM default exponential (power-of-two) padding. An integer switches

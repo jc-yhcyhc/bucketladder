@@ -53,8 +53,10 @@ CONTROLLED_VARS: dict[str, Any] = {
     "enable_chunked_prefill": REQUIRE_EXPLICIT,
     # Sets the chunk size and therefore the residual prefill padding.
     "max_num_batched_tokens": REQUIRE_EXPLICIT,
-    # Held fixed at 4 (v5e-4, single host). Stated as a limitation in the paper.
-    "tensor_parallel_size": 4,
+    # TP=1 on ct6e-standard-1t: Llama-3.1-8B fits in one v6e chip's 32 GB HBM.
+    # This is stronger than holding TP fixed — with a single chip there is no
+    # tensor-parallel reduction to confound anything.
+    "tensor_parallel_size": 1,
     # Changes accepted-token paths entirely.
     "speculative_model": None,
     "kv_cache_dtype": REQUIRE_EXPLICIT,

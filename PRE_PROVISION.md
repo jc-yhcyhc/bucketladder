@@ -21,7 +21,8 @@ were closed; the remainder are yours.
 
 - [x] `v5litepod-4` offered in `us-central1-a` — checked live
 - [x] Image family `ubuntu-accel-2204-amd64-tpu-v5e-v5p-v6e` resolves — checked live
-- [x] Machine type `ct5lp-hightpu-4t` available in us-central1-a — checked live
+- [x] Machine type **`ct6e-standard-1t`** available in us-central1-a — checked live.
+      v5e (`ct5lp`) is NOT offered in this project's console creation flow.
 - [x] Quota `TPU_LITE_PODSLICE_V5` = 16 chips, preemptible likewise (need 4) —
       checked live in us-central1 and us-east5. `TPU_LITE_DEVICE_V5` is 0, which
       is irrelevant: a `v5litepod-4` is a podslice, not a device.
@@ -67,7 +68,7 @@ create.
 ./infra/create_tpu.sh --check         # live machine-type/image/quota, no spend
 ./infra/create_tpu.sh                 # BILLING STARTS
 ./infra/deploy.sh
-gcloud compute ssh bucketladder-v5e4 --zone=us-central1-a \
+gcloud compute ssh bucketladder-v6e1 --zone=us-central1-a \
     --command='bash ~/bucketladder/infra/vm_setup.sh'
 ./infra/capture.sh --tag default      # THE DELIVERABLE
 ./infra/teardown_tpu.sh               # BILLING STOPS

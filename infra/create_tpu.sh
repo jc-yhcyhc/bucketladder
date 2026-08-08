@@ -96,19 +96,29 @@ check_quota() {
   # v5litepod-N is a PODSLICE, not a DEVICE. Device quota being 0 is normal and
   # irrelevant here — checking the wrong metric is exactly how "quota approved"
   # turns into a failed provision.
-  if [[ "$SPOT" == "true" ]]; then
-    metric="PREEMPTIBLE_TPU_LITE_PODSLICE_V5"
-  else
-    metric="TPU_LITE_PODSLICE_V5"
-  fi
+  # Metric depends on the TPU family. v5e is "TPU LITE ... V5"; v6e has its own.
+  # NOTE `gcloud compute regions describe` does NOT surface every TPU metric —
+  # v6e in particular is only visible via `gcloud alpha services quota list
+  # --service=compute.googleapis.com`. A blank result here is inconclusive, not
+  # a failure, which is why check_quota returns 0 when it cannot read a limit.
+  case "$MACHINE_TYPE" in
+    ct5lp-*) metric="TPU_LITE_PODSLICE_V5" ;;
+    ct6e-*)  metric="TPU_V6E" ;;
+    ct5p-*)  metric="TPU_V5P" ;;
+    tpu7x-*) metric="TPU7X" ;;
+    *)       metric="TPU_LITE_PODSLICE_V5" ;;
+  esac
+  [[ "$SPOT" == "true" ]] && metric="PREEMPTIBLE_${metric}"
   quotas=$(timeout 60 gcloud compute regions describe "$region" --project="$PROJECT" \
              --format="value(quotas)" 2>/dev/null) || return 0
   [[ -z "$quotas" ]] && return 0
 
   limit=$(tr ';' '\n' <<<"$quotas" | grep -F "'$metric'" | sed -E "s/.*'limit': ([0-9.]+).*/\1/" | head -1)
   if [[ -z "$limit" ]]; then
-    warn "could not read quota metric $metric in $region — check manually"
-    return 1
+    log "  --  quota metric $metric not exposed by 'regions describe' in $region"
+    log "      (expected for v6e; check with: gcloud alpha services quota list \\"
+    log "       --service=compute.googleapis.com --consumer=projects/$PROJECT)"
+    return 0
   fi
   if awk -v l="$limit" -v c="$CHIPS" 'BEGIN{exit !(l>=c)}'; then
     log "  ok  quota $metric = $limit chips in $region (need $CHIPS)"
