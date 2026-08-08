@@ -24,11 +24,15 @@ were closed; the remainder are yours.
 - [x] Quota `TPU_LITE_PODSLICE_V5` = 16 chips, preemptible likewise (need 4) —
       checked live in us-central1 and us-east5. `TPU_LITE_DEVICE_V5` is 0, which
       is irrelevant: a `v5litepod-4` is a podslice, not a device.
-- [x] **v5e is the ONLY TPU we hold.** The GCE console's machine-series dropdown
-      (CT5P / CT6E / TPU7X) is a catalogue of what exists in the region, not an
-      entitlement. No v6e, v5p or v7x quota metric exists at all. Both
-      provisioning surfaces list v5e in us-central1-a: `v5litepod-4` via the
-      Cloud TPU API, `ct5lp-hightpu-4t` via GCE machine types.
+- [x] **v5e is the right choice, and available in ~25 zones on four continents.**
+      Quota is a global default of 16 chips (on-demand and spot), not a special
+      grant. Exceptions: us-east1 has 0/0, us-west1 has 0 on-demand / 16 spot.
+      `./infra/find_zone.sh` prints the live list.
+- [x] **v6e spot quota also exists** (16 chips in 10 regions) but there is **no
+      on-demand v6e**. Since bring-up and holdout both require on-demand, v5e is
+      the only family that covers the whole study. v6e is a recorded fallback for
+      the re-runnable primitives block only. Note `regions describe` does not show
+      v6e quota at all — use `gcloud alpha services quota list`.
 - [x] **GPUs do not help.** P100/K80/P4 cannot run vLLM (compute capability
       below the required 7.0). T4/L4 could, but a GPU is the paper's contrast
       case, not its platform.

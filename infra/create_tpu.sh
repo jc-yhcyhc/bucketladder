@@ -69,8 +69,8 @@ check_accelerator_type() {
     return 0
   fi
   warn "accelerator-type '$TPU_TYPE' is NOT offered in $ZONE."
-  warn "  v5litepod-4 zones known good: us-central1-a, us-east1-c, us-east5-a,"
-  warn "  us-west1-c, us-west4-a. (us-central1-b/c/f do NOT offer it.)"
+  warn "  Run ./infra/find_zone.sh for the current list — v5e is offered in ~25"
+  warn "  zones across four continents, so a bad zone is a one-line fix."
   return 1
 }
 
