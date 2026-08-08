@@ -249,3 +249,112 @@ def test_controlled_vars_list_is_not_silently_shrunk():
         "max_model_len",
         "XLA_FLAGS",
     }
+
+
+# --- spot preemption: per-run atomicity ------------------------------------
+# A spot VM can vanish mid-write. The invariant is that MANIFEST.jsonl is
+# appended only by finish_run, so a run with no manifest entry never finished
+# no matter what files sit in its directory. Analysis reads the manifest.
+
+def test_interrupted_run_is_not_complete(tmp_path):
+    from _common import is_complete
+
+    run = start_run("t", good_config(), results_root=tmp_path)
+    save_table(run, "partial", [{"a": 1}])
+    # Simulate preemption: process dies here, finish_run never runs.
+    assert not is_complete(run.dir)
+    assert read_manifest(tmp_path) == []
+
+
+def test_finished_run_is_complete(tmp_path):
+    from _common import is_complete
+
+    run = start_run("t", good_config(), results_root=tmp_path)
+    finish_run(run)
+    assert is_complete(run.dir)
+
+
+def test_mark_interrupted_flags_and_records(tmp_path):
+    from _common import mark_interrupted_runs
+
+    run = start_run("t", good_config(), results_root=tmp_path)
+    save_table(run, "partial", [{"a": 1}])
+    # (no finish_run — the VM went away)
+
+    touched = mark_interrupted_runs(tmp_path)
+    assert touched == [run.run_id]
+
+    meta = json.loads(run.meta_path.read_text())
+    assert meta["status"] == "interrupted"
+    assert meta["preempted"] is True
+
+    # Visible in the manifest rather than silently absent.
+    entries = read_manifest(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["status"] == "interrupted"
+    assert entries[0]["preempted"] is True
+
+
+def test_mark_interrupted_cleans_temp_tables(tmp_path):
+    from _common import mark_interrupted_runs
+
+    run = start_run("t", good_config(), results_root=tmp_path)
+    stale = run.dir / "half_written.parquet.tmp"
+    stale.write_bytes(b"truncated garbage")
+    mark_interrupted_runs(tmp_path)
+    assert not stale.exists(), "a half-written table must not survive recovery"
+
+
+def test_mark_interrupted_leaves_finished_runs_alone(tmp_path):
+    from _common import mark_interrupted_runs
+
+    run = start_run("t", good_config(), results_root=tmp_path)
+    finish_run(run, status="ok")
+    assert mark_interrupted_runs(tmp_path) == []
+    assert json.loads(run.meta_path.read_text())["status"] == "ok"
+    assert len(read_manifest(tmp_path)) == 1
+
+
+def test_mark_interrupted_is_idempotent(tmp_path):
+    from _common import mark_interrupted_runs
+
+    start_run("t", good_config(), results_root=tmp_path)
+    assert len(mark_interrupted_runs(tmp_path)) == 1
+    assert mark_interrupted_runs(tmp_path) == []
+    assert len(read_manifest(tmp_path)) == 1
+
+
+def test_usable_runs_excludes_preempted_and_dirty(tmp_path):
+    """The only function analysis code should use to find results.
+
+    Note this test cannot assume the good run is usable: if the working tree is
+    dirty (it usually is mid-development) usable_runs correctly drops it too.
+    So assert the exclusions, and assert the inclusion only on a clean tree.
+    """
+    from _common import mark_interrupted_runs, usable_runs
+    import time
+
+    ok = start_run("t", good_config(), results_root=tmp_path)
+    finish_run(ok, status="ok")
+    time.sleep(1.01)
+    start_run("t", good_config(), results_root=tmp_path)  # abandoned mid-run
+    mark_interrupted_runs(tmp_path)
+
+    assert len(read_manifest(tmp_path)) == 2, "both runs must be visible in the manifest"
+
+    usable = usable_runs(tmp_path)
+    assert all(e["status"] == "ok" and not e["preempted"] for e in usable)
+    assert all(not e["git_dirty"] for e in usable)
+
+    was_dirty = json.loads(ok.meta_path.read_text())["git"]["dirty"]
+    if not was_dirty:
+        assert {e["run_id"] for e in usable} == {ok.run_id}
+    else:
+        assert usable == [], "dirty tree must exclude even a successful run"
+
+
+def test_save_table_leaves_no_tmp_file(tmp_path):
+    run = start_run("t", good_config(), results_root=tmp_path)
+    save_table(run, "x", [{"a": 1}])
+    assert list(run.dir.glob("*.tmp")) == []
+    assert (run.dir / "x.parquet").exists()

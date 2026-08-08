@@ -10,6 +10,7 @@ before the build and ended up being the most valuable file in the repo.
 | File | What it is |
 |---|---|
 | `plan_v4.md` | **The execution plan. Start here.** Standalone. Written after the W0 gate closed. |
+| `session_plan.md` | **Hardware runbook.** Session sizing, the two independent gates, compile budget, contingency, and the start/end checklist. Read with plan_v4. |
 | `plan_v3.md` | Superseded. Written before the gate ran; its three-level story and staircase experiment did not survive it. |
 | `design_review_v2.md` | Disk-verified review of v2. Ten findings, four consequential. Explains why v3 differs from v2 rather than just asserting it. |
 | `plan_v2_assessment.md` | Superseded. The cost reframe that named admission control as the spine and killed the determinism framing. |

@@ -238,9 +238,12 @@ def start_run(
 
 
 def save_table(run: Run, name: str, rows: Sequence[Mapping[str, Any]] | Any) -> Path:
-    """Write one result table as Parquet. Never overwrites.
+    """Write one result table as Parquet, atomically. Never overwrites.
 
-    `rows` may be a sequence of dicts or anything pandas.DataFrame accepts.
+    Atomicity matters because of spot preemption: a VM can vanish mid-write.
+    Writing to a temp file and renaming means a preempted run leaves either a
+    complete table or no table — never a truncated Parquet that reads as valid
+    data. See is_complete() for the other half of this.
     """
     import pandas as pd  # imported lazily so the module is importable without it
 
@@ -251,10 +254,109 @@ def save_table(run: Run, name: str, rows: Sequence[Mapping[str, Any]] | Any) -> 
         raise FileExistsError(f"table already exists, refusing to overwrite: {path}")
 
     df = rows if hasattr(rows, "to_parquet") else pd.DataFrame(list(rows))
+    tmp = path.with_suffix(".parquet.tmp")
     # index=False so an identical config yields a byte-identical file.
-    df.to_parquet(path, index=False)
+    df.to_parquet(tmp, index=False)
+    tmp.replace(path)  # atomic within a filesystem
     run.tables.append(name)
     return path
+
+
+# ---------------------------------------------------------------------------
+# Preemption / crash recovery
+# ---------------------------------------------------------------------------
+# A spot VM can be reclaimed at any moment. The rule (plan_v4.md) is that a
+# preempted run is excluded from paper figures, same as a dirty git tree. That
+# requires being able to tell a complete run from an abandoned one, which is
+# what these two functions are for.
+#
+# The invariant: MANIFEST.jsonl is appended only by finish_run. So a run
+# directory with no manifest entry was never finished, regardless of what
+# files it contains. Read results via the manifest, never by globbing.
+
+def is_complete(run_dir: Path | str) -> bool:
+    """True only if this run finished. Never trust a directory listing."""
+    meta = Path(run_dir) / "meta.json"
+    if not meta.exists():
+        return False
+    try:
+        return json.loads(meta.read_text()).get("status") in ("ok", "failed")
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def mark_interrupted_runs(
+    results_root: Path | str | None = None, reason: str = "preempted"
+) -> list[str]:
+    """Find runs left in 'running' state and record them as interrupted.
+
+    Run this at the START of every session, before any new work: anything still
+    marked 'running' from a previous session died with the VM. Returns the
+    run_ids touched.
+
+    Interrupted runs get status='interrupted' and preempted=True, are appended
+    to MANIFEST.jsonl so they are visible rather than silently absent, and are
+    excluded from paper figures by the same rule as dirty:true.
+    """
+    root = Path(results_root) if results_root is not None else RESULTS_ROOT
+    if not root.exists():
+        return []
+
+    touched: list[str] = []
+    for meta_path in sorted(root.glob("*/*/meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("status") != "running":
+            continue
+
+        meta["status"] = "interrupted"
+        meta["preempted"] = True
+        meta["interrupted_reason"] = reason
+        meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _write_json_atomic(meta_path, meta)
+
+        # Remove any half-written temp tables left by the interrupted process.
+        for tmp in meta_path.parent.glob("*.tmp"):
+            tmp.unlink(missing_ok=True)
+
+        with (root / MANIFEST_NAME).open("a") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "run_id": meta["run_id"],
+                        "experiment": meta["experiment"],
+                        "status": "interrupted",
+                        "config_hash": meta["config_hash"],
+                        "started_at": meta["started_at"],
+                        "finished_at": meta["finished_at"],
+                        "duration_sec": None,
+                        "tables": meta.get("tables", []),
+                        "git_commit": meta["git"]["commit"],
+                        "git_dirty": meta["git"]["dirty"],
+                        "preempted": True,
+                        "path": str(meta_path.parent),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+        touched.append(meta["run_id"])
+    return touched
+
+
+def usable_runs(results_root: Path | str | None = None) -> list[dict[str, Any]]:
+    """Manifest entries safe to put in a paper figure.
+
+    Excludes interrupted/preempted runs and dirty git trees. This is the only
+    function analysis code should use to find results.
+    """
+    return [
+        e
+        for e in read_manifest(results_root)
+        if e["status"] == "ok" and not e.get("preempted") and not e.get("git_dirty")
+    ]
 
 
 def finish_run(
@@ -328,3 +430,27 @@ def read_manifest(results_root: Path | str | None = None) -> list[dict[str, Any]
     if not manifest.exists():
         return []
     return [json.loads(line) for line in manifest.read_text().splitlines() if line.strip()]
+
+
+if __name__ == "__main__":
+    # Session-start recovery. Run this FIRST every session, before new work:
+    #   python scripts/_common.py --mark-interrupted results/
+    # Anything still marked 'running' died with a previous VM.
+    import argparse
+
+    ap = argparse.ArgumentParser(description="traceability contract utilities")
+    ap.add_argument("--mark-interrupted", metavar="RESULTS_DIR", type=Path)
+    ap.add_argument("--reason", default="preempted")
+    ap.add_argument("--list-usable", metavar="RESULTS_DIR", type=Path)
+    a = ap.parse_args()
+
+    if a.mark_interrupted:
+        ids = mark_interrupted_runs(a.mark_interrupted, reason=a.reason)
+        print(f"marked {len(ids)} interrupted run(s) as preempted")
+        for i in ids:
+            print(f"  {i}")
+    if a.list_usable:
+        rows = usable_runs(a.list_usable)
+        print(f"{len(rows)} usable run(s) (status=ok, not preempted, clean tree)")
+        for r in rows:
+            print(f"  {r['run_id']:<55} {','.join(r['tables'])}")

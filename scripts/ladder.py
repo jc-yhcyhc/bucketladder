@@ -144,3 +144,52 @@ def prefill_padding_tokens(
     if chunk is None:
         return padding_tokens(length, ladder)
     return sum(padding_tokens(s, ladder) for s in chunked_prefill_shapes(length, chunk))
+
+
+# ---------------------------------------------------------------------------
+# Compile budget
+# ---------------------------------------------------------------------------
+# Every bucket edge is a distinct XLA executable. vLLM's own docs warn that too
+# many compiled graphs "may lead to HBM OOM", and LAPS measures 8-12 s per CUDA
+# Graph capture with 228-277 MB each. On XLA the numbers are worse.
+#
+# This is not overhead to note in passing — it is an experimental design
+# constraint. A fine ladder can cost more wall-clock to instantiate than a
+# short experiment can possibly save, which is why ladder sweeps must be
+# costed before they are scheduled, not after.
+#
+# Figures from the source calibration doc: 5-30 min for the first bucket
+# (whole-model compile), 30-120 s for each additional one.
+
+FIRST_BUCKET_SEC = (300.0, 1800.0)   # 5-30 min
+EXTRA_BUCKET_SEC = (30.0, 120.0)     # 30-120 s
+
+
+def compile_time_estimate(n_buckets: int) -> tuple[float, float]:
+    """(low, high) seconds to warm a ladder of n_buckets, as a range."""
+    if n_buckets < 1:
+        raise ValueError(f"n_buckets must be >= 1, got {n_buckets}")
+    lo = FIRST_BUCKET_SEC[0] + (n_buckets - 1) * EXTRA_BUCKET_SEC[0]
+    hi = FIRST_BUCKET_SEC[1] + (n_buckets - 1) * EXTRA_BUCKET_SEC[1]
+    return lo, hi
+
+
+def sweep_compile_budget(ladders: Sequence[Sequence[int]], n_models: int = 1) -> dict:
+    """Total warmup cost of a ladder sweep, in hours and dollars.
+
+    Use this BEFORE scheduling a sweep. The answer is frequently 'that sweep
+    does not fit', and it is much cheaper to learn that here.
+    """
+    lo = hi = 0.0
+    for lad in ladders:
+        a, b = compile_time_estimate(len(lad))
+        lo += a * n_models
+        hi += b * n_models
+    return {
+        "n_bringups": len(ladders) * n_models,
+        "hours_low": lo / 3600.0,
+        "hours_high": hi / 3600.0,
+        # v5e-4 on-demand; compile time bills at the same rate as measurement.
+        "usd_low_ondemand": lo / 3600.0 * 4.80,
+        "usd_high_ondemand": hi / 3600.0 * 4.80,
+    }

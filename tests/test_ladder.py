@@ -14,7 +14,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from ladder import (  # noqa: E402
+    FIRST_BUCKET_SEC,
     bucket_for,
+    compile_time_estimate,
+    sweep_compile_budget,
     build_ladder,
     chunked_prefill_shapes,
     exponential_ladder,
@@ -131,3 +134,45 @@ def test_rejects_bad_inputs():
         exponential_ladder(0)
     with pytest.raises(ValueError):
         chunked_prefill_shapes(100, 0)
+
+
+# --- compile budget: an experimental design constraint, not overhead -------
+
+def test_compile_estimate_grows_with_buckets():
+    lo1, hi1 = compile_time_estimate(10)
+    lo2, hi2 = compile_time_estimate(20)
+    assert lo2 > lo1 and hi2 > hi1
+
+
+def test_single_bucket_is_just_the_model_compile():
+    assert compile_time_estimate(1) == FIRST_BUCKET_SEC
+
+
+def test_fine_ladders_are_expensive_to_instantiate():
+    """gap=128 has ~6.7x the buckets of the default and costs materially more
+    to warm — the reason ladder sweeps must be costed before scheduling."""
+    coarse = len(build_ladder(8192, ""))
+    fine = len(build_ladder(8192, 128))
+    assert fine > 6 * coarse
+    assert compile_time_estimate(fine)[1] > 2 * compile_time_estimate(coarse)[1]
+
+
+def test_plan_v3_sweep_does_not_fit_the_primitives_budget():
+    """Pins the finding that killed the 12-ladder sweep: at the high end it
+    exceeds the entire 40-hour W1-3 spot allocation on warmup alone."""
+    ladders = [build_ladder(8192, g) for g in ["", 1536, 1024, 768, 512, 384, 256, 192, 128, 96, 64, 48]]
+    b = sweep_compile_budget(ladders, n_models=2)
+    assert b["n_bringups"] == 24
+    assert b["hours_high"] > 40, "if this drops below 40 the sweep became affordable — recheck"
+    assert b["hours_low"] > 10
+
+
+def test_reduced_sweep_does_fit():
+    ladders = [build_ladder(8192, g) for g in ["", 1024, 512, 256]]
+    b = sweep_compile_budget(ladders, n_models=1)
+    assert b["hours_high"] < 6
+
+
+def test_compile_estimate_rejects_bad_input():
+    with pytest.raises(ValueError):
+        compile_time_estimate(0)
