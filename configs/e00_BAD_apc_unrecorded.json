@@ -1,0 +1,14 @@
+{
+  "experiment": "e00_smoke_test",
+  "description": "DELIBERATELY INVALID. Prefix caching is on and max_model_len is missing. start_run must abort on this. Used by tests/test_common.py to prove the contract is live.",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "controlled": {
+    "enable_prefix_caching": true,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "bfloat16",
+    "VLLM_TPU_BUCKET_PADDING_GAP": ""
+  }
+}

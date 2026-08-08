@@ -11,31 +11,42 @@ pay the padding, or queue it and pay the wait.** This project's claim is that th
 decision is workload-dependent, that the right policy is measurably better than
 either fixed strategy, and that the gain is large enough to matter in dollars.
 
-## Status: pre-gate. No results, no scaffolding, deliberately.
+## Status: gate passed, W0b harness written, no hardware provisioned. $0 spent.
 
-This repo contains records only — the execution plan, the two drafts it supersedes,
-and the design review that produced it. There is no `scripts/`, no `sim/`, no
-`configs/`, and that is on purpose.
+The W0 prior-art gate ran **before** any code was written, and it changed the plan
+substantially — see `notes/kill_condition.md`. It did not fire, but L1 (prefill-length
+bucketing) is dead because chunked prefill is default-on, and LAPS (MLSys 2026) is now
+primary related work. `notes/plan_v4.md` is the current plan.
 
-The W0 prior-art gate runs **before** anything gets built. Two prior projects by this
-author were killed at exactly this stage (`gapcache` on Aug 2, on its own prior-art
-gate; the determinism framing of this work on Aug 7). Writing code before the gate
-passes is how you end up with a scaffold for a project that shouldn't exist. See
-`notes/plan_v3.md` → "W0 — gate, blocking", and the pre-committed response if it
-fires.
+What exists now is the W0b harness, written so it is **fully testable before a TPU
+exists**: mock modes, dry-runs, and a 59-test suite that runs on a laptop.
+
+```bash
+./run_tests.sh          # everything verifiable without hardware
+```
 
 ## What's here
 
 ```
-notes/
-├── plan_v3.md                     the execution plan — start here
-├── design_review_v2.md            disk-verified review of v2; ten findings, why v3 differs
-├── plan_v2_assessment.md          superseded — the cost reframe that named admission as the spine
-└── plan_v1_determinism_review.md  retired direction; source of the controlled-variables contract
+notes/          the plan, the prior-art gate, the kill-condition verdicts
+infra/          create_tpu.sh, teardown_tpu.sh, vm_setup.sh — all support --dry-run
+scripts/        _common.py (traceability contract), ladder.py, e00_smoke_test.py
+configs/        one JSON per variant, including a deliberately invalid one
+tests/          59 tests, no accelerator required
 ```
 
-Still to be written, in W0, before any code: `notes/prior_art.md` and
-`notes/kill_condition.md`.
+## The two rules that cost money if broken
+
+**Tear the VM down at the end of every session.** A TPU VM bills while it *exists*,
+not while it computes. `infra/teardown_tpu.sh` is the single most important cost
+control here; `--status` tells you whether anything is billing right now. The budget
+is 135 billed VM-hours (~$450) against a $1,000 ceiling, and the headroom is almost
+exactly one forgotten VM-week.
+
+**Never run with prefix caching in an unrecorded state.** `assert_controlled_vars`
+aborts rather than warns, because a warning in a log is not something anyone reads six
+weeks later while writing a paper. `configs/e00_BAD_apc_unrecorded.json` exists to be
+rejected, and a test asserts that it is.
 
 ## Relationship to infersim
 

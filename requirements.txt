@@ -1,0 +1,3 @@
+# Analysis / harness deps. Deliberately small — these also install on the TPU VM.
+pandas
+pyarrow

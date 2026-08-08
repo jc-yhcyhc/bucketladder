@@ -1,0 +1,330 @@
+"""
+Traceability contract for every experiment in this repo.
+
+Rules (notes/plan_v4.md, "Traceability contract"):
+  1. meta.json is written FIRST, before any work happens. A crashed run still
+     leaves evidence of what it was trying to do.
+  2. Nothing is ever overwritten. A RUN_ID collision is an error, not a merge.
+  3. Every run appends one line to MANIFEST.jsonl on completion (success or not).
+  4. start_run / save_table / finish_run are used in try/finally so that a
+     failed run is still recorded, with status="failed" and the traceback.
+  5. assert_controlled_vars ABORTS on an unrecorded or wrong controlled
+     variable. It never warns. A run that cannot prove prefix caching is off
+     produces no data.
+
+Nothing here imports jax, vllm, or torch — this module is fully testable on a
+laptop with no accelerator, which is the point.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
+import socket
+import subprocess
+import sys
+import time
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+RESULTS_ROOT = Path(os.environ.get("BUCKETLADDER_RESULTS", "results"))
+MANIFEST_NAME = "MANIFEST.jsonl"
+
+# ---------------------------------------------------------------------------
+# Controlled variables
+# ---------------------------------------------------------------------------
+# Every one of these must appear in a config's `controlled` block. Values are
+# either a literal that must match exactly, or REQUIRE_EXPLICIT meaning "any
+# value, but it must be stated". Missing key -> abort. See plan_v4.md.
+
+REQUIRE_EXPLICIT = "<must-be-stated>"
+
+CONTROLLED_VARS: dict[str, Any] = {
+    # Corrupts measured prompt-token counts, which corrupts every padding
+    # number in the paper. This is the one that must be off, not merely stated.
+    "enable_prefix_caching": False,
+    # Determines whether prefill padding exists at all. Swept, so any value,
+    # but it must be recorded.
+    "enable_chunked_prefill": REQUIRE_EXPLICIT,
+    # Sets the chunk size and therefore the residual prefill padding.
+    "max_num_batched_tokens": REQUIRE_EXPLICIT,
+    # Held fixed at 4 (v5e-4, single host). Stated as a limitation in the paper.
+    "tensor_parallel_size": 4,
+    # Changes accepted-token paths entirely.
+    "speculative_model": None,
+    "kv_cache_dtype": REQUIRE_EXPLICIT,
+    # THE independent variable. Empty string means "vLLM default exponential
+    # padding (nearest power of two)"; an int means linear buckets 16 ->
+    # max_model_len with that gap.
+    "VLLM_TPU_BUCKET_PADDING_GAP": REQUIRE_EXPLICIT,
+    "max_model_len": REQUIRE_EXPLICIT,
+    "XLA_FLAGS": REQUIRE_EXPLICIT,
+}
+
+
+class ControlledVarError(RuntimeError):
+    """Raised when a controlled variable is missing or wrong. Always fatal."""
+
+
+def assert_controlled_vars(config: Mapping[str, Any]) -> None:
+    """Abort unless every controlled variable is present and correct.
+
+    Deliberately raises rather than warns: a run that cannot prove prefix
+    caching is off must produce no data at all, because a warning in a log is
+    not something anyone reads six weeks later while writing a paper.
+    """
+    controlled = config.get("controlled")
+    if not isinstance(controlled, Mapping):
+        raise ControlledVarError(
+            "config has no 'controlled' block; every config must carry one "
+            f"with keys: {sorted(CONTROLLED_VARS)}"
+        )
+
+    problems: list[str] = []
+    for name, expected in CONTROLLED_VARS.items():
+        if name not in controlled:
+            problems.append(f"{name}: MISSING (must be stated explicitly)")
+            continue
+        actual = controlled[name]
+        if expected is REQUIRE_EXPLICIT:
+            continue
+        if actual != expected:
+            problems.append(f"{name}: is {actual!r}, must be {expected!r}")
+
+    unknown = sorted(set(controlled) - set(CONTROLLED_VARS))
+    if unknown:
+        problems.append(
+            f"unknown controlled vars {unknown} — add them to CONTROLLED_VARS "
+            "so they are checked, or remove them"
+        )
+
+    if problems:
+        raise ControlledVarError(
+            "controlled-variable contract violated; refusing to run:\n  - "
+            + "\n  - ".join(problems)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Config hashing
+# ---------------------------------------------------------------------------
+
+def config_hash(config: Mapping[str, Any]) -> str:
+    """Stable 12-hex-char hash of a config.
+
+    Must be invariant to dict ordering and stable across process restarts, so
+    that re-running an identical config is detectable. sort_keys gives the
+    first; avoiding hash() / id() gives the second.
+    """
+    blob = json.dumps(config, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:12]
+
+
+def _git_state(repo: Path) -> dict[str, Any]:
+    def _run(*args: str) -> str | None:
+        try:
+            out = subprocess.run(
+                args, cwd=repo, capture_output=True, text=True, timeout=10
+            )
+            return out.stdout.strip() if out.returncode == 0 else None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    commit = _run("git", "rev-parse", "HEAD")
+    status = _run("git", "status", "--porcelain")
+    return {
+        "commit": commit,
+        # Any uncommitted change means results are not reproducible from the
+        # commit alone. Recorded, never silently tolerated.
+        "dirty": bool(status) if status is not None else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run lifecycle
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Run:
+    """Handle for one experiment run. Created by start_run()."""
+
+    run_id: str
+    experiment: str
+    config: dict[str, Any]
+    dir: Path
+    started_at: float
+    tables: list[str] = field(default_factory=list)
+    _finished: bool = False
+
+    @property
+    def meta_path(self) -> Path:
+        return self.dir / "meta.json"
+
+
+def make_run_id(experiment: str, config: Mapping[str, Any], when: float | None = None) -> str:
+    """RUN_ID = <experiment>__<UTC timestamp>__<config_hash>.
+
+    Sortable, unique, and self-describing: you can tell what a directory is
+    without opening it.
+    """
+    ts = datetime.fromtimestamp(when if when is not None else time.time(), timezone.utc)
+    return f"{experiment}__{ts.strftime('%Y%m%dT%H%M%SZ')}__{config_hash(config)}"
+
+
+def start_run(
+    experiment: str,
+    config: Mapping[str, Any],
+    results_root: Path | str | None = None,
+    check_controlled: bool = True,
+) -> Run:
+    """Create the run directory and write meta.json BEFORE any work happens.
+
+    Raises ControlledVarError before creating anything if the config violates
+    the controlled-variable contract — a bad config leaves no directory behind.
+    """
+    cfg = json.loads(json.dumps(config, default=str))  # deep copy, JSON-safe
+
+    if check_controlled:
+        assert_controlled_vars(cfg)
+
+    root = Path(results_root) if results_root is not None else RESULTS_ROOT
+    run_id = make_run_id(experiment, cfg)
+    run_dir = root / experiment / run_id
+
+    if run_dir.exists():
+        raise FileExistsError(
+            f"run directory already exists: {run_dir}\n"
+            "Runs are never overwritten. Delete it deliberately if you mean to."
+        )
+    run_dir.mkdir(parents=True)
+
+    repo = Path(__file__).resolve().parent.parent
+    meta = {
+        "run_id": run_id,
+        "experiment": experiment,
+        "config": cfg,
+        "config_hash": config_hash(cfg),
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "git": _git_state(repo),
+        "host": {
+            "hostname": socket.gethostname(),
+            "platform": platform.platform(),
+            "python": sys.version.split()[0],
+        },
+        # Set by the harness when a spot VM is reclaimed. Excluded from paper
+        # figures, same rule as git dirty.
+        "preempted": False,
+        "env": {
+            k: os.environ.get(k)
+            for k in ("VLLM_TPU_BUCKET_PADDING_GAP", "XLA_FLAGS", "TPU_NAME", "TPU_TYPE")
+        },
+        "tables": [],
+    }
+    _write_json_atomic(run_dir / "meta.json", meta)
+
+    return Run(
+        run_id=run_id,
+        experiment=experiment,
+        config=cfg,
+        dir=run_dir,
+        started_at=time.time(),
+    )
+
+
+def save_table(run: Run, name: str, rows: Sequence[Mapping[str, Any]] | Any) -> Path:
+    """Write one result table as Parquet. Never overwrites.
+
+    `rows` may be a sequence of dicts or anything pandas.DataFrame accepts.
+    """
+    import pandas as pd  # imported lazily so the module is importable without it
+
+    if name.endswith(".parquet"):
+        name = name[: -len(".parquet")]
+    path = run.dir / f"{name}.parquet"
+    if path.exists():
+        raise FileExistsError(f"table already exists, refusing to overwrite: {path}")
+
+    df = rows if hasattr(rows, "to_parquet") else pd.DataFrame(list(rows))
+    # index=False so an identical config yields a byte-identical file.
+    df.to_parquet(path, index=False)
+    run.tables.append(name)
+    return path
+
+
+def finish_run(
+    run: Run,
+    status: str = "ok",
+    error: BaseException | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> None:
+    """Finalise meta.json and append to MANIFEST.jsonl. Safe to call twice."""
+    if run._finished:
+        return
+    run._finished = True
+
+    meta = json.loads(run.meta_path.read_text())
+    meta["status"] = status
+    meta["finished_at"] = datetime.now(timezone.utc).isoformat()
+    meta["duration_sec"] = round(time.time() - run.started_at, 3)
+    meta["tables"] = list(run.tables)
+    if error is not None:
+        meta["error"] = {
+            "type": type(error).__name__,
+            "message": str(error),
+            "traceback": "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            ),
+        }
+    if extra:
+        meta.update(extra)
+    _write_json_atomic(run.meta_path, meta)
+
+    manifest = run.dir.parent.parent / MANIFEST_NAME
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "run_id": run.run_id,
+        "experiment": run.experiment,
+        "status": status,
+        "config_hash": meta["config_hash"],
+        "started_at": meta["started_at"],
+        "finished_at": meta["finished_at"],
+        "duration_sec": meta["duration_sec"],
+        "tables": meta["tables"],
+        "git_commit": meta["git"]["commit"],
+        "git_dirty": meta["git"]["dirty"],
+        "preempted": meta.get("preempted", False),
+        "path": str(run.dir),
+    }
+    with manifest.open("a") as fh:
+        fh.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def _write_json_atomic(path: Path, obj: Any) -> None:
+    """Write via a temp file + rename so a crash never leaves half a meta.json."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, sort_keys=True, default=str) + "\n")
+    tmp.replace(path)
+
+
+# ---------------------------------------------------------------------------
+# Config loading
+# ---------------------------------------------------------------------------
+
+def load_config(path: Path | str) -> dict[str, Any]:
+    """Load a JSON config. YAML is deliberately not supported — one less
+    dependency on the TPU VM, and configs are small."""
+    return json.loads(Path(path).read_text())
+
+
+def read_manifest(results_root: Path | str | None = None) -> list[dict[str, Any]]:
+    root = Path(results_root) if results_root is not None else RESULTS_ROOT
+    manifest = root / MANIFEST_NAME
+    if not manifest.exists():
+        return []
+    return [json.loads(line) for line in manifest.read_text().splitlines() if line.strip()]

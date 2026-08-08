@@ -1,0 +1,150 @@
+"""Tests for scripts/e00_smoke_test.py — the W0b gate script.
+
+Covers the log parser, the controlled-variable audit, and end-to-end runs in
+mock mode, so the script is exercised fully before it ever reaches a TPU.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+
+import e00_smoke_test as e00  # noqa: E402
+from _common import ControlledVarError, read_manifest  # noqa: E402
+from ladder import build_ladder  # noqa: E402
+
+DEFAULT_CFG = REPO / "configs" / "e00_default_ladder.json"
+GAP_CFG = REPO / "configs" / "e00_gap512_ladder.json"
+BAD_CFG = REPO / "configs" / "e00_BAD_apc_unrecorded.json"
+
+
+# --- warmup log parsing ----------------------------------------------------
+
+def test_parses_compiling_lines():
+    lines = [
+        "INFO vllm.worker: starting XLA warmup",
+        "INFO vllm.worker: Compiling graph for num_tokens=16 (batch=1)",
+        "INFO vllm.worker: Compiling graph for num_tokens=32 (batch=1)",
+        "INFO vllm.worker: warmup complete",
+    ]
+    assert e00.parse_warmup_log(lines) == [16, 32]
+
+
+def test_parses_alternate_spellings():
+    assert e00.parse_warmup_log(["Warming up shape=(128, 4)"]) == [128]
+    assert e00.parse_warmup_log(["... bucket=256 ..."]) == [256]
+
+
+def test_parser_dedupes_and_sorts():
+    lines = ["num_tokens=64 compiling", "compiling num_tokens=16", "Compiling num_tokens=64"]
+    assert e00.parse_warmup_log(lines) == [16, 64]
+
+
+def test_parser_returns_empty_on_junk():
+    assert e00.parse_warmup_log(["nothing to see", ""]) == []
+
+
+def test_mock_log_round_trips_through_parser():
+    for gap in ("", 512):
+        lines = e00.mock_warmup_log(8192, gap)
+        assert e00.parse_warmup_log(lines) == build_ladder(8192, gap)
+
+
+# --- controlled-variable audit --------------------------------------------
+
+def test_audit_marks_mock_when_no_server():
+    cfg = json.loads(DEFAULT_CFG.read_text())
+    rows = e00.audit_controlled(cfg, None)
+    assert {r["verdict"] for r in rows} == {"mock"}
+    assert len(rows) == len(cfg["controlled"])
+
+
+def test_audit_flags_mismatch():
+    cfg = json.loads(DEFAULT_CFG.read_text())
+    server = {"controlled": {"enable_prefix_caching": True}}
+    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, server)}
+    assert rows["enable_prefix_caching"]["verdict"] == "MISMATCH"
+
+
+def test_audit_reports_unverified_rather_than_passing():
+    """A variable the server does not expose must be visibly unverified, not
+    quietly counted as ok."""
+    cfg = json.loads(DEFAULT_CFG.read_text())
+    server = {"controlled": {"enable_prefix_caching": False}}
+    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, server)}
+    assert rows["enable_prefix_caching"]["verdict"] == "ok"
+    assert rows["max_model_len"]["verdict"] == "unverified"
+
+
+# --- end to end, mock mode -------------------------------------------------
+
+@pytest.mark.parametrize("cfg_path", [DEFAULT_CFG, GAP_CFG])
+def test_mock_run_passes_gate(tmp_path, cfg_path, capsys):
+    rc = e00.main(["--config", str(cfg_path), "--mock", "--results-root", str(tmp_path)])
+    assert rc == 0
+    assert "GATE PASSED" in capsys.readouterr().out
+
+
+def test_mock_run_writes_expected_artifacts(tmp_path):
+    e00.main(["--config", str(DEFAULT_CFG), "--mock", "--results-root", str(tmp_path)])
+
+    entries = read_manifest(tmp_path)
+    assert len(entries) == 1 and entries[0]["status"] == "ok"
+
+    run_dir = Path(entries[0]["path"])
+    assert set(entries[0]["tables"]) == {"ladder", "controlled_audit"}
+    assert (run_dir / "ladder.parquet").exists()
+    assert (run_dir / "controlled_audit.parquet").exists()
+
+    ladder_json = json.loads((run_dir / "ladder_default.json").read_text())
+    assert ladder_json["mode"] == "mock"
+    assert ladder_json["ladder"] == build_ladder(8192, "")
+
+
+def test_gap_config_produces_finer_ladder(tmp_path):
+    e00.main(["--config", str(GAP_CFG), "--mock", "--results-root", str(tmp_path / "gap")])
+    e00.main(["--config", str(DEFAULT_CFG), "--mock", "--results-root", str(tmp_path / "def")])
+
+    gap = json.loads((Path(read_manifest(tmp_path / "gap")[0]["path"]) / "ladder_default.json").read_text())
+    dflt = json.loads((Path(read_manifest(tmp_path / "def")[0]["path"]) / "ladder_default.json").read_text())
+    assert len(gap["ladder"]) > len(dflt["ladder"])
+
+
+def test_bad_config_aborts_before_creating_anything(tmp_path):
+    """The deliberate test from plan_v4.md's verification section: a config
+    with prefix caching in a non-compliant state must abort at start_run."""
+    with pytest.raises(ControlledVarError):
+        e00.main(["--config", str(BAD_CFG), "--mock", "--results-root", str(tmp_path)])
+    assert read_manifest(tmp_path) == []
+    assert not list(tmp_path.glob("**/meta.json"))
+
+
+def test_gate_fails_on_ladder_mismatch(tmp_path, monkeypatch, capsys):
+    """If the observed ladder disagrees with the prediction, the gate must fail
+    and the run must be recorded as failed — not pass with a warning."""
+    monkeypatch.setattr(e00, "parse_warmup_log", lambda lines: [1, 2, 3])
+    rc = e00.main(["--config", str(DEFAULT_CFG), "--mock", "--results-root", str(tmp_path)])
+    assert rc == 1
+    assert "GATE FAILED" in capsys.readouterr().err
+    assert read_manifest(tmp_path)[0]["status"] == "failed"
+
+
+def test_gate_fails_on_empty_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(e00, "parse_warmup_log", lambda lines: [])
+    rc = e00.main(["--config", str(DEFAULT_CFG), "--mock", "--results-root", str(tmp_path)])
+    assert rc == 1
+    assert read_manifest(tmp_path)[0]["status"] == "failed"
+
+
+def test_captured_log_mode(tmp_path):
+    log = tmp_path / "warmup.log"
+    log.write_text("\n".join(e00.mock_warmup_log(8192, "")))
+    rc = e00.main(
+        ["--config", str(DEFAULT_CFG), "--warmup-log", str(log), "--results-root", str(tmp_path / "r")]
+    )
+    assert rc == 0
+    assert read_manifest(tmp_path / "r")[0]["status"] == "ok"
