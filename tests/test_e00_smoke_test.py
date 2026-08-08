@@ -64,18 +64,18 @@ def test_audit_marks_mock_when_no_server():
 
 
 def test_audit_flags_mismatch():
+    # `server` is a flat dict of vLLM's own logged engine config, as returned
+    # by parse_server_config — not a nested {"controlled": ...} block.
     cfg = json.loads(DEFAULT_CFG.read_text())
-    server = {"controlled": {"enable_prefix_caching": True}}
-    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, server)}
+    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, {"enable_prefix_caching": True})}
     assert rows["enable_prefix_caching"]["verdict"] == "MISMATCH"
 
 
 def test_audit_reports_unverified_rather_than_passing():
-    """A variable the server does not expose must be visibly unverified, not
+    """A variable the server does not report must be visibly unverified, not
     quietly counted as ok."""
     cfg = json.loads(DEFAULT_CFG.read_text())
-    server = {"controlled": {"enable_prefix_caching": False}}
-    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, server)}
+    rows = {r["variable"]: r for r in e00.audit_controlled(cfg, {"enable_prefix_caching": False})}
     assert rows["enable_prefix_caching"]["verdict"] == "ok"
     assert rows["max_model_len"]["verdict"] == "unverified"
 
@@ -148,3 +148,94 @@ def test_captured_log_mode(tmp_path):
     )
     assert rc == 0
     assert read_manifest(tmp_path / "r")[0]["status"] == "ok"
+
+
+# --- against a realistic vLLM log fixture ---------------------------------
+# tests/fixtures/vllm_tpu_warmup.log is hand-written to match real vLLM TPU
+# output. It is NOT ground truth — only a run on real hardware can confirm the
+# format. It exists so the parsers are exercised against something that looks
+# like reality rather than only against our own mock.
+
+FIXTURE = REPO / "tests" / "fixtures" / "vllm_tpu_warmup.log"
+
+
+def fixture_lines():
+    return FIXTURE.read_text().splitlines()
+
+
+def test_fixture_ladder_parses_to_powers_of_two():
+    assert e00.parse_warmup_log(fixture_lines()) == build_ladder(8192, "")
+
+
+def test_fixture_engine_config_parses():
+    cfg = e00.parse_server_config(fixture_lines())
+    assert cfg["tensor_parallel_size"] == 4
+    assert cfg["max_model_len"] == 8192
+    assert cfg["enable_prefix_caching"] is False
+    assert cfg["chunked_prefill_enabled"] is True
+    assert cfg["max_num_batched_tokens"] == 8192
+    assert cfg["kv_cache_dtype"] == "bfloat16"
+    assert cfg["speculative_config"] is None
+
+
+def test_coercion_of_logged_tokens():
+    assert e00._coerce("True") is True
+    assert e00._coerce("False") is False
+    assert e00._coerce("None") is None
+    assert e00._coerce("8192") == 8192
+    assert e00._coerce("1.5") == 1.5
+    assert e00._coerce("'bfloat16'") == "bfloat16"
+    assert e00._coerce("tpu") == "tpu"
+
+
+def test_audit_against_fixture_matches_shipped_config():
+    """The shipped default config must agree with a realistic server log."""
+    cfg = json.loads(DEFAULT_CFG.read_text())
+    server = e00.parse_server_config(fixture_lines())
+    rows = {r["variable"]: r["verdict"] for r in e00.audit_controlled(cfg, server)}
+
+    for name in (
+        "tensor_parallel_size",
+        "max_model_len",
+        "enable_prefix_caching",
+        "enable_chunked_prefill",   # via the chunked_prefill_enabled alias
+        "max_num_batched_tokens",
+        "kv_cache_dtype",
+        "speculative_model",        # via the speculative_config alias
+    ):
+        assert rows[name] == "ok", f"{name} -> {rows[name]}"
+
+    # Env vars are structurally unverifiable from the log. They must be
+    # reported as such, never silently passed.
+    assert rows["VLLM_TPU_BUCKET_PADDING_GAP"] == "unverified"
+    assert rows["XLA_FLAGS"] == "unverified"
+
+
+def test_audit_catches_prefix_caching_left_on():
+    """The failure this whole contract exists to prevent: config says APC off,
+    server actually has it on."""
+    cfg = json.loads(DEFAULT_CFG.read_text())
+    server = e00.parse_server_config(fixture_lines())
+    server["enable_prefix_caching"] = True
+    rows = {r["variable"]: r["verdict"] for r in e00.audit_controlled(cfg, server)}
+    assert rows["enable_prefix_caching"] == "MISMATCH"
+
+
+def test_gate_fails_on_controlled_mismatch(tmp_path):
+    """A MISMATCH must fail the gate, not just appear in a table."""
+    log = tmp_path / "w.log"
+    log.write_text(FIXTURE.read_text().replace("enable_prefix_caching=False", "enable_prefix_caching=True"))
+    rc = e00.main(["--config", str(DEFAULT_CFG), "--warmup-log", str(log), "--results-root", str(tmp_path / "r")])
+    assert rc == 1
+    assert read_manifest(tmp_path / "r")[0]["status"] == "failed"
+
+
+def test_end_to_end_on_fixture_passes(tmp_path, capsys):
+    """Closest thing to a real run available without a TPU: real-shaped log,
+    real parsers, real audit, real gate."""
+    rc = e00.main(["--config", str(DEFAULT_CFG), "--warmup-log", str(FIXTURE), "--results-root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "GATE PASSED" in out
+    assert "unverifiable against server" in out  # the two env vars
+    assert read_manifest(tmp_path)[0]["status"] == "ok"

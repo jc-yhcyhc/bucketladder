@@ -16,15 +16,22 @@ Two jobs, and the run fails if either does:
 Runs in three modes:
 
   --mock            no server, synthetic warmup log. Used by the test suite and
-                    by anyone without a TPU. Exercises every code path except
-                    the HTTP call.
+                    by anyone without a TPU. NOTE the mock log is generated FROM
+                    ladder.py's prediction, so passing in mock mode proves the
+                    parser and comparison are wired up — it does NOT prove real
+                    vLLM output matches the regexes. Only a real run does that.
   --warmup-log F    parse a real log captured from a previous server start.
-  (default)         query a live vLLM server over the OpenAI-compatible API.
+                    This is the mode that first meets reality.
+  (default)         read the log at config["warmup_log_path"], written by
+                    infra/vm_setup.sh.
+
+Both real modes also parse vLLM's resolved engine-config line out of the same
+log and audit it against the recorded controlled variables.
 
 Usage:
   python scripts/e00_smoke_test.py --config configs/e00_default_ladder.json --mock
   python scripts/e00_smoke_test.py --config configs/e00_default_ladder.json \
-      --base-url http://localhost:8000
+      --warmup-log /tmp/vllm_warmup.log
 """
 
 from __future__ import annotations
@@ -33,7 +40,6 @@ import argparse
 import json
 import re
 import sys
-import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -85,36 +91,99 @@ def mock_warmup_log(max_model_len: int, padding_gap: Any) -> list[str]:
     return lines
 
 
-def fetch_server_config(base_url: str, timeout: float = 30.0) -> dict[str, Any]:
-    """Read the server's own view of its configuration."""
-    url = base_url.rstrip("/") + "/v1/models"
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+# vLLM logs its resolved engine configuration at startup, e.g.
+#   INFO ... Initializing an LLM engine (v0.11.0) with config: model='...',
+#   tensor_parallel_size=4, enable_prefix_caching=False, max_model_len=8192, ...
+# That line is the audit's source of truth. An earlier version of this script
+# queried /v1//models for a "controlled" block; that endpoint returns model
+# cards and no such block exists, so the audit was a no-op that reported
+# everything as "unverified". Parsing the engine config line actually works.
+_ENGINE_CONFIG_RE = re.compile(r"with config:\s*(.+)$")
+_KV_RE = re.compile(r"(\w+)=('[^']*'|\"[^\"]*\"|[^,\s]+)")
+
+# Our controlled-variable name -> the name(s) vLLM may log it under.
+_VLLM_ALIASES: dict[str, tuple[str, ...]] = {
+    "enable_prefix_caching": ("enable_prefix_caching",),
+    "enable_chunked_prefill": ("enable_chunked_prefill", "chunked_prefill_enabled"),
+    "max_num_batched_tokens": ("max_num_batched_tokens",),
+    "tensor_parallel_size": ("tensor_parallel_size",),
+    "speculative_model": ("speculative_model", "speculative_config"),
+    "kv_cache_dtype": ("kv_cache_dtype",),
+    "max_model_len": ("max_model_len",),
+    # Environment variables — vLLM does not echo these into the engine config
+    # line, so they are structurally unverifiable from the log. Reported as
+    # such rather than quietly passed.
+    "VLLM_TPU_BUCKET_PADDING_GAP": (),
+    "XLA_FLAGS": (),
+}
 
 
-def audit_controlled(config: dict[str, Any], server: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Compare recorded controlled vars against the server's reported values.
+def _coerce(raw: str) -> Any:
+    """Turn a logged token into a Python value for comparison."""
+    s = raw.strip().strip("'\"")
+    low = s.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if low in ("none", "null"):
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
 
-    Any key the server does not expose is reported as 'unverified' rather than
-    silently passed — an unverifiable controlled variable is a known hole, and
-    the paper should say which ones they are.
+
+def parse_server_config(lines: Iterable[str]) -> dict[str, Any]:
+    """Extract vLLM's resolved engine config from its startup log."""
+    out: dict[str, Any] = {}
+    for line in lines:
+        m = _ENGINE_CONFIG_RE.search(line)
+        if not m:
+            continue
+        for k, v in _KV_RE.findall(m.group(1)):
+            out[k] = _coerce(v)
+    return out
+
+
+def audit_controlled(
+    config: dict[str, Any], server: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Compare recorded controlled vars against the server's own reported config.
+
+    `server` is the dict from parse_server_config, or None in mock mode.
+
+    A variable the server does not report is 'unverified', never 'ok'. Those
+    are known holes and the paper should name them rather than imply every
+    controlled variable was checked.
     """
     rows: list[dict[str, Any]] = []
-    reported = (server or {}).get("controlled", {}) if server else {}
     for name, recorded in sorted(config["controlled"].items()):
-        if not server:
+        reported: Any = None
+        found = False
+        if server is not None:
+            for alias in _VLLM_ALIASES.get(name, (name,)):
+                if alias in server:
+                    reported, found = server[alias], True
+                    break
+
+        if server is None:
             verdict = "mock"
-        elif name not in reported:
+        elif not found:
             verdict = "unverified"
-        elif reported[name] != recorded:
+        elif reported != recorded:
             verdict = "MISMATCH"
         else:
             verdict = "ok"
+
         rows.append(
             {
                 "variable": name,
                 "recorded": json.dumps(recorded),
-                "server_reported": json.dumps(reported.get(name)) if server else None,
+                "server_reported": json.dumps(reported) if found else None,
                 "verdict": verdict,
             }
         )
@@ -126,7 +195,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", required=True, type=Path)
     ap.add_argument("--mock", action="store_true", help="no server; synthetic warmup log")
     ap.add_argument("--warmup-log", type=Path, help="parse a captured warmup log")
-    ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--results-root", type=Path, default=None)
     args = ap.parse_args(argv)
 
@@ -147,15 +215,15 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.mock:
             log_lines = mock_warmup_log(max_model_len, padding_gap)
-            server = None
         elif args.warmup_log:
             log_lines = args.warmup_log.read_text().splitlines()
-            server = None
         else:
             log_lines = Path(config["warmup_log_path"]).read_text().splitlines()
-            server = fetch_server_config(args.base_url)
 
         observed = parse_warmup_log(log_lines)
+        # Mock mode has no real server to audit against; every other mode reads
+        # vLLM's own resolved engine config out of the same log.
+        server = None if args.mock else parse_server_config(log_lines)
 
         save_table(
             run,

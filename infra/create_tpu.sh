@@ -52,10 +52,79 @@ warn() { echo "[$(date '+%H:%M:%S')] [create_tpu] WARNING: $*" >&2; }
 die()  { echo "[$(date '+%H:%M:%S')] [create_tpu] ERROR: $*" >&2; exit 1; }
 
 # ── Preflight ───────────────────────────────────────────────────────────────
+# These are REAL read-only API calls, not prose. Every one of them catches a
+# failure that would otherwise happen after `create` has already started
+# billing, or several minutes into it.
+
+have_gcloud() { command -v gcloud >/dev/null 2>&1; }
+
+check_accelerator_type() {
+  have_gcloud || return 0
+  local types
+  types=$(timeout 60 gcloud compute tpus accelerator-types list \
+            --zone="$ZONE" --project="$PROJECT" --format='value(type)' 2>/dev/null) || return 0
+  [[ -z "$types" ]] && return 0
+  if grep -qx "$TPU_TYPE" <<<"$types"; then
+    log "  ok  accelerator-type '$TPU_TYPE' available in $ZONE"
+    return 0
+  fi
+  warn "accelerator-type '$TPU_TYPE' is NOT offered in $ZONE."
+  warn "  v5litepod-4 zones known good: us-central1-a, us-east1-c, us-east5-a,"
+  warn "  us-west1-c, us-west4-a. (us-central1-b/c/f do NOT offer it.)"
+  return 1
+}
+
+check_runtime_version() {
+  have_gcloud || return 0
+  local versions
+  # `value(name)` returns full resource paths; the version is the last segment.
+  versions=$(timeout 60 gcloud compute tpus versions list \
+               --zone="$ZONE" --project="$PROJECT" --format='value(name)' 2>/dev/null \
+             | awk -F/ '{print $NF}') || return 0
+  [[ -z "$versions" ]] && return 0
+  if grep -qx "$RUNTIME_VERSION" <<<"$versions"; then
+    log "  ok  runtime version '$RUNTIME_VERSION' valid in $ZONE"
+    return 0
+  fi
+  warn "runtime version '$RUNTIME_VERSION' is NOT valid in $ZONE."
+  warn "  v5e candidates seen: v2-alpha-tpuv5-lite, v2-tpuv5-litepod, v2-tpuv5-lite-cgroup1"
+  return 1
+}
+
+check_quota() {
+  have_gcloud || return 0
+  local region metric quotas limit
+  region="${ZONE%-*}"
+  # v5litepod-N is a PODSLICE, not a DEVICE. Device quota being 0 is normal and
+  # irrelevant here — checking the wrong metric is exactly how "quota approved"
+  # turns into a failed provision.
+  if [[ "$SPOT" == "true" ]]; then
+    metric="PREEMPTIBLE_TPU_LITE_PODSLICE_V5"
+  else
+    metric="TPU_LITE_PODSLICE_V5"
+  fi
+  quotas=$(timeout 60 gcloud compute regions describe "$region" --project="$PROJECT" \
+             --format="value(quotas)" 2>/dev/null) || return 0
+  [[ -z "$quotas" ]] && return 0
+
+  limit=$(tr ';' '\n' <<<"$quotas" | grep -F "'$metric'" | sed -E "s/.*'limit': ([0-9.]+).*/\1/" | head -1)
+  if [[ -z "$limit" ]]; then
+    warn "could not read quota metric $metric in $region — check manually"
+    return 1
+  fi
+  if awk -v l="$limit" -v c="$CHIPS" 'BEGIN{exit !(l>=c)}'; then
+    log "  ok  quota $metric = $limit chips in $region (need $CHIPS)"
+    return 0
+  fi
+  warn "INSUFFICIENT QUOTA: $metric = $limit in $region, need $CHIPS chips."
+  warn "  Request an increase before provisioning; create will fail otherwise."
+  return 1
+}
+
 preflight() {
   local problems=0
 
-  command -v gcloud >/dev/null 2>&1 || { warn "gcloud not on PATH"; problems=$((problems+1)); }
+  have_gcloud || { warn "gcloud not on PATH"; problems=$((problems+1)); }
 
   [[ -n "${PROJECT:-}" ]] || { warn "PROJECT is empty; run: gcloud config set project <id>"; problems=$((problems+1)); }
 
@@ -63,6 +132,13 @@ preflight() {
     warn "no HF_TOKEN and no ~/.cache/huggingface/token — the gated meta-llama"
     warn "  download will fail on the VM. Request access first (prerequisite 2)."
     problems=$((problems+1))
+  fi
+
+  if have_gcloud && [[ -n "${PROJECT:-}" ]]; then
+    log "verifying against the live API (read-only):"
+    check_accelerator_type || problems=$((problems+1))
+    check_runtime_version  || problems=$((problems+1))
+    check_quota            || problems=$((problems+1))
   fi
 
   if [[ -z "${TPU_INFERENCE_VERSION:-}" ]]; then

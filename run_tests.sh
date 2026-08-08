@@ -22,6 +22,10 @@ trap 'rm -rf "$TMP"' EXIT
 "$PY" scripts/e00_smoke_test.py --config configs/e00_gap512_ladder.json  --mock --results-root "$TMP" >/dev/null
 echo "  OK  2 runs, $(wc -l < "$TMP/MANIFEST.jsonl") manifest entries"
 
+echo; echo "=== e00 against a realistic vLLM log fixture (closest to a real run) ==="
+"$PY" scripts/e00_smoke_test.py --config configs/e00_default_ladder.json \
+      --warmup-log tests/fixtures/vllm_tpu_warmup.log --results-root "$TMP/fx"
+
 echo; echo "=== controlled-variable contract aborts on the bad config ==="
 if "$PY" scripts/e00_smoke_test.py --config configs/e00_BAD_apc_unrecorded.json --mock --results-root "$TMP" 2>/dev/null; then
   echo "  FAIL: bad config was accepted"; exit 1
