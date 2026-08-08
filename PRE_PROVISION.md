@@ -20,7 +20,8 @@ were closed; the remainder are yours.
 ## Blocking — verified already, no action
 
 - [x] `v5litepod-4` offered in `us-central1-a` — checked live
-- [x] Runtime `v2-alpha-tpuv5-lite` valid in that zone — checked live
+- [x] Image family `ubuntu-accel-2204-amd64-tpu-v5e-v5p-v6e` resolves — checked live
+- [x] Machine type `ct5lp-hightpu-4t` available in us-central1-a — checked live
 - [x] Quota `TPU_LITE_PODSLICE_V5` = 16 chips, preemptible likewise (need 4) —
       checked live in us-central1 and us-east5. `TPU_LITE_DEVICE_V5` is 0, which
       is irrelevant: a `v5litepod-4` is a podslice, not a device.
@@ -55,12 +56,18 @@ not seen.
 
 ## Session 1, once the boxes above are ticked
 
+This project uses the **GCE-native TPU path** ("Lightweight Exploration" in the
+console). A TPU here is an ordinary Compute Engine instance with a TPU machine
+type, so everything uses `gcloud compute ssh/scp` — **not** `gcloud compute tpus
+tpu-vm ssh/scp`, which addresses Cloud TPU API nodes that this project cannot
+create.
+
 ```bash
 ./infra/setup_gcs.sh                  # one-off
-./infra/create_tpu.sh --check         # live quota/zone/version, no spend
+./infra/create_tpu.sh --check         # live machine-type/image/quota, no spend
 ./infra/create_tpu.sh                 # BILLING STARTS
 ./infra/deploy.sh
-gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" \
+gcloud compute ssh bucketladder-v5e4 --zone=us-central1-a \
     --command='bash ~/bucketladder/infra/vm_setup.sh'
 ./infra/capture.sh --tag default      # THE DELIVERABLE
 ./infra/teardown_tpu.sh               # BILLING STOPS

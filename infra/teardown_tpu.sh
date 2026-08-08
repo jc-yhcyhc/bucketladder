@@ -52,7 +52,7 @@ command -v gcloud >/dev/null 2>&1 || {
 # ── Status ──────────────────────────────────────────────────────────────────
 exists=unknown
 if command -v gcloud >/dev/null 2>&1 && [[ -n "${PROJECT:-}" ]]; then
-  if gcloud compute tpus tpu-vm describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
+  if gcloud compute instances describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
        >/dev/null 2>&1; then
     exists=yes
   else
@@ -68,7 +68,7 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
   esac
 fi
 
-CMD=(gcloud compute tpus tpu-vm delete "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" --quiet)
+CMD=(gcloud compute instances delete "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" --quiet)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — the command that would run:"

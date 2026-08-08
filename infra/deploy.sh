@@ -42,8 +42,8 @@ TARBALL="/tmp/bucketladder-deploy.tar.gz"
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — would package: ${PAYLOAD[*]}"
   log "  tar -czf $TARBALL -C $REPO --exclude=__pycache__ ${PAYLOAD[*]}"
-  log "  gcloud compute tpus tpu-vm scp $TARBALL ${TPU_NAME}:~/ --zone=$ZONE --project=$PROJECT"
-  log "  gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE --command='mkdir -p ~/bucketladder && tar -xzf ~/$(basename $TARBALL) -C ~/bucketladder'"
+  log "  gcloud compute scp $TARBALL ${TPU_NAME}:~/ --zone=$ZONE --project=$PROJECT"
+  log "  gcloud compute ssh $TPU_NAME --zone=$ZONE --command='mkdir -p ~/bucketladder && tar -xzf ~/$(basename $TARBALL) -C ~/bucketladder'"
   log "DRY RUN — nothing copied."
   exit 0
 fi
@@ -55,10 +55,10 @@ tar -czf "$TARBALL" -C "$REPO" --exclude=__pycache__ --exclude='*.pyc' "${PAYLOA
 log "  $(du -h "$TARBALL" | cut -f1)"
 
 log "copying to $TPU_NAME…"
-gcloud compute tpus tpu-vm scp "$TARBALL" "${TPU_NAME}:~/" --zone="$ZONE" --project="$PROJECT"
+gcloud compute scp "$TARBALL" "${TPU_NAME}:~/" --zone="$ZONE" --project="$PROJECT"
 
 log "unpacking on the VM…"
-gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
+gcloud compute ssh "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
   --command="mkdir -p ~/bucketladder && tar -xzf ~/$(basename "$TARBALL") -C ~/bucketladder && ls ~/bucketladder"
 
 log "deployed to ~/bucketladder on $TPU_NAME"

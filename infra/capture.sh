@@ -46,8 +46,8 @@ DEST="$REPO/captured/$TAG"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — would create $DEST and run:"
-  log "  gcloud compute tpus tpu-vm scp ${TPU_NAME}:$WARMUP_LOG $DEST/vllm_warmup.log --zone=$ZONE"
-  log "  gcloud compute tpus tpu-vm scp --recurse ${TPU_NAME}:~/bucketladder/results $DEST/ --zone=$ZONE"
+  log "  gcloud compute scp ${TPU_NAME}:$WARMUP_LOG $DEST/vllm_warmup.log --zone=$ZONE"
+  log "  gcloud compute scp --recurse ${TPU_NAME}:~/bucketladder/results $DEST/ --zone=$ZONE"
   [[ "$PUSH" == "true" ]] && log "  gcloud storage rsync -r $DEST $GCS_BUCKET/captured/$TAG"
   log "DRY RUN — nothing copied."
   exit 0
@@ -57,7 +57,7 @@ command -v gcloud >/dev/null 2>&1 || die "gcloud not on PATH"
 mkdir -p "$DEST"
 
 log "pulling warmup log…"
-if gcloud compute tpus tpu-vm scp "${TPU_NAME}:$WARMUP_LOG" "$DEST/vllm_warmup.log" \
+if gcloud compute scp "${TPU_NAME}:$WARMUP_LOG" "$DEST/vllm_warmup.log" \
      --zone="$ZONE" --project="$PROJECT" 2>/dev/null; then
   log "  got $(wc -l < "$DEST/vllm_warmup.log") lines -> $DEST/vllm_warmup.log"
 else
@@ -65,7 +65,7 @@ else
 fi
 
 log "pulling results…"
-gcloud compute tpus tpu-vm scp --recurse "${TPU_NAME}:~/bucketladder/results" "$DEST/" \
+gcloud compute scp --recurse "${TPU_NAME}:~/bucketladder/results" "$DEST/" \
   --zone="$ZONE" --project="$PROJECT" 2>/dev/null \
   || log "  (no results directory yet — expected in session 1)"
 

@@ -6,11 +6,14 @@
 # PREREQUISITES — satisfy these before running, or this will fail late and
 # confusingly. They are checked by --check where checkable.
 #
-#   1. TPU quota approved for **v5e specifically, in $ZONE**. Quota approved
-#      for one generation or one zone does not grant another. The v1 review
-#      recorded "quota approved but unprovisioned" without naming the
-#      generation — confirm which you actually have.
-#        gcloud compute regions describe "${ZONE%-*}" --format='value(quotas)'
+#   1. TPU quota for v5e in $ZONE's region. VERIFIED: TPU_LITE_PODSLICE_V5 = 16
+#      chips (and 16 preemptible) as a global default. Note `regions describe`
+#      hides some TPU metrics — use `gcloud alpha services quota list
+#      --service=compute.googleapis.com` for the full picture.
+#
+#      This creates a GCE-NATIVE TPU instance ("Lightweight Exploration" in the
+#      console), not a Cloud TPU API node. Everything downstream therefore uses
+#      `gcloud compute ssh/scp`, not `gcloud compute tpus tpu-vm ssh/scp`.
 #
 #   2. Gated `meta-llama` repo access requested and granted on HuggingFace.
 #      Commonly a multi-hour stall. Start it first.
@@ -58,36 +61,31 @@ die()  { echo "[$(date '+%H:%M:%S')] [create_tpu] ERROR: $*" >&2; exit 1; }
 
 have_gcloud() { command -v gcloud >/dev/null 2>&1; }
 
-check_accelerator_type() {
+check_machine_type() {
   have_gcloud || return 0
-  local types
-  types=$(timeout 60 gcloud compute tpus accelerator-types list \
-            --zone="$ZONE" --project="$PROJECT" --format='value(type)' 2>/dev/null) || return 0
-  [[ -z "$types" ]] && return 0
-  if grep -qx "$TPU_TYPE" <<<"$types"; then
-    log "  ok  accelerator-type '$TPU_TYPE' available in $ZONE"
+  if timeout 60 gcloud compute machine-types describe "$MACHINE_TYPE" \
+       --zone="$ZONE" --project="$PROJECT" >/dev/null 2>&1; then
+    log "  ok  machine-type '$MACHINE_TYPE' available in $ZONE"
     return 0
   fi
-  warn "accelerator-type '$TPU_TYPE' is NOT offered in $ZONE."
+  warn "machine-type '$MACHINE_TYPE' is NOT offered in $ZONE."
   warn "  Run ./infra/find_zone.sh for the current list — v5e is offered in ~25"
   warn "  zones across four continents, so a bad zone is a one-line fix."
   return 1
 }
 
-check_runtime_version() {
+check_image() {
   have_gcloud || return 0
-  local versions
-  # `value(name)` returns full resource paths; the version is the last segment.
-  versions=$(timeout 60 gcloud compute tpus versions list \
-               --zone="$ZONE" --project="$PROJECT" --format='value(name)' 2>/dev/null \
-             | awk -F/ '{print $NF}') || return 0
-  [[ -z "$versions" ]] && return 0
-  if grep -qx "$RUNTIME_VERSION" <<<"$versions"; then
-    log "  ok  runtime version '$RUNTIME_VERSION' valid in $ZONE"
+  local img
+  img=$(timeout 60 gcloud compute images describe-from-family "$IMAGE_FAMILY" \
+          --project="$IMAGE_PROJECT" --format='value(name)' 2>/dev/null) || true
+  if [[ -n "$img" ]]; then
+    log "  ok  image family '$IMAGE_FAMILY' resolves to $img"
     return 0
   fi
-  warn "runtime version '$RUNTIME_VERSION' is NOT valid in $ZONE."
-  warn "  v5e candidates seen: v2-alpha-tpuv5-lite, v2-tpuv5-litepod, v2-tpuv5-lite-cgroup1"
+  warn "image family '$IMAGE_FAMILY' not found in project '$IMAGE_PROJECT'."
+  warn "  v5e images live in ubuntu-os-accelerator-images; list them with:"
+  warn "  gcloud compute images list --filter='name~tpu'"
   return 1
 }
 
@@ -136,8 +134,8 @@ preflight() {
 
   if have_gcloud && [[ -n "${PROJECT:-}" ]]; then
     log "verifying against the live API (read-only):"
-    check_accelerator_type || problems=$((problems+1))
-    check_runtime_version  || problems=$((problems+1))
+    check_machine_type || problems=$((problems+1))
+    check_image        || problems=$((problems+1))
     check_quota            || problems=$((problems+1))
   fi
 
@@ -148,7 +146,8 @@ preflight() {
 
   log "config:"
   log "  project=$PROJECT  zone=$ZONE"
-  log "  name=$TPU_NAME  type=$TPU_TYPE  runtime=$RUNTIME_VERSION"
+  log "  name=$TPU_NAME  machine-type=$MACHINE_TYPE"
+  log "  image=$IMAGE_FAMILY ($IMAGE_PROJECT)  disk=$BOOT_DISK_SIZE"
   log "  spot=$SPOT  model=$MODEL"
 
   local rate chips_rate
@@ -172,7 +171,7 @@ fi
 
 # ── Idempotency ─────────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" != "true" ]] && command -v gcloud >/dev/null 2>&1; then
-  if gcloud compute tpus tpu-vm describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
+  if gcloud compute instances describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
        >/dev/null 2>&1; then
     log "TPU '$TPU_NAME' already exists in $ZONE — nothing to do."
     log "It is BILLING right now. Tear down with: ./infra/teardown_tpu.sh"
@@ -181,12 +180,23 @@ if [[ "$DRY_RUN" != "true" ]] && command -v gcloud >/dev/null 2>&1; then
 fi
 
 # ── Build the command ───────────────────────────────────────────────────────
-CMD=(gcloud compute tpus tpu-vm create "$TPU_NAME"
+# GCE-native TPU: an ordinary instance with a TPU machine type. This is the
+# "Lightweight Exploration" option in the console; the legacy Cloud TPU API
+# "Create TPU node" page is not available on this project.
+CMD=(gcloud compute instances create "$TPU_NAME"
      --zone="$ZONE"
      --project="$PROJECT"
-     --accelerator-type="$TPU_TYPE"
-     --version="$RUNTIME_VERSION")
-[[ "$SPOT" == "true" ]] && CMD+=(--spot)
+     --machine-type="$MACHINE_TYPE"
+     --image-family="$IMAGE_FAMILY"
+     --image-project="$IMAGE_PROJECT"
+     --boot-disk-size="$BOOT_DISK_SIZE"
+     # cloud-platform so a GCS write from the VM never fails mid-session
+     --scopes=https://www.googleapis.com/auth/cloud-platform)
+if [[ "$SPOT" == "true" ]]; then
+  # TERMINATE (not the STOP default) so a preempted VM stops billing outright
+  # instead of lingering as a stopped instance with a paid disk.
+  CMD+=(--provisioning-model=SPOT --instance-termination-action=DELETE)
+fi
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — the command that would run:"
@@ -203,7 +213,7 @@ log ""
 log "Next:"
 log "  1. record the start time in DECISIONS.md (billed VM-hours, not benchmark-hours)"
 log "  2. ./infra/deploy.sh                       # repo -> VM"
-log "  3. gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE \\"
+log "  3. gcloud compute ssh $TPU_NAME --zone=$ZONE \\"
 log "       --command='bash ~/bucketladder/infra/vm_setup.sh'"
 log "  4. ./infra/capture.sh --tag <label>        # GET THE LOG OFF"
 log "  5. ./infra/teardown_tpu.sh                 # ALWAYS"
