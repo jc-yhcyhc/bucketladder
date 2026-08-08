@@ -22,8 +22,16 @@ were closed; the remainder are yours.
 - [x] `v5litepod-4` offered in `us-central1-a` — checked live
 - [x] Runtime `v2-alpha-tpuv5-lite` valid in that zone — checked live
 - [x] Quota `TPU_LITE_PODSLICE_V5` = 16 chips, preemptible likewise (need 4) —
-      checked live. Note `TPU_LITE_DEVICE_V5` is 0, which is irrelevant: a
-      `v5litepod-4` is a podslice, not a device.
+      checked live in us-central1 and us-east5. `TPU_LITE_DEVICE_V5` is 0, which
+      is irrelevant: a `v5litepod-4` is a podslice, not a device.
+- [x] **v5e is the ONLY TPU we hold.** The GCE console's machine-series dropdown
+      (CT5P / CT6E / TPU7X) is a catalogue of what exists in the region, not an
+      entitlement. No v6e, v5p or v7x quota metric exists at all. Both
+      provisioning surfaces list v5e in us-central1-a: `v5litepod-4` via the
+      Cloud TPU API, `ct5lp-hightpu-4t` via GCE machine types.
+- [x] **GPUs do not help.** P100/K80/P4 cannot run vLLM (compute capability
+      below the required 7.0). T4/L4 could, but a GPU is the paper's contrast
+      case, not its platform.
 - [x] `tpu-inference` 0.26.0 on PyPI alongside vLLM 0.26.0
 - [x] `gcloud ... tpu-vm create` accepts `--version --accelerator-type --zone --spot`
 - [x] Harness green: `./run_tests.sh` — 80 tests, all dry-runs, mock and
