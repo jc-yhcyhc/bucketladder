@@ -11,9 +11,10 @@ echo; echo "=== unit tests ==="
 "$PY" -m pytest tests/ -q
 
 echo; echo "=== infra dry-runs (must not touch gcloud) ==="
-./infra/create_tpu.sh   --dry-run >/dev/null && echo "  OK  create_tpu.sh --dry-run"
-./infra/teardown_tpu.sh --dry-run >/dev/null && echo "  OK  teardown_tpu.sh --dry-run"
-bash infra/vm_setup.sh  --dry-run >/dev/null && echo "  OK  vm_setup.sh --dry-run"
+for s in create_tpu teardown_tpu setup_gcs deploy capture; do
+  ./infra/$s.sh --dry-run >/dev/null 2>&1 && echo "  OK  $s.sh --dry-run"
+done
+bash infra/vm_setup.sh --dry-run >/dev/null && echo "  OK  vm_setup.sh --dry-run"
 
 echo; echo "=== e00 end-to-end, mock mode ==="
 TMP=$(mktemp -d)

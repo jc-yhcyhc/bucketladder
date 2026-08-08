@@ -1,0 +1,84 @@
+# Pre-provision checklist
+
+Everything that must be true before `./infra/create_tpu.sh` is run for the first
+time. Derived from an audit, not from memory — four gaps were found and three
+were closed; the remainder are yours.
+
+## Blocking — you
+
+- [ ] **Gated `meta-llama` access granted** on HuggingFace for
+      `meta-llama/Llama-3.1-8B-Instruct`. Commonly a multi-hour stall, so start
+      it first. https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
+- [ ] **`export HF_TOKEN=hf_...`** (or `~/.cache/huggingface/token` present).
+      `create_tpu.sh` treats a missing token as a preflight failure and refuses
+      to provision — the model download would fail several minutes in, after
+      billing had started.
+- [ ] **`./infra/setup_gcs.sh`** — creates the results bucket. One-off, costs
+      approximately nothing, and without it the session-end sync has nowhere to
+      write. **Currently missing.**
+
+## Blocking — verified already, no action
+
+- [x] `v5litepod-4` offered in `us-central1-a` — checked live
+- [x] Runtime `v2-alpha-tpuv5-lite` valid in that zone — checked live
+- [x] Quota `TPU_LITE_PODSLICE_V5` = 16 chips, preemptible likewise (need 4) —
+      checked live. Note `TPU_LITE_DEVICE_V5` is 0, which is irrelevant: a
+      `v5litepod-4` is a podslice, not a device.
+- [x] `tpu-inference` 0.26.0 on PyPI alongside vLLM 0.26.0
+- [x] `gcloud ... tpu-vm create` accepts `--version --accelerator-type --zone --spot`
+- [x] Harness green: `./run_tests.sh` — 80 tests, all dry-runs, mock and
+      fixture end-to-end, deliberate abort
+
+## Not blocking session 1 — needed before session 2
+
+- [ ] `scripts/e01_oracle_gap.py` — marginal-cost design (hold one bucket, vary
+      occupancy over ~5 shapes). Does not exist.
+- [ ] `scripts/e02_stock_baseline.py`. Does not exist.
+- [ ] Noise-floor measurement — three repeats of one config; sets the threshold
+      units for both gates. Does not exist.
+
+Session 1 needs none of these: its only job is to capture a real warmup log and
+tear down. Writing them before then would be guessing at a log format we have
+not seen.
+
+## Session 1, once the boxes above are ticked
+
+```bash
+./infra/setup_gcs.sh                  # one-off
+./infra/create_tpu.sh --check         # live quota/zone/version, no spend
+./infra/create_tpu.sh                 # BILLING STARTS
+./infra/deploy.sh
+gcloud compute tpus tpu-vm ssh "$TPU_NAME" --zone="$ZONE" \
+    --command='bash ~/bucketladder/infra/vm_setup.sh'
+./infra/capture.sh --tag default      # THE DELIVERABLE
+./infra/teardown_tpu.sh               # BILLING STOPS
+./infra/teardown_tpu.sh --status      # must report nothing billing
+```
+
+Optionally repeat the middle with `VLLM_TPU_BUCKET_PADDING_GAP=512` before
+teardown, for a second ladder, then `./infra/capture.sh --tag gap512`.
+
+Record billed VM-hours in `DECISIONS.md`. Then, at $0:
+
+```bash
+python scripts/e00_smoke_test.py --config configs/e00_default_ladder.json \
+    --warmup-log captured/default/vllm_warmup.log
+```
+
+Iterate on `parse_warmup_log` / `parse_server_config` until that passes. **Do not
+start session 2 until it does.**
+
+## What is most likely to break, in order
+
+1. **Warmup-log format** — `Compiling graph for num_tokens=N` is inferred, never
+   observed. This is why session 1 captures and leaves.
+2. **`--no-enable-prefix-caching`** — flag name unverified against vLLM 0.26.
+3. **`tpu-inference` install on `tpu-ubuntu2204-base`** — the image workarounds
+   are inherited from a MaxText-era script and have never been run against this
+   package.
+4. **`vllm serve` as the entrypoint** for the tpu-inference backend — assumed.
+5. **Spot capacity** — quota is confirmed, availability is not. Only a real
+   provision attempt answers it.
+
+All five are the interface to vLLM, which is deliberate: one surface to debug,
+and `--warmup-log` mode lets it be debugged with the VM switched off.

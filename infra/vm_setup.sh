@@ -2,7 +2,9 @@
 # =============================================================================
 # vm_setup.sh — run once on the TPU VM after create_tpu.sh.
 # =============================================================================
-# Installs tpu-inference + vLLM and starts a server for e00_smoke_test.py.
+# Installs tpu-inference + vLLM and starts a server, capturing the warmup log
+# that e00_smoke_test.py parses. Deploy the repo first with infra/deploy.sh if
+# you intend to run experiments on the VM rather than only capture the log.
 #
 # The tpu-ubuntu2204-base image quirks handled below were worked out the
 # expensive way in a previous project (infersim/calibration/vm_setup.sh) and
@@ -142,9 +144,14 @@ for _ in $(seq 1 240); do
   if curl -sf "http://localhost:${SERVER_PORT}/health" >/dev/null 2>&1; then
     log "  server up (pid $SERVER_PID)"
     log ""
-    log "Next: python scripts/e00_smoke_test.py \\"
-    log "        --config configs/e00_default_ladder.json \\"
-    log "        --base-url http://localhost:${SERVER_PORT}"
+    log "The warmup log is at $WARMUP_LOG. Session 1's job is to GET IT OFF"
+    log "the VM and tear down — the parser is then fixed offline at \$0:"
+    log "  ./infra/capture.sh --tag <label>"
+    log "  ./infra/teardown_tpu.sh"
+    log ""
+    log "Later sessions, with the repo deployed via ./infra/deploy.sh:"
+    log "  cd ~/bucketladder && ~/venv/bin/python scripts/e00_smoke_test.py \\"
+    log "      --config configs/e00_default_ladder.json --warmup-log $WARMUP_LOG"
     exit 0
   fi
   sleep 15

@@ -82,6 +82,12 @@ if [[ "$exists" == "no" ]]; then
   exit 0
 fi
 
+# Refuse to silently destroy uncaptured work.
+if [[ ! -d "$HERE/../captured" ]]; then
+  log "WARNING: no ./captured/ directory — has ./infra/capture.sh been run?"
+  log "  The VM disk is deleted with the VM. Anything not captured is gone."
+fi
+
 if [[ "$ASSUME_YES" != "true" ]]; then
   echo "About to DELETE TPU VM '$TPU_NAME' in $ZONE (project $PROJECT)."
   echo "Anything on its local disk is lost. Results should already be in $GCS_BUCKET."
