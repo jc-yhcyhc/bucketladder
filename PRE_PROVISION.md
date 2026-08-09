@@ -57,11 +57,14 @@ not seen.
 
 ## Session 1, once the boxes above are ticked
 
-This project uses the **GCE-native TPU path** ("Lightweight Exploration" in the
-console). A TPU here is an ordinary Compute Engine instance with a TPU machine
-type, so everything uses `gcloud compute ssh/scp` — **not** `gcloud compute tpus
-tpu-vm ssh/scp`, which addresses Cloud TPU API nodes that this project cannot
-create.
+Default is the **Cloud TPU API path** (`PROVISION_PATH=tpu-api`): `v5litepod-4`,
+TP=4, created with `gcloud compute tpus tpu-vm create`. That surface is enabled on
+this project, offers v5e, and matches the one quota metric we verifiably hold
+(`TPU_LITE_PODSLICE_V5` = 16). **You do not need the console for this** — the
+console's series list omits CT5LP because it shows a different, GCE-native surface.
+
+If the API path is refused, `PROVISION_PATH=gce BUCKETLADDER_TP=1` falls back to
+`ct6e-standard-1t` (v6e, one chip, TP=1) via the console flow.
 
 ```bash
 ./infra/setup_gcs.sh                  # one-off

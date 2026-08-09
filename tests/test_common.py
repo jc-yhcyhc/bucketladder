@@ -34,7 +34,7 @@ def good_controlled(**overrides):
         "enable_prefix_caching": False,
         "enable_chunked_prefill": True,
         "max_num_batched_tokens": 8192,
-        "tensor_parallel_size": 1,
+        "tensor_parallel_size": 4,
         "speculative_model": None,
         "kv_cache_dtype": "bfloat16",
         "VLLM_TPU_BUCKET_PADDING_GAP": "",
@@ -81,7 +81,7 @@ def test_aborts_on_unknown_controlled_var():
 
 def test_aborts_on_wrong_tp_size():
     with pytest.raises(ControlledVarError, match="tensor_parallel_size"):
-        assert_controlled_vars(good_config(tensor_parallel_size=4))
+        assert_controlled_vars(good_config(tensor_parallel_size=8))
 
 
 def test_explicit_vars_accept_any_value_but_must_exist():

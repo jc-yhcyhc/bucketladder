@@ -53,10 +53,12 @@ CONTROLLED_VARS: dict[str, Any] = {
     "enable_chunked_prefill": REQUIRE_EXPLICIT,
     # Sets the chunk size and therefore the residual prefill padding.
     "max_num_batched_tokens": REQUIRE_EXPLICIT,
-    # TP=1 on ct6e-standard-1t: Llama-3.1-8B fits in one v6e chip's 32 GB HBM.
-    # This is stronger than holding TP fixed — with a single chip there is no
-    # tensor-parallel reduction to confound anything.
-    "tensor_parallel_size": 1,
+    # Pinned to the hardware in use. 4 for the default path (v5litepod-4, our
+    # quota-certain configuration); 1 if provisioning falls back to the GCE
+    # path's ct6e-standard-1t, where Llama-3.1-8B fits one 32 GB v6e chip and
+    # there is no tensor-parallel reduction at all. Set BUCKETLADDER_TP to
+    # match the hardware; the config must then state that exact value.
+    "tensor_parallel_size": int(os.environ.get("BUCKETLADDER_TP", "4")),
     # Changes accepted-token paths entirely.
     "speculative_model": None,
     "kv_cache_dtype": REQUIRE_EXPLICIT,

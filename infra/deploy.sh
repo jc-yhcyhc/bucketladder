@@ -21,6 +21,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 # shellcheck source=./config.env
 source "$HERE/config.env"
+# shellcheck source=./_paths.sh
+source "$HERE/_paths.sh"
 
 DRY_RUN=false
 for arg in "$@"; do
@@ -55,10 +57,10 @@ tar -czf "$TARBALL" -C "$REPO" --exclude=__pycache__ --exclude='*.pyc' "${PAYLOA
 log "  $(du -h "$TARBALL" | cut -f1)"
 
 log "copying to $TPU_NAME…"
-gcloud compute scp "$TARBALL" "${TPU_NAME}:~/" --zone="$ZONE" --project="$PROJECT"
+tpu_scp "$TARBALL" "${TPU_NAME}:~/"
 
 log "unpacking on the VM…"
-gcloud compute ssh "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
+tpu_ssh \
   --command="mkdir -p ~/bucketladder && tar -xzf ~/$(basename "$TARBALL") -C ~/bucketladder && ls ~/bucketladder"
 
 log "deployed to ~/bucketladder on $TPU_NAME"

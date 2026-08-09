@@ -24,6 +24,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./config.env
 source "$HERE/config.env"
+# shellcheck source=./_paths.sh
+source "$HERE/_paths.sh"
 
 DRY_RUN=false
 ASSUME_YES=false
@@ -52,8 +54,7 @@ command -v gcloud >/dev/null 2>&1 || {
 # ── Status ──────────────────────────────────────────────────────────────────
 exists=unknown
 if command -v gcloud >/dev/null 2>&1 && [[ -n "${PROJECT:-}" ]]; then
-  if gcloud compute instances describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
-       >/dev/null 2>&1; then
+  if tpu_exists; then
     exists=yes
   else
     exists=no
@@ -68,7 +69,7 @@ if [[ "$STATUS_ONLY" == "true" ]]; then
   esac
 fi
 
-CMD=(gcloud compute instances delete "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" --quiet)
+mapfile -t CMD < <(tpu_delete_argv)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — the command that would run:"

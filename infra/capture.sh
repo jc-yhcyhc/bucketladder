@@ -23,6 +23,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 # shellcheck source=./config.env
 source "$HERE/config.env"
+# shellcheck source=./_paths.sh
+source "$HERE/_paths.sh"
 
 : "${WARMUP_LOG:=/tmp/vllm_warmup.log}"
 
@@ -57,16 +59,14 @@ command -v gcloud >/dev/null 2>&1 || die "gcloud not on PATH"
 mkdir -p "$DEST"
 
 log "pulling warmup log…"
-if gcloud compute scp "${TPU_NAME}:$WARMUP_LOG" "$DEST/vllm_warmup.log" \
-     --zone="$ZONE" --project="$PROJECT" 2>/dev/null; then
+if tpu_scp "${TPU_NAME}:$WARMUP_LOG" "$DEST/vllm_warmup.log" 2>/dev/null; then
   log "  got $(wc -l < "$DEST/vllm_warmup.log") lines -> $DEST/vllm_warmup.log"
 else
   log "  WARNING: no warmup log at $WARMUP_LOG on the VM"
 fi
 
 log "pulling results…"
-gcloud compute scp --recurse "${TPU_NAME}:~/bucketladder/results" "$DEST/" \
-  --zone="$ZONE" --project="$PROJECT" 2>/dev/null \
+tpu_scp --recurse "${TPU_NAME}:~/bucketladder/results" "$DEST/" 2>/dev/null \
   || log "  (no results directory yet — expected in session 1)"
 
 if [[ "$PUSH" == "true" ]]; then

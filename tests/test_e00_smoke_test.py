@@ -169,7 +169,7 @@ def test_fixture_ladder_parses_to_powers_of_two():
 
 def test_fixture_engine_config_parses():
     cfg = e00.parse_server_config(fixture_lines())
-    assert cfg["tensor_parallel_size"] == 1
+    assert cfg["tensor_parallel_size"] == 4
     assert cfg["max_model_len"] == 8192
     assert cfg["enable_prefix_caching"] is False
     assert cfg["chunked_prefill_enabled"] is True

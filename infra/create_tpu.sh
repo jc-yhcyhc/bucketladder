@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# create_tpu.sh — provision the v5e-4 TPU VM.
+# create_tpu.sh — provision the TPU.
 # =============================================================================
 #
 # PREREQUISITES — satisfy these before running, or this will fail late and
@@ -11,9 +11,11 @@
 #      hides some TPU metrics — use `gcloud alpha services quota list
 #      --service=compute.googleapis.com` for the full picture.
 #
-#      This creates a GCE-NATIVE TPU instance ("Lightweight Exploration" in the
-#      console), not a Cloud TPU API node. Everything downstream therefore uses
-#      `gcloud compute ssh/scp`, not `gcloud compute tpus tpu-vm ssh/scp`.
+#      TWO SURFACES EXIST and they have separate quota — see infra/_paths.sh.
+#      PROVISION_PATH defaults to `tpu-api` (Cloud TPU API), because that is
+#      where our quota is unambiguous and it offers v5litepod-4 even though the
+#      console's instance-creation flow does not list CT5LP at all.
+#      PROVISION_PATH=gce falls back to the console's GCE-native path (v6e).
 #
 #   2. Gated `meta-llama` repo access requested and granted on HuggingFace.
 #      Commonly a multi-hour stall. Start it first.
@@ -30,7 +32,8 @@
 #   ./infra/create_tpu.sh --dry-run     # print the gcloud command, change nothing
 #   ./infra/create_tpu.sh --check       # verify prerequisites only
 #   ./infra/create_tpu.sh               # actually create (SPENDS MONEY)
-#   SPOT=true ./infra/create_tpu.sh     # ~$1.40/hr instead of ~$4.80/hr
+#   SPOT=true ./infra/create_tpu.sh     # spot instead of on-demand
+#   PROVISION_PATH=gce ./infra/create_tpu.sh   # GCE fallback (v6e, TP=1)
 # =============================================================================
 
 set -euo pipefail
@@ -38,6 +41,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./config.env
 source "$HERE/config.env"
+# shellcheck source=./_paths.sh
+source "$HERE/_paths.sh"
 
 DRY_RUN=false
 CHECK_ONLY=false
@@ -63,9 +68,19 @@ have_gcloud() { command -v gcloud >/dev/null 2>&1; }
 
 check_machine_type() {
   have_gcloud || return 0
+  if [[ "$PROVISION_PATH" == "tpu-api" ]]; then
+    if timeout 60 gcloud compute tpus accelerator-types list --zone="$ZONE" \
+         --project="$PROJECT" --format='value(type)' 2>/dev/null | grep -qx "$ACCELERATOR_TYPE"; then
+      log "  ok  accelerator-type '$ACCELERATOR_TYPE' available in $ZONE (Cloud TPU API)"
+      return 0
+    fi
+    warn "accelerator-type '$ACCELERATOR_TYPE' is NOT offered in $ZONE."
+    warn "  List them: gcloud compute tpus accelerator-types list --zone=$ZONE"
+    return 1
+  fi
   if timeout 60 gcloud compute machine-types describe "$MACHINE_TYPE" \
        --zone="$ZONE" --project="$PROJECT" >/dev/null 2>&1; then
-    log "  ok  machine-type '$MACHINE_TYPE' available in $ZONE"
+    log "  ok  machine-type '$MACHINE_TYPE' available in $ZONE (GCE)"
     return 0
   fi
   warn "machine-type '$MACHINE_TYPE' is NOT offered in $ZONE."
@@ -76,6 +91,17 @@ check_machine_type() {
 
 check_image() {
   have_gcloud || return 0
+  if [[ "$PROVISION_PATH" == "tpu-api" ]]; then
+    local versions
+    versions=$(timeout 60 gcloud compute tpus versions list --zone="$ZONE" \
+                 --project="$PROJECT" --format='value(name)' 2>/dev/null | awk -F/ '{print $NF}')
+    if grep -qx "$RUNTIME_VERSION" <<<"$versions"; then
+      log "  ok  runtime version '$RUNTIME_VERSION' valid in $ZONE"
+      return 0
+    fi
+    warn "runtime version '$RUNTIME_VERSION' is NOT valid in $ZONE."
+    return 1
+  fi
   local img
   img=$(timeout 60 gcloud compute images describe-from-family "$IMAGE_FAMILY" \
           --project="$IMAGE_PROJECT" --format='value(name)' 2>/dev/null) || true
@@ -101,12 +127,14 @@ check_quota() {
   # v6e in particular is only visible via `gcloud alpha services quota list
   # --service=compute.googleapis.com`. A blank result here is inconclusive, not
   # a failure, which is why check_quota returns 0 when it cannot read a limit.
-  case "$MACHINE_TYPE" in
-    ct5lp-*) metric="TPU_LITE_PODSLICE_V5" ;;
-    ct6e-*)  metric="TPU_V6E" ;;
-    ct5p-*)  metric="TPU_V5P" ;;
-    tpu7x-*) metric="TPU7X" ;;
-    *)       metric="TPU_LITE_PODSLICE_V5" ;;
+  local target
+  if [[ "$PROVISION_PATH" == "tpu-api" ]]; then target="$ACCELERATOR_TYPE"; else target="$MACHINE_TYPE"; fi
+  case "$target" in
+    v5litepod-*|ct5lp-*) metric="TPU_LITE_PODSLICE_V5" ;;
+    v6e-*|ct6e-*)        metric="TPU_V6E" ;;
+    v5p-*|ct5p-*)        metric="TPU_V5P" ;;
+    tpu7x-*)             metric="TPU7X" ;;
+    *)                   metric="TPU_LITE_PODSLICE_V5" ;;
   esac
   [[ "$SPOT" == "true" ]] && metric="PREEMPTIBLE_${metric}"
   quotas=$(timeout 60 gcloud compute regions describe "$region" --project="$PROJECT" \
@@ -156,8 +184,8 @@ preflight() {
 
   log "config:"
   log "  project=$PROJECT  zone=$ZONE"
-  log "  name=$TPU_NAME  machine-type=$MACHINE_TYPE"
-  log "  image=$IMAGE_FAMILY ($IMAGE_PROJECT)  disk=$BOOT_DISK_SIZE"
+  log "  name=$TPU_NAME  path=$PROVISION_PATH"
+  log "  target=$(tpu_target_desc)  TP=$TP_SIZE  chips=$CHIPS"
   log "  spot=$SPOT  model=$MODEL"
 
   local rate chips_rate
@@ -181,8 +209,7 @@ fi
 
 # ── Idempotency ─────────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" != "true" ]] && command -v gcloud >/dev/null 2>&1; then
-  if gcloud compute instances describe "$TPU_NAME" --zone="$ZONE" --project="$PROJECT" \
-       >/dev/null 2>&1; then
+  if tpu_exists; then
     log "TPU '$TPU_NAME' already exists in $ZONE — nothing to do."
     log "It is BILLING right now. Tear down with: ./infra/teardown_tpu.sh"
     exit 0
@@ -190,23 +217,7 @@ if [[ "$DRY_RUN" != "true" ]] && command -v gcloud >/dev/null 2>&1; then
 fi
 
 # ── Build the command ───────────────────────────────────────────────────────
-# GCE-native TPU: an ordinary instance with a TPU machine type. This is the
-# "Lightweight Exploration" option in the console; the legacy Cloud TPU API
-# "Create TPU node" page is not available on this project.
-CMD=(gcloud compute instances create "$TPU_NAME"
-     --zone="$ZONE"
-     --project="$PROJECT"
-     --machine-type="$MACHINE_TYPE"
-     --image-family="$IMAGE_FAMILY"
-     --image-project="$IMAGE_PROJECT"
-     --boot-disk-size="$BOOT_DISK_SIZE"
-     # cloud-platform so a GCS write from the VM never fails mid-session
-     --scopes=https://www.googleapis.com/auth/cloud-platform)
-if [[ "$SPOT" == "true" ]]; then
-  # TERMINATE (not the STOP default) so a preempted VM stops billing outright
-  # instead of lingering as a stopped instance with a paid disk.
-  CMD+=(--provisioning-model=SPOT --instance-termination-action=DELETE)
-fi
+mapfile -t CMD < <(tpu_create_argv)
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "DRY RUN — the command that would run:"
