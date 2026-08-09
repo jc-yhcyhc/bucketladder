@@ -1,0 +1,22 @@
+{
+  "experiment": "e03_noise_floor",
+  "description": "Run-to-run variance on one fixed config. Sets the UNITS for every threshold in e01/e02 \u2014 a '5% gap' is meaningless until this is known.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "probe_len": 512,
+  "output_len": 1,
+  "repeats": 30,
+  "restarts": 3
+}

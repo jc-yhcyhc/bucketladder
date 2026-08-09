@@ -29,6 +29,26 @@ real thing via `--warmup-log`, until `e00` passes on both captured logs.
 
 **Do not proceed to session 2 until e00 passes offline on a real log.**
 
+## Session 2 — READY TO RUN. Scripts written and mock-tested (2026-08-09).
+
+`e01_oracle_gap.py`, `e02_stock_baseline.py`, `e03_noise_floor.py` all exist,
+run in `--mock`, and — the part that matters — each has a mock for **both**
+hypotheses, with tests asserting the analysis separates them. A mock that only
+ever produces the hoped-for answer proves nothing.
+
+Order on the day: **e03 first** (sets threshold units), then e00, then e01, e02.
+
+Two things session 1 changed here:
+
+- **e01 must run on the DEFAULT (power-of-two) ladder.** Achievable occupancy is
+  bounded by the ladder itself: bucket B spans (B/2, B], so occupancy varies over
+  at most 2x, and 0.5B/0.25B fall into *smaller* buckets — a different executable.
+  Gap ladders are far worse (gap=512 at B=4096 spans only 0.875–1.0).
+- **e02 now targets the `request paddings` ladder** `[8,16,32,64,128,256]`
+  discovered on hardware, not the token ladder. That is the axis where
+  promote-vs-wait actually bites, and `VLLM_TPU_BUCKET_PADDING_GAP` does not
+  move it.
+
 ## Session 2 — gate, noise floor, and both kill checks (~10 h on-demand, ~$48)
 
 Sessions 2 and 3 from the original sketch, merged. One setup cycle, not two.
