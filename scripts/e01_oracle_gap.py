@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _client import Sample, complete, complete_mock, summarise  # noqa: E402
 from _metrics import MockMetrics, delta, metrics_available, scrape  # noqa: E402
+from _stats import flatness_ci, fmt_ci  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from ladder import bucket_for, build_ladder  # noqa: E402
 
@@ -211,6 +212,27 @@ def main(argv: list[str] | None = None) -> int:
             print("[e01] flatness from SERVER prefill time (headline) vs client TTFT (proxy):")
             for b in sorted(overall):
                 print(f"[e01]   bucket {b:>5}: server={overall[b]:.2f}  client={overall_client[b]:.2f}")
+        # --- intervals (solidity.md R4): a point estimate is not a result ---
+        ci_rows = []
+        for bucket in sorted({r["bucket"] for r in rows}):
+            lens = sorted({r["prompt_len"] for r in rows if r["bucket"] == bucket})
+            if len(lens) < 2:
+                continue
+            lo_len, hi_len = lens[0], lens[-1]
+            lo_vals = [r["ttft_ms"] for r in rows if r["bucket"] == bucket and r["prompt_len"] == lo_len]
+            hi_vals = [r["ttft_ms"] for r in rows if r["bucket"] == bucket and r["prompt_len"] == hi_len]
+            pt, cl, ch = flatness_ci(lo_vals, hi_vals, lo_len, hi_len)
+            ci_rows.append({"bucket": bucket, "flatness": pt, "ci_lo": cl, "ci_hi": ch,
+                            "n_lo": len(lo_vals), "n_hi": len(hi_vals),
+                            "ci_width": ch - cl})
+            print(f"[e01]   bucket {bucket:>5}: flatness {fmt_ci(pt, cl, ch)}")
+        if ci_rows:
+            save_table(run, "flatness_ci", ci_rows)
+            wide = [r for r in ci_rows if r["ci_width"] > 0.5]
+            if wide:
+                print(f"[e01] WARNING {len(wide)} bucket(s) have a CI wider than 0.5 — "
+                      "underpowered, do not report as a point estimate")
+
         vals = [v for v in overall.values() if not math.isnan(v)]
         if vals:
             med = sorted(vals)[len(vals) // 2]

@@ -1,0 +1,37 @@
+{
+  "experiment": "e01_oracle_gap",
+  "description": "R3 replication of e01 on a DIFFERENT attention shape. Single variable changed vs Qwen3-4B: head_dim 64 instead of 128, GQA ratio held at 4:1. If the large-bucket flatness gradient is an RPA tiling effect it should move; if it is universal it should not.",
+  "model": "ibm-granite/granite-3.1-2b-instruct",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "buckets": [
+    256,
+    512,
+    1024,
+    2048,
+    4096
+  ],
+  "fractions": [
+    1.0,
+    0.95,
+    0.85,
+    0.75,
+    0.65,
+    0.55
+  ],
+  "repeats": 5,
+  "output_len": 1,
+  "note_occupancy": "Occupancy is bounded to (0.5, 1.0] by the power-of-two ladder; B/2 is a bucket edge. Run e01 on the DEFAULT ladder \u2014 gap ladders give a far narrower range (gap=512 at B=4096 spans only 0.875-1.0).",
+  "warmup_discard": 2
+}

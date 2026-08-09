@@ -52,10 +52,10 @@ problem. The problems are elsewhere.
 
 | | Status | Consequence |
 |---|---|---|
-| **R1 units** | ❌ TTFT in ms, client-side | The strongest claim in the project is measured in the wrong units |
+| **R1 units** | ✅ **fixed** — headline from `vllm:request_prefill_time_seconds` | Client TTFT retained alongside as a proxy |
 | **R2 restart** | ❌ one restart, `e03 --restart-block 0` only | The 2048/4096 gradient (4.8%, 9.0%) is **unvalidated against restart drift** |
-| **R3 models** | ❌ Qwen3-4B only | The gradient may be architecture-specific |
-| **R4 intervals** | ❌ medians only | No CI on any reported number |
+| **R3 models** | ⚠️ **ready, not run** — granite config written | Needs one session; granite is untested on tpu-inference so the run is exploratory |
+| **R4 intervals** | ✅ **fixed** — `_stats.flatness_ci` bootstraps the statistic itself | e01 now prints `0.97 [0.94, 1.01]` and warns when a CI exceeds 0.5 |
 | **R5 mechanism** | ⚠️ plausible, untested | "RPA recovers padding at large shapes" is inference, not evidence |
 
 **The main claim (flatness ≈ 1.0 at ≤1024) is robust to all of this** — a −0.8%
@@ -95,7 +95,12 @@ tends to be made of. It is currently the *more interesting* finding and the
    time as the headline and keeps client TTFT alongside as a proxy, because a
    divergence between them is itself informative.
 4. **A second model** joins once the first is fully characterised — different
-   attention shape, not just a different size.
+   attention shape, not just a different size. Chosen and justified in
+   `notes/model_selection.md`: **`ibm-granite/granite-3.1-2b-instruct`**, a
+   single-variable change (head_dim 64 vs 128, GQA held at 4:1). Worth noting
+   that **every model on `tpu-inference`'s tested list is head_dim=128 with
+   GQA**, so replicating inside that list would vary parameter count and nothing
+   structural.
 
 ## What this does *not* change
 

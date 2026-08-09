@@ -10,6 +10,7 @@ before the build and ended up being the most valuable file in the repo.
 | File | What it is |
 |---|---|
 | `plan_v4.md` | **The execution plan. Start here.** Standalone. Written after the W0 gate closed. |
+| `model_selection.md` | Why the second model is granite-3.1-2b: `tpu-inference`'s tested list is attention-homogeneous (all head_dim=128 GQA), so replicating inside it would prove nothing. |
 | `solidity.md` | **The bar every result must clear before it enters the paper.** Five requirements, plus an honest audit of where session 2 falls short of them. |
 | `session_plan.md` | **Hardware runbook.** Session sizing, the two independent gates, compile budget, contingency, and the start/end checklist. Read with plan_v4. |
 | `plan_v3.md` | Superseded. Written before the gate ran; its three-level story and staircase experiment did not survive it. |

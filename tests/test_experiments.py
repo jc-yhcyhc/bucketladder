@@ -269,3 +269,78 @@ def test_e01_still_separates_hypotheses_on_server_timing(tmp_path):
         return pd.read_parquet(Path(entry["path"]) / "flatness.parquet")["flatness"].median()
 
     assert med([], tmp_path / "s") - med(["--mock-linear"], tmp_path / "l") > 0.5
+
+
+# --- R4: intervals, not points --------------------------------------------
+
+def test_bootstrap_ci_brackets_a_known_difference():
+    from _stats import bootstrap_ci
+    a = [10.0] * 20
+    b = [8.0] * 20
+    lo, hi = bootstrap_ci(a, b)
+    assert lo <= 2.0 <= hi
+
+
+def test_bootstrap_ci_requires_paired_lengths():
+    from _stats import bootstrap_ci
+    with pytest.raises(ValueError):
+        bootstrap_ci([1.0, 2.0], [1.0])
+
+
+def test_bootstrap_p_detects_no_difference():
+    from _stats import bootstrap_p
+    a = [10.0, 10.1, 9.9, 10.0, 10.2]
+    assert bootstrap_p(a, list(a)) > 0.5
+
+
+def test_bootstrap_p_detects_a_real_difference():
+    from _stats import bootstrap_p
+    assert bootstrap_p([10.0] * 10, [20.0] * 10) < 0.05
+
+
+def test_flatness_ci_is_tight_for_clean_staircase():
+    """Cost identical at both occupancies -> flatness 1.0 with a narrow CI."""
+    from _stats import flatness_ci
+    pt, lo, hi = flatness_ci([50.0, 50.1, 49.9] * 4, [50.0, 50.1, 49.9] * 4, 100, 200)
+    assert pt == pytest.approx(1.0, abs=0.05)
+    assert hi - lo < 0.2
+
+
+def test_flatness_ci_is_wide_when_underpowered():
+    """Noisy cells must produce an interval that says so, not a confident point."""
+    from _stats import flatness_ci
+    _, lo, hi = flatness_ci([10.0, 90.0, 30.0, 70.0], [50.0, 55.0, 45.0, 60.0], 100, 200)
+    assert hi - lo > 0.5
+
+
+def test_flatness_ci_matches_e01_point_estimate():
+    """The bootstrapped point must equal the statistic e01 reports."""
+    from _stats import flatness_ci
+    lo_vals, hi_vals = [25.0] * 5, [50.0] * 5
+    pt, _, _ = flatness_ci(lo_vals, hi_vals, 100, 200)
+    assert pt == pytest.approx(e01.flatness({100: 25.0, 200: 50.0}, 200), abs=1e-9)
+
+
+def test_fmt_ci_shape():
+    from _stats import fmt_ci
+    assert fmt_ci(0.97, 0.94, 1.01) == "0.97 [0.94, 1.01]"
+    assert "no CI" in fmt_ci(0.97, float("nan"), float("nan"))
+
+
+def test_e01_emits_intervals_and_flags_underpowered(tmp_path):
+    import pandas as pd
+    e01.main(["--config", str(E01_CFG), "--mock", "--results-root", str(tmp_path)])
+    entry = read_manifest(tmp_path)[0]
+    df = pd.read_parquet(Path(entry["path"]) / "flatness_ci.parquet")
+    assert {"flatness", "ci_lo", "ci_hi", "ci_width"} <= set(df.columns)
+    assert (df["ci_lo"] <= df["flatness"]).all() and (df["flatness"] <= df["ci_hi"]).all()
+
+
+# --- R3: the second model must actually differ ----------------------------
+
+def test_granite_config_differs_in_head_dim():
+    """Guards the reason granite was chosen. If someone swaps it for another
+    Qwen size, R3 becomes vacuous and this fails."""
+    cfg = json.loads((REPO / "configs" / "e01_marginal_cost_granite.json").read_text())
+    assert "granite" in cfg["model"]
+    assert cfg["model"] != json.loads(E01_CFG.read_text())["model"]
