@@ -146,9 +146,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[e01] bucket {bucket}: <2 usable occupancies, skipping", file=sys.stderr)
                 continue
             for L in lengths:
-                before = (mock_metrics.snapshot() if mock_metrics
-                          else scrape(args.base_url)) if use_metrics else None
+                before = None
                 for rep in range(-discard, repeats):
+                    # The metrics window must OPEN AFTER the warmup requests.
+                    # Scraping before them put the 7.5x first-request outlier
+                    # inside the delta, which is what produced nonsense
+                    # server-side flatness (2.79 at bucket 256) while the client
+                    # numbers were clean. Caught on hardware 2026-08-09.
+                    if rep == 0 and use_metrics:
+                        before = mock_metrics.snapshot() if mock_metrics else scrape(args.base_url)
                     if args.mock:
                         s = complete_mock(L, output_len, ladder=ladder,
                                           staircase=not args.mock_linear, seed=rep)
@@ -166,9 +172,13 @@ def main(argv: list[str] | None = None) -> int:
                     after = mock_metrics.snapshot() if mock_metrics else scrape(args.base_url)
                     d = delta(before, after)
                     pf = d.get("vllm:request_prefill_time_seconds")
+                    kv = d.get("vllm:request_prefill_kv_computed_tokens")
                     server_rows.append({
                         "bucket": bucket, "prompt_len": L, "occupancy": L / bucket,
                         "server_prefill_ms": pf["mean_ms"] if pf else float("nan"),
+                        # R5 mechanism: does the hardware compute the padded
+                        # shape or the true length?
+                        "kv_tokens_computed": kv["mean_s"] if kv else float("nan"),
                         "n_requests": pf["count"] if pf else 0,
                     })
         save_table(run, "samples", rows)
@@ -208,6 +218,17 @@ def main(argv: list[str] | None = None) -> int:
              "source": "server_prefill" if server_rows else "client_ttft"}
             for b in overall])
 
+        if server_rows and any(not math.isnan(r["kv_tokens_computed"]) for r in server_rows):
+            print("[e01] MECHANISM (R5): KV tokens actually computed vs true length vs bucket")
+            for r in sorted(server_rows, key=lambda x: (x["bucket"], x["prompt_len"]))[:24]:
+                if math.isnan(r["kv_tokens_computed"]):
+                    continue
+                kvt = r["kv_tokens_computed"]
+                verdict = ("== PADDED bucket" if abs(kvt - r["bucket"]) < 0.02 * r["bucket"]
+                           else "== TRUE length" if abs(kvt - r["prompt_len"]) < 0.02 * max(1, r["prompt_len"])
+                           else "neither")
+                print(f"[e01]   L={r['prompt_len']:>5} bucket={r['bucket']:>5}: "
+                      f"kv_computed={kvt:8.1f}  {verdict}")
         if server_rows:
             print("[e01] flatness from SERVER prefill time (headline) vs client TTFT (proxy):")
             for b in sorted(overall):

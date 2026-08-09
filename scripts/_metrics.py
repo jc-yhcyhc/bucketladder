@@ -47,6 +47,13 @@ TIMING_METRICS = (
     "vllm:time_to_first_token_seconds",
     "vllm:e2e_request_latency_seconds",
     "vllm:request_inference_time_seconds",
+    # NOT a time. Discovered on hardware 2026-08-09 and kept because it is the
+    # most direct mechanism evidence available (solidity.md R5): the count of KV
+    # tokens actually computed during prefill. If it tracks the PADDED bucket,
+    # the hardware is genuinely computing the padding; if it tracks the TRUE
+    # length, RPA skips the work and the cost must be elsewhere. Either answer
+    # converts "flatness is 0.97" from a correlation into a mechanism.
+    "vllm:request_prefill_kv_computed_tokens",
 )
 
 
@@ -129,7 +136,8 @@ def short(name: str) -> str:
     """`vllm:request_prefill_time_seconds` -> `prefill`, for readable tables."""
     n = name.removeprefix("vllm:").removesuffix("_seconds")
     n = n.removeprefix("request_").removesuffix("_time")
-    return {"time_to_first_token": "ttft", "e2e_request_latency": "e2e"}.get(n, n)
+    return {"time_to_first_token": "ttft", "e2e_request_latency": "e2e",
+            "prefill_kv_computed_tokens": "kv_tokens"}.get(n, n)
 
 
 def metrics_available(base_url: str) -> bool:

@@ -53,20 +53,21 @@ problem. The problems are elsewhere.
 | | Status | Consequence |
 |---|---|---|
 | **R1 units** | ✅ **fixed** — headline from `vllm:request_prefill_time_seconds` | Client TTFT retained alongside as a proxy |
-| **R2 restart** | ❌ one restart, `e03 --restart-block 0` only | The 2048/4096 gradient (4.8%, 9.0%) is **unvalidated against restart drift** |
-| **R3 models** | ⚠️ **ready, not run** — granite config written | Needs one session; granite is untested on tpu-inference so the run is exploratory |
+| **R2 restart** | ✅ **satisfied 2026-08-09** — two restarts agree within 0.02; across-restart CV 0.32% | The gradient is real, not drift |
+| **R3 models** | ✅ **satisfied** — SmolLM2 replication (granite failed TP=4 sharding) | **The staircase is architecture-dependent**: flatness 0.54 vs 0.81 at 4096 |
 | **R4 intervals** | ✅ **fixed** — `_stats.flatness_ci` bootstraps the statistic itself | e01 now prints `0.97 [0.94, 1.01]` and warns when a CI exceeds 0.5 |
-| **R5 mechanism** | ⚠️ plausible, untested | "RPA recovers padding at large shapes" is inference, not evidence |
+| **R5 mechanism** | ✅ **satisfied** — `prefill_kv_computed_tokens` == true length always | RPA *does* skip padding in attention; the cost is the dense path running on the padded shape |
 
 **The main claim (flatness ≈ 1.0 at ≤1024) is robust to all of this** — a −0.8%
 to 1.5% effect is indistinguishable from a perfect staircase under any plausible
 drift, and that is the load-bearing result. It survives.
 
-**The gradient is the fragile part.** 4.8% at 2048 and 9.0% at 4096 are large
-against a 1.34% within-run CV but have never been tested against restart-to-
-restart variation, which is exactly the noise that a small effect measured once
-tends to be made of. It is currently the *more interesting* finding and the
-*less trustworthy* one. It must not be written up until R2 is satisfied.
+~~**The gradient is the fragile part.**~~ **RESOLVED 2026-08-09.** Reproduced
+across two restarts to within 0.02 (across-restart CV 0.32%), and independently
+in session 2 on a different day with a different instrument. It is now among the
+better-supported numbers in the project — and R3 showed it is
+*architecture-dependent*, which turned it from a curiosity into the finding that
+scopes the paper's central claim.
 
 ---
 
