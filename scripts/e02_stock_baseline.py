@@ -55,6 +55,13 @@ from ladder import build_ladder  # noqa: E402
 # this constant once e00 has run in the same session.
 DEFAULT_REQUEST_LADDER = [8, 16, 32, 64, 128, 256]
 
+# WARMUP DISCARD. Measured on hardware 2026-08-09: the first request after a
+# server start costs ~116 ms against a ~15.4 ms steady state (7.5x), even though
+# vLLM has already logged "Application startup complete". Including it puts the
+# run-to-run CV at 97%; discarding it gives 1.7%, and discarding 5 gives 0.8%.
+# Every cell therefore fires `warmup_discard` unrecorded requests first.
+
+
 
 def concurrency_sweep(request_ladder: list[int], around: int = 8, span: int = 2) -> list[int]:
     """Concurrency levels bracketing a request-ladder edge.
@@ -98,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     prompt_len = config.get("prompt_len", 512)
     output_len = config.get("output_len", 8)
     repeats = config.get("repeats", 3)
+    discard = config.get("warmup_discard", 1)
     levels = config.get("concurrency") or concurrency_sweep(req_ladder, around=edge)
 
     run = start_run("e02_stock_baseline", config, results_root=args.results_root)
@@ -105,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rows: list[dict[str, Any]] = []
         for n in levels:
-            for rep in range(repeats):
+            for rep in range(-discard, repeats):
                 if args.mock:
                     # promote: batch padded up to the next request bucket, so
                     #          per-request cost jumps at the edge.
@@ -125,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
                         n, lambda i, rep=rep: complete(
                             args.base_url, config["model"], prompt_len, output_len,
                             seed=rep * 100 + i))
+                if rep < 0:
+                    continue  # warmup, not recorded
                 for i, s in enumerate(samples):
                     rows.append({"concurrency": n, "repeat": rep, "req_index": i,
                                  "at_edge": n == edge, **s.as_row()})

@@ -37,6 +37,13 @@ from _client import complete, complete_mock, summarise  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from ladder import build_ladder  # noqa: E402
 
+# WARMUP DISCARD. Measured on hardware 2026-08-09: the first request after a
+# server start costs ~116 ms against a ~15.4 ms steady state (7.5x), even though
+# vLLM has already logged "Application startup complete". Including it puts the
+# run-to-run CV at 97%; discarding it gives 1.7%, and discarding 5 gives 0.8%.
+# Every cell therefore fires `warmup_discard` unrecorded requests first.
+
+
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -57,13 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     probe_len = config.get("probe_len", 512)
     output_len = config.get("output_len", 1)
     repeats = config.get("repeats", 30)
+    discard = config.get("warmup_discard", 5)
 
     run = start_run("e03_noise_floor", config, results_root=args.results_root)
     status, err = "ok", None
     try:
         rows: list[dict[str, Any]] = []
         samples = []
-        for rep in range(repeats):
+        for rep in range(-discard, repeats):
             if args.mock:
                 # Vary the seed per restart block so the mock exhibits a
                 # genuine across-restart offset to detect.
@@ -71,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                                   seed=rep + 1000 * args.restart_block)
             else:
                 s = complete(args.base_url, config["model"], probe_len, output_len, seed=rep)
+            if rep < 0:
+                continue  # warmup, not recorded — see note at top of file
             samples.append(s)
             rows.append({"restart_block": args.restart_block, "repeat": rep, **s.as_row()})
         save_table(run, "samples", rows)

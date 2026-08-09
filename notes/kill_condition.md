@@ -111,8 +111,11 @@ Ranked by probability × cost:
    bins are over predicted *execution time* (straggler waste), not input length padded to a
    compiled shape — a different axis — but it is the nearest thing to a theoretical result on
    bin-based admission. **Read before writing the DP.**
-3. **Oracle headroom turns out small.** Untestable without hardware; the power-of-two default
-   ladder argues in our favour, but that is an argument, not a measurement.
+3. ~~**Oracle headroom turns out small.**~~ **RESOLVED 2026-08-09 on hardware.**
+   e01 measured flatness 0.97 — a request occupying 55% of its bucket costs the
+   same as one occupying 100%. Padding is fully paid; the headroom is real. The
+   measurement also answers "what survives RPA": nothing at ≤1024 tokens, ~20%
+   recovered at 4096.
 4. **Vidur already does this, or extends to it cheaply.** MLSys'24, <9% error. If it models
    compiled-shape ladders, the simulator contribution evaporates and the right move is to
    build on it. Not checked against its extension points.

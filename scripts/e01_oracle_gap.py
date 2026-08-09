@@ -46,6 +46,13 @@ from _client import Sample, complete, complete_mock, summarise  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from ladder import bucket_for, build_ladder  # noqa: E402
 
+# WARMUP DISCARD. Measured on hardware 2026-08-09: the first request after a
+# server start costs ~116 ms against a ~15.4 ms steady state (7.5x), even though
+# vLLM has already logged "Application startup complete". Including it puts the
+# run-to-run CV at 97%; discarding it gives 1.7%, and discarding 5 gives 0.8%.
+# Every cell therefore fires `warmup_discard` unrecorded requests first.
+
+
 # ACHIEVABLE OCCUPANCY IS BOUNDED BY THE LADDER ITSELF, discovered while
 # testing this script. On the power-of-two default ladder, bucket B spans
 # (B/2, B], so occupancy can only be varied over a 2x range — 0.5B and 0.25B
@@ -110,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     fractions = config.get("fractions", DEFAULT_FRACTIONS)
     repeats = config.get("repeats", 5)
     output_len = config.get("output_len", 1)
+    discard = config.get("warmup_discard", 2)
 
     run = start_run("e01_oracle_gap", config, results_root=args.results_root)
     status, err = "ok", None
@@ -121,12 +129,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[e01] bucket {bucket}: <2 usable occupancies, skipping", file=sys.stderr)
                 continue
             for L in lengths:
-                for rep in range(repeats):
+                for rep in range(-discard, repeats):
                     if args.mock:
                         s = complete_mock(L, output_len, ladder=ladder,
                                           staircase=not args.mock_linear, seed=rep)
                     else:
                         s = complete(args.base_url, config["model"], L, output_len, seed=rep)
+                    if rep < 0:
+                        continue  # warmup, not recorded
                     rows.append({
                         "bucket": bucket, "prompt_len": L, "occupancy": L / bucket,
                         "repeat": rep, **s.as_row(),

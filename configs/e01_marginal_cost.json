@@ -32,5 +32,6 @@
   ],
   "repeats": 5,
   "output_len": 1,
-  "note_occupancy": "Occupancy is bounded to (0.5, 1.0] by the power-of-two ladder; B/2 is a bucket edge. Run e01 on the DEFAULT ladder \u2014 gap ladders give a far narrower range (gap=512 at B=4096 spans only 0.875-1.0)."
+  "note_occupancy": "Occupancy is bounded to (0.5, 1.0] by the power-of-two ladder; B/2 is a bucket edge. Run e01 on the DEFAULT ladder \u2014 gap ladders give a far narrower range (gap=512 at B=4096 spans only 0.875-1.0).",
+  "warmup_discard": 2
 }
