@@ -72,9 +72,16 @@ log "Step 2: python environment"
 if [[ "$DRY_RUN" != "true" ]]; then
   sudo chown -R "$(whoami)" /usr/local/lib /usr/local/bin /usr/local/share 2>/dev/null || true
   if [[ ! -d "$HOME/venv" ]]; then
+    # MUST be python3.11, not `python3`. The image's default python3 is 3.10,
+    # and tpu-inference pins jax>=0.10 which requires >=3.11 — a 3.10 venv
+    # fails with "No matching distribution found for jax==0.10.2", which reads
+    # like a missing index rather than a Python-version problem. Verified on
+    # v5litepod-4 / v2-alpha-tpuv5-lite, 2026-08-09.
+    PY311=$(command -v python3.11 || echo python3)
+    log "  building venv with $PY311 ($("$PY311" -V 2>&1))"
     # --without-pip + get-pip.py because the system pip imports distutils and
     # python3-venv's ensurepip is unreliable on this image.
-    python3 -m venv --without-pip "$HOME/venv"
+    "$PY311" -m venv --without-pip "$HOME/venv"
     curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
     "$HOME/venv/bin/python" /tmp/get-pip.py -q
   fi
@@ -88,6 +95,16 @@ log "Step 3: tpu-inference + vLLM"
 PKG="tpu-inference"
 [[ -n "$TPU_INFERENCE_VERSION" ]] && PKG="tpu-inference==${TPU_INFERENCE_VERSION}"
 run "$HOME/venv/bin/python" -m pip install -q "$PKG"
+# tpu-inference imports vllm but does NOT declare it as a dependency, so a bare
+# `pip install tpu-inference` yields ModuleNotFoundError: No module named 'vllm'
+# at import time. Install the matching version explicitly. Verified 2026-08-09:
+# tpu_inference 0.25.0 pairs with vllm 0.25.0.
+TI_VER=$("$HOME/venv/bin/python" -m pip show tpu_inference 2>/dev/null | awk '/^Version:/{print $2}')
+if [[ -n "$TI_VER" ]]; then
+  run "$HOME/venv/bin/python" -m pip install -q "vllm==${TI_VER}"
+else
+  run "$HOME/venv/bin/python" -m pip install -q vllm
+fi
 run "$HOME/venv/bin/python" -m pip install -q pandas pyarrow
 
 if [[ "$DRY_RUN" != "true" ]]; then
@@ -132,8 +149,16 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
-export VLLM_TPU_BUCKET_PADDING_GAP
-log "  VLLM_TPU_BUCKET_PADDING_GAP='${VLLM_TPU_BUCKET_PADDING_GAP}' (empty = exponential default)"
+# MUST be unset, not empty, for the default power-of-two ladder: vLLM does
+# int(os.environ["VLLM_TPU_BUCKET_PADDING_GAP"]) unconditionally when the var is
+# present, so "" kills the engine. Verified on hardware 2026-08-09.
+if [[ -n "${VLLM_TPU_BUCKET_PADDING_GAP:-}" ]]; then
+  export VLLM_TPU_BUCKET_PADDING_GAP
+  log "  VLLM_TPU_BUCKET_PADDING_GAP=$VLLM_TPU_BUCKET_PADDING_GAP (linear ladder)"
+else
+  unset VLLM_TPU_BUCKET_PADDING_GAP
+  log "  VLLM_TPU_BUCKET_PADDING_GAP unset (default exponential ladder)"
+fi
 log "  XLA warmup is slow: 5-30 min for the first bucket, 30-120 s per additional one."
 
 "${SERVE[@]}" 2>&1 | tee "$WARMUP_LOG" &

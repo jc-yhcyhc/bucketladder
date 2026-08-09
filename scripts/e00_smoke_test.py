@@ -54,23 +54,48 @@ from _common import (  # noqa: E402
 )
 from ladder import build_ladder  # noqa: E402
 
-# vLLM logs compiled shapes during warmup. Both spellings seen in the wild;
-# the parser is deliberately permissive because this is exactly the kind of
-# thing that silently changes between releases.
-_BUCKET_PATTERNS = [
-    re.compile(r"[Cc]ompil\w*.*?num_tokens[=: ]+(\d+)"),
-    re.compile(r"[Ww]arm(?:ing )?up.*?shape[=: ]+\((\d+)"),
-    re.compile(r"bucket[=: ]+(\d+)"),
-]
+# GROUND TRUTH, captured 2026-08-09 on v5litepod-4 / tpu_inference 0.25.0 /
+# vllm 0.25.0 (tests/fixtures/real_*.log). vLLM states the ladder outright:
+#
+#   INFO ... [utils.py:210] Prepared token paddings: [16, 32, ..., 8192]
+#   INFO ... [utils.py:156] Prepared request paddings: [8, 16, 32, 64, 128, 256]
+#   INFO ... [utils.py:175] Prepared attn request paddings: [256]
+#
+# The earlier guessed patterns ("Compiling graph for num_tokens=N") appear
+# nowhere; per-shape compiles are logged as
+#   [compilation_manager.py:133] Precompile worker0 backbone --> {'num_tokens': 16, ...}
+# which is a usable fallback but noisier — several non-ladder axes (sample,
+# compute_logits, gather_logprobs) use the same line shape.
+_PADDINGS_RE = re.compile(r"Prepared (token|request|attn request) paddings:\s*\[([0-9,\s]*)\]")
+_PRECOMPILE_BACKBONE_RE = re.compile(r"Precompile \w+ backbone --> \{[^}]*'num_tokens':\s*(\d+)")
+
+
+def parse_paddings(lines: Iterable[str]) -> dict[str, list[int]]:
+    """Extract every 'Prepared ... paddings' ladder vLLM announces.
+
+    Returns keys 'token' (L1/L2 sequence ladder), 'request' (the BATCH-size
+    ladder — a second axis the plan had not accounted for), and 'attn request'.
+    """
+    out: dict[str, list[int]] = {}
+    for line in lines:
+        m = _PADDINGS_RE.search(line)
+        if m:
+            vals = [int(x) for x in m.group(2).split(",") if x.strip()]
+            out[m.group(1)] = vals
+    return out
 
 
 def parse_warmup_log(lines: Iterable[str]) -> list[int]:
-    """Extract compiled bucket sizes from a vLLM TPU warmup log."""
-    found: set[int] = set()
-    for line in lines:
-        for pat in _BUCKET_PATTERNS:
-            for m in pat.finditer(line):
-                found.add(int(m.group(1)))
+    """The compiled token-shape ladder — the paper's independent variable.
+
+    Prefers vLLM's explicit 'Prepared token paddings' line; falls back to the
+    per-shape backbone compile lines if a future release drops it.
+    """
+    lines = list(lines)
+    paddings = parse_paddings(lines)
+    if "token" in paddings:
+        return sorted(set(paddings["token"]))
+    found = {int(m.group(1)) for line in lines for m in [_PRECOMPILE_BACKBONE_RE.search(line)] if m}
     return sorted(found)
 
 
@@ -83,11 +108,21 @@ def mock_warmup_log(max_model_len: int, padding_gap: Any) -> list[str]:
     records which mode produced it.
     """
     ladder = build_ladder(max_model_len, padding_gap)
-    lines = ["INFO vllm.worker: starting XLA warmup"]
+    lines = ["INFO 08-09 00:00:00 [__init__.py:76] TPU info: tpu_type=v5litepod-4"]
+    lines.append(
+        "(EngineCore pid=1) INFO 08-09 00:00:01 [utils.py:210] "
+        f"Prepared token paddings: [{', '.join(str(b) for b in ladder)}]"
+    )
+    lines.append(
+        "(EngineCore pid=1) INFO 08-09 00:00:01 [utils.py:156] "
+        "Prepared request paddings: [8, 16, 32, 64, 128, 256]"
+    )
     lines += [
-        f"INFO vllm.worker: Compiling graph for num_tokens={b} (batch=1)" for b in ladder
+        "(EngineCore pid=1) INFO 08-09 00:00:02 [compilation_manager.py:133] "
+        f"Precompile worker0 backbone --> {{'num_tokens': {b}, 'num_reqs': 8}}"
+        for b in ladder
     ]
-    lines.append("INFO vllm.worker: warmup complete")
+    lines.append("(APIServer pid=1) INFO:     Application startup complete.")
     return lines
 
 
@@ -109,7 +144,8 @@ _VLLM_ALIASES: dict[str, tuple[str, ...]] = {
     "tensor_parallel_size": ("tensor_parallel_size",),
     "speculative_model": ("speculative_model", "speculative_config"),
     "kv_cache_dtype": ("kv_cache_dtype",),
-    "max_model_len": ("max_model_len",),
+    # vLLM 0.25 logs this as max_seq_len in the engine-config line.
+    "max_model_len": ("max_model_len", "max_seq_len"),
     # Environment variables — vLLM does not echo these into the engine config
     # line, so they are structurally unverifiable from the log. Reported as
     # such rather than quietly passed.
@@ -253,7 +289,17 @@ def main(argv: list[str] | None = None) -> int:
             problems.append(f"controlled-variable mismatch: {[r['variable'] for r in bad]}")
 
         (run.dir / "ladder_default.json").write_text(
-            json.dumps({"mode": mode, "ladder": observed or predicted}, indent=2) + "\n"
+            json.dumps(
+                {
+                    "mode": mode,
+                    "ladder": observed or predicted,
+                    # Second axis, discovered on hardware 2026-08-09: vLLM also
+                    # pads the BATCH dimension to its own ladder.
+                    "paddings": parse_paddings(log_lines),
+                },
+                indent=2,
+            )
+            + "\n"
         )
 
         if problems:

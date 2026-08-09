@@ -24,24 +24,29 @@ BAD_CFG = REPO / "configs" / "e00_BAD_apc_unrecorded.json"
 
 # --- warmup log parsing ----------------------------------------------------
 
-def test_parses_compiling_lines():
+def test_parses_the_prepared_paddings_line():
+    """The real format, per hardware capture 2026-08-09."""
+    lines = ["(EngineCore pid=1) INFO [utils.py:210] Prepared token paddings: [16, 32, 64]"]
+    assert e00.parse_warmup_log(lines) == [16, 32, 64]
+
+
+def test_falls_back_to_backbone_precompiles():
+    """If a future vLLM drops the summary line, per-shape compiles still work."""
     lines = [
-        "INFO vllm.worker: starting XLA warmup",
-        "INFO vllm.worker: Compiling graph for num_tokens=16 (batch=1)",
-        "INFO vllm.worker: Compiling graph for num_tokens=32 (batch=1)",
-        "INFO vllm.worker: warmup complete",
+        "INFO [compilation_manager.py:133] Precompile worker0 backbone --> {'num_tokens': 64, 'num_reqs': 8}",
+        "INFO [compilation_manager.py:133] Precompile worker0 backbone --> {'num_tokens': 16, 'num_reqs': 8}",
+        # Non-ladder axes must NOT be picked up:
+        "INFO [compilation_manager.py:133] Precompile worker0 sample --> {'num_reqs': 8}",
+    ]
+    assert e00.parse_warmup_log(lines) == [16, 64]
+
+
+def test_summary_line_wins_over_precompiles():
+    lines = [
+        "INFO [utils.py:210] Prepared token paddings: [16, 32]",
+        "INFO [compilation_manager.py:133] Precompile worker0 backbone --> {'num_tokens': 999}",
     ]
     assert e00.parse_warmup_log(lines) == [16, 32]
-
-
-def test_parses_alternate_spellings():
-    assert e00.parse_warmup_log(["Warming up shape=(128, 4)"]) == [128]
-    assert e00.parse_warmup_log(["... bucket=256 ..."]) == [256]
-
-
-def test_parser_dedupes_and_sorts():
-    lines = ["num_tokens=64 compiling", "compiling num_tokens=16", "Compiling num_tokens=64"]
-    assert e00.parse_warmup_log(lines) == [16, 64]
 
 
 def test_parser_returns_empty_on_junk():
@@ -150,13 +155,12 @@ def test_captured_log_mode(tmp_path):
     assert read_manifest(tmp_path / "r")[0]["status"] == "ok"
 
 
-# --- against a realistic vLLM log fixture ---------------------------------
-# tests/fixtures/vllm_tpu_warmup.log is hand-written to match real vLLM TPU
-# output. It is NOT ground truth — only a run on real hardware can confirm the
-# format. It exists so the parsers are exercised against something that looks
-# like reality rather than only against our own mock.
+# --- fixture section, now backed by REAL captured output ------------------
+# The previous hand-written fixture guessed the log format and guessed wrong;
+# it was deleted rather than kept, because a fictional fixture sitting beside
+# real logs invites validating against the fiction.
 
-FIXTURE = REPO / "tests" / "fixtures" / "vllm_tpu_warmup.log"
+FIXTURE = REPO / "tests" / "fixtures" / "real_v5e4_default.log"
 
 
 def fixture_lines():
@@ -170,11 +174,10 @@ def test_fixture_ladder_parses_to_powers_of_two():
 def test_fixture_engine_config_parses():
     cfg = e00.parse_server_config(fixture_lines())
     assert cfg["tensor_parallel_size"] == 4
-    assert cfg["max_model_len"] == 8192
+    assert cfg["max_seq_len"] == 8192
     assert cfg["enable_prefix_caching"] is False
-    assert cfg["chunked_prefill_enabled"] is True
-    assert cfg["max_num_batched_tokens"] == 8192
-    assert cfg["kv_cache_dtype"] == "bfloat16"
+    assert cfg["enable_chunked_prefill"] is True
+    assert cfg["kv_cache_dtype"] == "auto"
     assert cfg["speculative_config"] is None
 
 
@@ -196,10 +199,9 @@ def test_audit_against_fixture_matches_shipped_config():
 
     for name in (
         "tensor_parallel_size",
-        "max_model_len",
+        "max_model_len",            # via the max_seq_len alias
         "enable_prefix_caching",
-        "enable_chunked_prefill",   # via the chunked_prefill_enabled alias
-        "max_num_batched_tokens",
+        "enable_chunked_prefill",
         "kv_cache_dtype",
         "speculative_model",        # via the speculative_config alias
     ):
@@ -209,6 +211,8 @@ def test_audit_against_fixture_matches_shipped_config():
     # reported as such, never silently passed.
     assert rows["VLLM_TPU_BUCKET_PADDING_GAP"] == "unverified"
     assert rows["XLA_FLAGS"] == "unverified"
+    # vLLM 0.25 does not echo this one either — a known hole, named not hidden.
+    assert rows["max_num_batched_tokens"] == "unverified"
 
 
 def test_audit_catches_prefix_caching_left_on():
@@ -239,3 +243,68 @@ def test_end_to_end_on_fixture_passes(tmp_path, capsys):
     assert "GATE PASSED" in out
     assert "unverifiable against server" in out  # the two env vars
     assert read_manifest(tmp_path)[0]["status"] == "ok"
+
+
+# --- GROUND TRUTH: real logs captured on hardware 2026-08-09 ---------------
+# v5litepod-4 (us-west4-a), tpu_inference 0.25.0, vllm 0.25.0, Qwen3-4B.
+# These are the real thing, not hand-written. If a vLLM upgrade changes the log
+# format these fail, which is exactly what we want to hear about.
+
+REAL_DEFAULT = REPO / "tests" / "fixtures" / "real_v5e4_default.log"
+REAL_GAP512 = REPO / "tests" / "fixtures" / "real_v5e4_gap512.log"
+
+
+def test_real_default_ladder_matches_prediction():
+    """The load-bearing check: hardware emitted exactly exponential_ladder(8192)."""
+    obs = e00.parse_warmup_log(REAL_DEFAULT.read_text().splitlines())
+    assert obs == build_ladder(8192, "")
+    assert obs == [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+
+
+def test_real_gap512_ladder_matches_prediction():
+    """VLLM_TPU_BUCKET_PADDING_GAP=512 produced exactly gap_ladder(8192, 512)."""
+    obs = e00.parse_warmup_log(REAL_GAP512.read_text().splitlines())
+    assert obs == build_ladder(8192, 512)
+    assert len(obs) == 21
+
+
+def test_real_logs_expose_the_batch_axis_too():
+    """Discovered on hardware: vLLM pads the BATCH dimension to its own ladder,
+    a second axis the plan had not accounted for."""
+    for f in (REAL_DEFAULT, REAL_GAP512):
+        p = e00.parse_paddings(f.read_text().splitlines())
+        assert p["request"] == [8, 16, 32, 64, 128, 256], f
+        assert p["attn request"] == [256], f
+        assert "token" in p
+
+
+def test_gap_changes_token_ladder_but_not_batch_ladder():
+    """The env var moves the token axis only — the request ladder is identical
+    across both runs. Relevant to how the ladder can actually be manipulated."""
+    a = e00.parse_paddings(REAL_DEFAULT.read_text().splitlines())
+    b = e00.parse_paddings(REAL_GAP512.read_text().splitlines())
+    assert a["token"] != b["token"]
+    assert a["request"] == b["request"]
+
+
+def test_real_engine_config_parses_and_confirms_chunked_prefill():
+    """Confirms on hardware the finding that killed L1."""
+    cfg = e00.parse_server_config(REAL_DEFAULT.read_text().splitlines())
+    assert cfg["enable_chunked_prefill"] is True
+    assert cfg["enable_prefix_caching"] is False
+    assert cfg["tensor_parallel_size"] == 4
+    assert cfg["max_seq_len"] == 8192
+
+
+def test_real_logs_pass_the_gate(tmp_path):
+    for cfg, log in ((DEFAULT_CFG, REAL_DEFAULT), (GAP_CFG, REAL_GAP512)):
+        rc = e00.main(["--config", str(cfg), "--warmup-log", str(log),
+                       "--results-root", str(tmp_path / log.stem)])
+        assert rc == 0, log
+
+
+def test_guessed_pattern_is_gone():
+    """The old assumed format appears nowhere in real output. Pinned so nobody
+    reintroduces it from memory."""
+    for f in (REAL_DEFAULT, REAL_GAP512):
+        assert "Compiling graph for num_tokens" not in f.read_text()
