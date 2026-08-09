@@ -164,10 +164,20 @@ preflight() {
 
   [[ -n "${PROJECT:-}" ]] || { warn "PROJECT is empty; run: gcloud config set project <id>"; problems=$((problems+1)); }
 
-  if [[ -z "${HF_TOKEN:-}" && ! -f "$HOME/.cache/huggingface/token" ]]; then
-    warn "no HF_TOKEN and no ~/.cache/huggingface/token — the gated meta-llama"
-    warn "  download will fail on the VM. Request access first (prerequisite 2)."
+  # Only gated repos need a token. Session 1 uses an ungated model precisely so
+  # it is not blocked on an approval that takes hours.
+  case "$MODEL" in
+    meta-llama/*|google/gemma*|mistralai/Mistral-7B-Instruct-v0.1) MODEL_GATED=true ;;
+    *) MODEL_GATED=false ;;
+  esac
+  if [[ "$MODEL_GATED" == "true" && -z "${HF_TOKEN:-}" && ! -f "$HOME/.cache/huggingface/token" ]]; then
+    warn "'$MODEL' is gated and no HF_TOKEN / ~/.cache/huggingface/token found."
+    warn "  The download will fail on the VM after billing has started."
+    warn "  For session 1 use an ungated model instead:"
+    warn "    MODEL=Qwen/Qwen3-4B ./infra/create_tpu.sh"
     problems=$((problems+1))
+  elif [[ "$MODEL_GATED" != "true" ]]; then
+    log "  ok  model '$MODEL' is ungated — no HF token required"
   fi
 
   if have_gcloud && [[ -n "${PROJECT:-}" ]]; then
