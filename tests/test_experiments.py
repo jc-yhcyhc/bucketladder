@@ -166,3 +166,106 @@ def test_new_scripts_honour_the_controlled_var_contract(mod, cfg, tmp_path):
     with pytest.raises(ControlledVarError):
         mod.main(["--config", str(p), "--mock", "--results-root", str(tmp_path / "r")])
     assert read_manifest(tmp_path / "r") == []
+
+
+# --- server-side metrics: the R1 fix --------------------------------------
+
+REAL_PROM = """\
+# HELP vllm:request_prefill_time_seconds Prefill time
+# TYPE vllm:request_prefill_time_seconds histogram
+vllm:request_prefill_time_seconds_bucket{le="0.01",model_name="Qwen/Qwen3-4B"} 3
+vllm:request_prefill_time_seconds_sum{model_name="Qwen/Qwen3-4B"} 1.5
+vllm:request_prefill_time_seconds_count{model_name="Qwen/Qwen3-4B"} 100
+vllm:request_queue_time_seconds_sum{model_name="Qwen/Qwen3-4B"} 0.25
+vllm:request_queue_time_seconds_count{model_name="Qwen/Qwen3-4B"} 100
+vllm:num_requests_running{model_name="Qwen/Qwen3-4B"} 2.0
+"""
+
+
+def test_parses_prometheus_histograms():
+    import _metrics
+    snap = _metrics.parse_prometheus(REAL_PROM)
+    assert snap["vllm:request_prefill_time_seconds"].count == 100
+    assert snap["vllm:request_prefill_time_seconds"].mean() == pytest.approx(0.015)
+    # gauges and _bucket lines must not be mistaken for histograms
+    assert "vllm:num_requests_running" not in snap
+
+
+def test_delta_gives_mean_over_exactly_the_new_requests():
+    """Counters are cumulative; only the delta describes our own requests."""
+    import _metrics
+    before = _metrics.parse_prometheus(REAL_PROM)
+    after = _metrics.parse_prometheus(
+        REAL_PROM.replace("_sum{model_name=\"Qwen/Qwen3-4B\"} 1.5", "_sum{model_name=\"Qwen/Qwen3-4B\"} 2.5")
+                 .replace("time_seconds_count{model_name=\"Qwen/Qwen3-4B\"} 100",
+                          "time_seconds_count{model_name=\"Qwen/Qwen3-4B\"} 110"))
+    d = _metrics.delta(before, after)
+    pf = d["vllm:request_prefill_time_seconds"]
+    assert pf["count"] == 10
+    assert pf["mean_ms"] == pytest.approx(100.0)  # 1.0 s over 10 requests
+
+
+def test_delta_omits_metrics_with_no_new_requests():
+    import _metrics
+    snap = _metrics.parse_prometheus(REAL_PROM)
+    assert _metrics.delta(snap, snap) == {}
+
+
+def test_short_names_are_readable():
+    import _metrics
+    assert _metrics.short("vllm:request_prefill_time_seconds") == "prefill"
+    assert _metrics.short("vllm:request_queue_time_seconds") == "queue"
+    assert _metrics.short("vllm:time_to_first_token_seconds") == "ttft"
+
+
+# --- e02 redesign: the 2x2 must reach opposite verdicts --------------------
+
+def test_e02_verdict_separates_promote_from_queue(tmp_path):
+    """The whole point of the redesign. Client TTFT could not do this."""
+    import pandas as pd
+
+    def verdict(policy, root):
+        assert e02.main(["--config", str(E02_CFG), "--mock", "--mock-policy", policy,
+                         "--results-root", str(root)]) == 0
+        entry = read_manifest(root)[0]
+        return pd.read_parquet(Path(entry["path"]) / "stock_verdict.parquet").iloc[0]
+
+    p = verdict("promote", tmp_path / "p")
+    q = verdict("queue", tmp_path / "q")
+
+    assert "promote" in p["verdict"], p["verdict"]
+    assert "queue" in q["verdict"], q["verdict"]
+    # promote pays in PREFILL and does not wait; queue is the mirror image.
+    assert p["d_prefill_ms"] > p["d_queue_ms"]
+    assert q["d_queue_ms"] > q["d_prefill_ms"]
+
+
+def test_e02_records_server_timing_table(tmp_path):
+    import pandas as pd
+    e02.main(["--config", str(E02_CFG), "--mock", "--results-root", str(tmp_path)])
+    entry = read_manifest(tmp_path)[0]
+    df = pd.read_parquet(Path(entry["path"]) / "server_timing.parquet")
+    assert {"queue_ms", "prefill_ms", "concurrency", "padded_to"} <= set(df.columns)
+
+
+# --- e01: headline must come from server timing, not the client -----------
+
+def test_e01_headline_uses_server_prefill(tmp_path):
+    import pandas as pd
+    e01.main(["--config", str(E01_CFG), "--mock", "--results-root", str(tmp_path)])
+    entry = read_manifest(tmp_path)[0]
+    df = pd.read_parquet(Path(entry["path"]) / "flatness.parquet")
+    assert (df["source"] == "server_prefill").all()
+    # the client proxy is retained for comparison, not discarded
+    assert "flatness_client_ttft" in df.columns
+
+
+def test_e01_still_separates_hypotheses_on_server_timing(tmp_path):
+    import pandas as pd
+
+    def med(args, root):
+        e01.main(["--config", str(E01_CFG), "--mock", *args, "--results-root", str(root)])
+        entry = read_manifest(root)[0]
+        return pd.read_parquet(Path(entry["path"]) / "flatness.parquet")["flatness"].median()
+
+    assert med([], tmp_path / "s") - med(["--mock-linear"], tmp_path / "l") > 0.5

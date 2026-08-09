@@ -18,17 +18,28 @@ both session-1 runs). That makes the request ladder the interesting axis for
 admission: with 9 concurrent requests, does the server pad the batch to 16 and
 eat the waste, or hold requests back to fill 8 exactly?
 
-Method: sweep concurrency across a request-ladder edge (e.g. 6,7,8,9,10,12,16)
-at fixed prompt length, and watch what happens to TTFT.
+REDESIGNED 2026-08-09 after the first version came back inconclusive. That
+version swept concurrency and watched client TTFT, which **conflates queueing
+with batch padding** — at n>8 some requests are simply waiting, and TTFT cannot
+say which. Predictably the largest step landed where no edge was crossed, and
+the step that did cross 16->32 came back *faster*.
 
-  A step up in TTFT exactly at the edge  -> the batch is padded up; the server
-                                            already pays promotion cost, and the
-                                            promote-vs-wait decision is being
-                                            made implicitly.
-  A smooth curve through the edge        -> the batch axis is not costing
-                                            anything here; look elsewhere.
-  A queueing knee (TTFT grows with n)    -> the server waits; `queue` is the
-                                            stock policy and `promote` is ours.
+The fix is not more samples, it is a better observable. vLLM already separates
+the two server-side:
+
+    vllm:request_queue_time_seconds     arrival -> first scheduled  (WAITING)
+    vllm:request_prefill_time_seconds   prefill phase duration      (COMPUTING)
+
+So the confounded question splits into two clean ones, and the answer is a
+2x2 rather than a judgement call:
+
+  prefill UP at edge, queue flat   -> the batch is padded and the server PAYS.
+                                      Stock behaves like `promote`.
+  queue UP, prefill flat           -> the server WAITS to fill the batch.
+                                      Stock behaves like `queue`; promote is ours.
+  both up                          -> mixed; report both and quantify.
+  both flat                        -> crossing the edge costs nothing, and the
+                                      batch axis is not where the paper lives.
 
 Usage:
   python scripts/e02_stock_baseline.py --config configs/e02_stock_baseline.json --mock
@@ -48,6 +59,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _client import Sample, complete, complete_mock, summarise  # noqa: E402
+from _metrics import MockMetrics, delta, metrics_available, scrape, short  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from ladder import build_ladder  # noqa: E402
 
@@ -111,9 +123,19 @@ def main(argv: list[str] | None = None) -> int:
     run = start_run("e02_stock_baseline", config, results_root=args.results_root)
     status, err = "ok", None
     try:
+        mock_metrics = MockMetrics() if args.mock else None
+        use_metrics = bool(mock_metrics) or metrics_available(args.base_url)
+        if not use_metrics:
+            print("[e02] WARNING /metrics unavailable — falling back to client TTFT, "
+                  "which CANNOT separate queueing from padding. Result will be "
+                  "inconclusive by construction.", file=sys.stderr)
+
         rows: list[dict[str, Any]] = []
+        server_rows: list[dict[str, Any]] = []
         for n in levels:
             for rep in range(-discard, repeats):
+                before = (mock_metrics.snapshot() if mock_metrics
+                          else scrape(args.base_url)) if use_metrics else None
                 if args.mock:
                     # promote: batch padded up to the next request bucket, so
                     #          per-request cost jumps at the edge.
@@ -121,11 +143,17 @@ def main(argv: list[str] | None = None) -> int:
                     nxt = next((b for b in req_ladder if b >= n), req_ladder[-1])
                     def one(i, n=n, rep=rep, nxt=nxt):
                         s = complete_mock(prompt_len, output_len, ladder=ladder, seed=rep * 100 + i)
+                        base = s.ttft_ms
                         if args.mock_policy == "promote":
-                            s.ttft_ms *= nxt / max(1, min(n, nxt))
+                            # padded batch -> PREFILL grows, no waiting
+                            prefill = base * nxt / max(1, min(n, nxt))
+                            queue = base * 0.05
                         else:
-                            waves = math.ceil(n / req_ladder[0])
-                            s.ttft_ms *= waves
+                            # server waits for a full batch -> QUEUE grows
+                            prefill = base
+                            queue = base * (math.ceil(n / req_ladder[0]) - 1) + base * 0.05
+                        mock_metrics.record(prefill / 1000.0, queue / 1000.0)
+                        s.ttft_ms = prefill + queue
                         return s
                     samples = fire_concurrent(n, one)
                 else:
@@ -133,6 +161,16 @@ def main(argv: list[str] | None = None) -> int:
                         n, lambda i, rep=rep: complete(
                             args.base_url, config["model"], prompt_len, output_len,
                             seed=rep * 100 + i))
+                if use_metrics:
+                    after = mock_metrics.snapshot() if mock_metrics else scrape(args.base_url)
+                    d = delta(before, after)
+                    if rep >= 0:
+                        server_rows.append({
+                            "concurrency": n, "repeat": rep,
+                            "padded_to": next((b for b in req_ladder if b >= n), None),
+                            **{f"{short(k)}_ms": v["mean_ms"] for k, v in d.items()},
+                            "n_requests_seen": max((v["count"] for v in d.values()), default=0),
+                        })
                 if rep < 0:
                     continue  # warmup, not recorded
                 for i, s in enumerate(samples):
@@ -158,6 +196,34 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[e02]   n={s['concurrency']:>3} -> batch {s['padded_to']:>3}: "
                   f"TTFT median {s['median']:.1f} ms{jump}{edge_mark}")
             prev = s["median"]
+
+        if server_rows:
+            save_table(run, "server_timing", server_rows)
+            print("[e02] --- SERVER-SIDE (the measurement that separates the two) ---")
+            base_q = base_p = None
+            for n in levels:
+                sub = [r for r in server_rows if r["concurrency"] == n]
+                if not sub:
+                    continue
+                q = sorted(r.get("queue_ms", float("nan")) for r in sub)[len(sub) // 2]
+                pf = sorted(r.get("prefill_ms", float("nan")) for r in sub)[len(sub) // 2]
+                if base_q is None:
+                    base_q, base_p = q, pf
+                print(f"[e02]   n={n:>3} -> batch {sub[0]['padded_to']:>3}: "
+                      f"queue {q:7.1f} ms ({q - base_q:+7.1f})   "
+                      f"prefill {pf:7.1f} ms ({pf - base_p:+7.1f})")
+            lo = [r for r in server_rows if r["concurrency"] == min(levels)]
+            hi = [r for r in server_rows if r["concurrency"] == max(levels)]
+            if lo and hi:
+                dq = (sum(r.get("queue_ms", 0) for r in hi) / len(hi)
+                      - sum(r.get("queue_ms", 0) for r in lo) / len(lo))
+                dp = (sum(r.get("prefill_ms", 0) for r in hi) / len(hi)
+                      - sum(r.get("prefill_ms", 0) for r in lo) / len(lo))
+                verdict = ("promote (server pays padding)" if dp > dq else
+                           "queue (server waits)" if dq > dp else "ambiguous")
+                print(f"[e02] VERDICT: dqueue={dq:+.1f} ms  dprefill={dp:+.1f} ms  -> stock looks like {verdict!r}")
+                save_table(run, "stock_verdict", [{"d_queue_ms": dq, "d_prefill_ms": dp,
+                                                   "verdict": verdict}])
 
         # Largest relative step, and whether it sits on a ladder edge.
         # An edge is CROSSED when the padded batch size changes between two

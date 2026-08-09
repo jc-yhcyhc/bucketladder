@@ -93,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[e03]   median={st['median']:.2f} ms  mean={st['mean']:.2f}  sd={st['stdev']:.2f}")
         print(f"[e03]   WITHIN-RUN CV = {st['cv'] * 100:.2f}%")
         print(f"[e03]   -> a difference is only credible above ~{3 * st['cv'] * 100:.1f}% (3x CV)")
+        if args.restart_block == 0:
+            print("[e03] NOTE this is the WITHIN-RUN floor only. solidity.md R2 requires the")
+            print("[e03]   ACROSS-RESTART floor before any headline effect is believed:")
+            print("[e03]   restart the server and re-run with --restart-block 1, then 2,")
+            print("[e03]   and combine with across_restart_cv().")
         print(f"[e03] run_id={run.run_id}")
         return 0
     except Exception as exc:  # noqa: BLE001

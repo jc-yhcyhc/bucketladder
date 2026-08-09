@@ -77,9 +77,23 @@ tends to be made of. It is currently the *more interesting* finding and the
    XLA warmup.
 2. **Any headline effect is measured twice, in different restarts**, before it
    is believed.
-3. **Server-side timing is required** for cost claims. vLLM's metrics endpoint
-   or engine logs, not the client's stopwatch — to be identified before the next
-   session.
+3. **Server-side timing is required** for cost claims, and the source is now
+   identified and wired in: `scripts/_metrics.py` scrapes vLLM's Prometheus
+   endpoint and takes `_sum`/`_count` **deltas** around each cell, giving the
+   exact mean over precisely the requests we issued.
+
+   ```
+   vllm:request_prefill_time_seconds   prefill duration   -> e01's headline
+   vllm:request_queue_time_seconds     arrival->scheduled -> resolves e02
+   vllm:request_decode_time_seconds
+   vllm:e2e_request_latency_seconds
+   ```
+
+   `request_queue_time_seconds` is what makes e02 answerable at all: client TTFT
+   under concurrency mixes waiting with computing, while queue time and prefill
+   time separate exactly those. e01 now reports flatness from server prefill
+   time as the headline and keeps client TTFT alongside as a proxy, because a
+   divergence between them is itself informative.
 4. **A second model** joins once the first is fully characterised — different
    attention shape, not just a different size.
 

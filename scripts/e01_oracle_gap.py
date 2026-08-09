@@ -16,6 +16,13 @@ design compiled an exact-shape ladder over hundreds of trace lengths, which was
 hours of XLA warmup to measure a bound. This is ~5 shapes inside an already-warm
 ladder, fits in a session, and asks the question directly.
 
+UNITS (notes/solidity.md, R1): the headline is computed from vLLM's own
+`vllm:request_prefill_time_seconds`, scraped from /metrics around each cell, NOT
+from the client stopwatch. Client TTFT includes network RTT, HTTP handling,
+tokenizer time and queueing; the paper's claims are about compute cost. Client
+TTFT is still recorded alongside, because a large divergence between the two is
+itself worth knowing.
+
 Interpretation, expressed in units of the measured noise floor (e03):
   staircase  TTFT(0.25B) ~= TTFT(B)     -> padding is fully paid. Ladder matters.
   linear     TTFT(0.25B) ~= 0.25 TTFT(B)-> padding is free. Both claims die.
@@ -43,6 +50,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _client import Sample, complete, complete_mock, summarise  # noqa: E402
+from _metrics import MockMetrics, delta, metrics_available, scrape  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from ladder import bucket_for, build_ladder  # noqa: E402
 
@@ -122,17 +130,29 @@ def main(argv: list[str] | None = None) -> int:
     run = start_run("e01_oracle_gap", config, results_root=args.results_root)
     status, err = "ok", None
     try:
+        mock_metrics = MockMetrics() if args.mock else None
+        use_metrics = bool(mock_metrics) or metrics_available(args.base_url)
+        if not use_metrics:
+            print("[e01] WARNING /metrics unavailable — falling back to client TTFT. "
+                  "That is a PROXY for compute cost (solidity.md R1); such a number "
+                  "may not be used as a headline.", file=sys.stderr)
+
         rows: list[dict[str, Any]] = []
+        server_rows: list[dict[str, Any]] = []
         for bucket in buckets:
             lengths = occupancy_lengths(bucket, fractions, ladder)
             if len(lengths) < 2:
                 print(f"[e01] bucket {bucket}: <2 usable occupancies, skipping", file=sys.stderr)
                 continue
             for L in lengths:
+                before = (mock_metrics.snapshot() if mock_metrics
+                          else scrape(args.base_url)) if use_metrics else None
                 for rep in range(-discard, repeats):
                     if args.mock:
                         s = complete_mock(L, output_len, ladder=ladder,
                                           staircase=not args.mock_linear, seed=rep)
+                        if rep >= 0:
+                            mock_metrics.record(s.ttft_ms / 1000.0, 0.001)
                     else:
                         s = complete(args.base_url, config["model"], L, output_len, seed=rep)
                     if rep < 0:
@@ -140,6 +160,15 @@ def main(argv: list[str] | None = None) -> int:
                     rows.append({
                         "bucket": bucket, "prompt_len": L, "occupancy": L / bucket,
                         "repeat": rep, **s.as_row(),
+                    })
+                if use_metrics:
+                    after = mock_metrics.snapshot() if mock_metrics else scrape(args.base_url)
+                    d = delta(before, after)
+                    pf = d.get("vllm:request_prefill_time_seconds")
+                    server_rows.append({
+                        "bucket": bucket, "prompt_len": L, "occupancy": L / bucket,
+                        "server_prefill_ms": pf["mean_ms"] if pf else float("nan"),
+                        "n_requests": pf["count"] if pf else 0,
                     })
         save_table(run, "samples", rows)
 
@@ -160,12 +189,28 @@ def main(argv: list[str] | None = None) -> int:
                   + f"   flatness={f:.2f}")
         save_table(run, "summary", summary)
 
-        overall = {}
+        overall, overall_client = {}, {}
         for bucket in sorted({r["bucket"] for r in rows}):
-            by_len = {s["prompt_len"]: s["median"] for s in summary if s["bucket"] == bucket}
-            overall[bucket] = flatness(by_len, bucket)
-        save_table(run, "flatness", [{"bucket": b, "flatness": v} for b, v in overall.items()])
+            by_len_c = {s["prompt_len"]: s["median"] for s in summary if s["bucket"] == bucket}
+            overall_client[bucket] = flatness(by_len_c, bucket)
+            if server_rows:
+                by_len_s = {r["prompt_len"]: r["server_prefill_ms"]
+                            for r in server_rows if r["bucket"] == bucket
+                            and not math.isnan(r["server_prefill_ms"])}
+                overall[bucket] = flatness(by_len_s, bucket) if len(by_len_s) >= 2 else math.nan
+            else:
+                overall[bucket] = overall_client[bucket]
+        if server_rows:
+            save_table(run, "server_timing", server_rows)
+        save_table(run, "flatness", [
+            {"bucket": b, "flatness": overall[b], "flatness_client_ttft": overall_client[b],
+             "source": "server_prefill" if server_rows else "client_ttft"}
+            for b in overall])
 
+        if server_rows:
+            print("[e01] flatness from SERVER prefill time (headline) vs client TTFT (proxy):")
+            for b in sorted(overall):
+                print(f"[e01]   bucket {b:>5}: server={overall[b]:.2f}  client={overall_client[b]:.2f}")
         vals = [v for v in overall.values() if not math.isnan(v)]
         if vals:
             med = sorted(vals)[len(vals) // 2]
