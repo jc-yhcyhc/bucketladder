@@ -106,6 +106,10 @@ else
   run "$HOME/venv/bin/python" -m pip install -q vllm
 fi
 run "$HOME/venv/bin/python" -m pip install -q pandas pyarrow
+# torchcodec ships as a vllm dep but is FATAL on TPU: it tries to dlopen
+# libnvrtc.so.13 (CUDA) at import and takes the server down, not just a warning.
+# We decode no video. Verified on hardware 2026-08-09.
+run "$HOME/venv/bin/python" -m pip uninstall -y -q torchcodec
 
 if [[ "$DRY_RUN" != "true" ]]; then
   log "  installed versions:"
