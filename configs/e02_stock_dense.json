@@ -1,0 +1,48 @@
+{
+  "experiment": "e02_stock_baseline",
+  "description": "Re-measurement of the stock baseline at 21 repeats over a dense concurrency sweep. Session 3 ran 3 repeats and fitted PROMOTION_COST_MS=60.21 to the 8->9 step; session 4 reproduced the cell and found it BIMODAL (prefill ms at n=9 was [176.3, 79.7, 86.7] here and [78.2, 179.2, 137.9] in session 3, spread 2.2x). A median of three draws from that is not an estimate, and the whole e30 result rests on it. This config exists to characterise the distribution instead of sampling it three times.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "request_ladder": [
+    8,
+    16,
+    32,
+    64,
+    128,
+    256
+  ],
+  "edge": 8,
+  "concurrency": [
+    4,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    18
+  ],
+  "prompt_len": 512,
+  "output_len": 8,
+  "repeats": 21,
+  "warmup_discard": 2,
+  "note_gap": "n=11..14 were never measured. At prompt_len 512 the sparse sweep jumped from 5120 tokens (n=10, ~89 ms) to 7680 (n=15, ~158 ms), so the SHAPE of the cost curve across that range is unknown -- and it is exactly the range where request padding (all of 9..16 pad to 16) and token padding (4608..8192 all pad to 8192) predict a flat cost while the measurements do not. Filling it is what makes a refit possible rather than a guess.",
+  "note_budget": "n=16 x 512 = 8192 tokens is exactly max_num_batched_tokens, so n<=16 is one scheduler step and n=18 must split into two. The split cell is kept deliberately: it is the only direct evidence of what a two-step dispatch costs."
+}

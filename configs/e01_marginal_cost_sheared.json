@@ -1,0 +1,40 @@
+{
+  "experiment": "e01_oracle_gap",
+  "description": "R3 single-variable control on head_dim. Sheared-LLaMA-1.3B is LlamaForCausalLM with head_dim 128 and full MHA; SmolLM2-1.7B-Instruct is LlamaForCausalLM with head_dim 64 and full MHA. Same architecture, same attention type, same order of size -- the ONLY structural difference is head_dim, which is the axis RPA tiles on. Session 3's contrast (Qwen3-4B 0.81 vs SmolLM2 0.54 at bucket 4096) moved head_dim, GQA ratio AND model family together and cannot attribute the gradient to any of them.",
+  "model": "princeton-nlp/Sheared-LLaMA-1.3B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 4096,
+    "XLA_FLAGS": ""
+  },
+  "buckets": [
+    256,
+    512,
+    1024,
+    2048,
+    4096
+  ],
+  "fractions": [
+    0.99,
+    0.95,
+    0.85,
+    0.75,
+    0.65,
+    0.55
+  ],
+  "repeats": 5,
+  "output_len": 1,
+  "note_reading": "vs SmolLM2 (head_dim 64, MHA, Llama): isolates head_dim. vs Qwen3-4B (head_dim 128, GQA 4:1): isolates the GQA ratio, though family also changes. If this lands near SmolLM2's 0.54 then head_dim is NOT what moved the gradient; if it lands near Qwen3's 0.81 then head_dim is.",
+  "note_fractions": "Top fraction is 0.99, not 1.0. max_position_embeddings is 4096, so bucket 4096 at full occupancy would need 4096 prompt tokens plus an output token and be rejected. 0.99 x 4096 = 4055 still maps to bucket 4096, and the flatness statistic is computed from the ACTUAL lengths, so the shortened top cell is accounted for rather than assumed away.",
+  "note_tp": "16 heads / 4 = 4, 16 kv / 4 = 4, intermediate 5504 / 4 = 1376 -- TP=4 shards cleanly. Checked before provisioning, because granite-3.1-2b died on exactly this.",
+  "note_arch": "LlamaForCausalLM is one of the architectures tpu-inference 0.25.0 actually implements in JAX (llama3.py). Qwen1.5-4B-Chat was the first choice and is UNSERVABLE: tpu_inference/models/jax/qwen2.py reads hf_config.text_config.hidden_size, which exists only on multimodal Qwen2 configs, so every text-only Qwen2ForCausalLM model raises AttributeError at engine start.",
+  "warmup_discard": 2
+}

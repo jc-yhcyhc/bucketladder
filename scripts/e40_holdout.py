@@ -87,6 +87,13 @@ def drive(base_url: str, model: str, trace, policy, cost: CostModel,
     idx = 0
     t0 = time.perf_counter()
     dispatched: list[dict[str, Any]] = []
+    # Per-request end-to-end latency, measured from the request's TRACE ARRIVAL
+    # time -- not from when the policy chose to release it. That distinction is
+    # the whole point: a policy that holds requests back to fill a batch buys
+    # its cost saving with delay, and charging from release time would hide
+    # exactly the cost being traded away. Without this the headline claim
+    # ("saves 23% at no latency cost") is half unmeasured.
+    latencies: list[dict[str, Any]] = []
 
     def elapsed() -> float:
         return time.perf_counter() - t0
@@ -120,12 +127,25 @@ def drive(base_url: str, model: str, trace, policy, cost: CostModel,
                 s = complete(base_url, model, prompt_len, output_len, seed=req.rid)
             results[i] = s
 
+        released_at = elapsed()
         for i, req in enumerate(group):
             th = threading.Thread(target=one, args=(i, req), daemon=True)
             th.start()
             threads.append(th)
         for th in threads:
             th.join()
+        done_at = elapsed()
+        for i, req in enumerate(group):
+            latencies.append({
+                "rid": req.rid,
+                # Held in the client queue because the policy chose to wait.
+                "queue_ms": (released_at - req.arrival_s) * 1000.0,
+                "service_ms": (done_at - released_at) * 1000.0,
+                # What the caller actually experiences.
+                "latency_ms": (done_at - req.arrival_s) * 1000.0,
+                "ttft_ms": results[i].ttft_ms if results[i] is not None else float("nan"),
+                "batch_n": len(group),
+            })
         batch_ms = float("nan")
         n_seen, queue_ms = float("nan"), float("nan")
         if scrape_each:
@@ -173,7 +193,7 @@ def drive(base_url: str, model: str, trace, policy, cost: CostModel,
         fire(pending[:take])
         pending = pending[take:]
 
-    return {"batches": dispatched, "wall_s": elapsed()}
+    return {"batches": dispatched, "wall_s": elapsed(), "latencies": latencies}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,10 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mock", action="store_true")
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--results-root", type=Path, default=None)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="override the trace seed. Re-running across seeds is how the "
+                         "MEASURED policy comparison gets an interval (solidity.md R4): "
+                         "one run per cell is a point estimate and may not be reported.")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
     cfg["mode"] = "mock" if args.mock else "live"
+    if args.seed is not None:
+        cfg["seed"] = args.seed
     plen = cfg.get("prompt_len", 512)
     olen = cfg.get("output_len", 1)
     n_req = cfg.get("n_requests", 120)
@@ -207,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
 
         rows: list[dict[str, Any]] = []
         batch_rows: list[dict[str, Any]] = []
+        lat_rows: list[dict[str, Any]] = []
         for cell in cells:
             pname, rate = cell["policy"], cell["rate_hz"]
             trace = sim.make_trace(n_req, rate, plen, seed=cfg.get("seed", 0))
@@ -232,17 +259,44 @@ def main(argv: list[str] | None = None) -> int:
             for b in out["batches"]:
                 batch_rows.append({"policy": pname, "rate_hz": rate, **b})
 
+            lats = sorted(x["latency_ms"] for x in out["latencies"])
+            held = [x["queue_ms"] for x in out["latencies"]]
+            p50 = statistics.median(lats) if lats else float("nan")
+            p95 = lats[int(0.95 * (len(lats) - 1))] if lats else float("nan")
+            for x in out["latencies"]:
+                lat_rows.append({"policy": pname, "rate_hz": rate, **x})
+
             rows.append({"policy": pname, "rate_hz": rate,
                          "predicted_ms_per_req": predicted,
                          "measured_ms_per_req": measured, "ape_pct": ape,
                          "n_requests": n_req, "n_batches": len(out["batches"]),
                          "split_batch_pct": split_pct,
-                         "mean_queue_ms": statistics.fmean(queued) if queued else 0.0})
+                         "mean_queue_ms": statistics.fmean(queued) if queued else 0.0,
+                         # The price of the saving. Reported in the same row so
+                         # a cost number can never be quoted without it.
+                         "p50_latency_ms": p50, "p95_latency_ms": p95,
+                         "mean_held_ms": statistics.fmean(held) if held else 0.0})
             flag = "" if not split else f"   SPLIT {split_pct:.0f}% of batches"
             print(f"[e40] {pname:<10} {rate:>4} req/s   predicted {predicted:7.2f}  "
-                  f"measured {measured:7.2f}  APE {ape:5.1f}%{flag}")
+                  f"measured {measured:7.2f}  APE {ape:5.1f}%   "
+                  f"p50 {p50:6.1f} p95 {p95:7.1f} ms{flag}")
         save_table(run, "holdout", rows)
         save_table(run, "batches", batch_rows)
+        save_table(run, "latency", lat_rows)
+
+        # Cost and latency, side by side, against stock. A saving quoted without
+        # the delay it was bought with is not a result.
+        for rate in sorted({r["rate_hz"] for r in rows}):
+            base = next((r for r in rows if r["rate_hz"] == rate and r["policy"] == "promote"), None)
+            if not base:
+                continue
+            print(f"[e40] --- {rate} req/s, against stock (promote) ---")
+            for r in rows:
+                if r["rate_hz"] != rate or r["policy"] == "promote":
+                    continue
+                d_cost = 100.0 * (1 - r["measured_ms_per_req"] / base["measured_ms_per_req"])
+                d_p95 = 100.0 * (r["p95_latency_ms"] / base["p95_latency_ms"] - 1)
+                print(f"[e40]   {r['policy']:<8} TPU cost {d_cost:+6.1f}%   p95 latency {d_p95:+7.1f}%")
 
         # A split rate above a few percent means the APE is testing the release
         # mechanism, not the cost model — report it before the verdict, so a

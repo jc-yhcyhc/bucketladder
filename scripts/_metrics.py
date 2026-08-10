@@ -54,6 +54,14 @@ TIMING_METRICS = (
     # length, RPA skips the work and the cost must be elsewhere. Either answer
     # converts "flatness is 0.97" from a correlation into a mechanism.
     "vllm:request_prefill_kv_computed_tokens",
+    # ALSO not a time. A histogram over ENGINE ITERATIONS, so its `_count` delta
+    # is the number of scheduler steps that ran, and its `_sum` is the tokens
+    # they scheduled. Added 2026-08-10 to explain e02's bimodality: at n=9..14
+    # the per-batch cost has two modes (~90 ms and ~140 ms) with the expensive
+    # one taking over as n rises, and the two candidate explanations —
+    # "one padded step" versus "two smaller steps" — differ by exactly one
+    # iteration. Nothing else exposed on /metrics separates them.
+    "vllm:iteration_tokens_total",
 )
 
 
@@ -173,6 +181,13 @@ class MockMetrics:
         ):
             self._sum[name] += v
             self._count[name] += 1
+
+    def record_iteration(self, tokens: float) -> None:
+        """One engine step. Separate from `record` because iterations and
+        requests are different populations — n requests can share one step, and
+        telling those apart is the entire point of e04."""
+        self._sum["vllm:iteration_tokens_total"] += tokens
+        self._count["vllm:iteration_tokens_total"] += 1
 
     def snapshot(self) -> dict[str, HistoSnapshot]:
         return {m: HistoSnapshot(m, self._sum[m], self._count[m])

@@ -36,8 +36,12 @@ done
 log() { echo "[$(date '+%H:%M:%S')] [deploy] $*"; }
 die() { echo "[$(date '+%H:%M:%S')] [deploy] ERROR: $*" >&2; exit 1; }
 
-# What the VM actually needs: the harness, the configs, the infra scripts.
-PAYLOAD=(scripts configs infra requirements.txt)
+# What the VM actually needs: the harness, the configs, the infra scripts, and
+# `sim` — e40 replays a simulated trace against the real server and compares
+# predicted with measured, so the cost model and policies must be present.
+# Omitting it cost one round-trip: every earlier experiment was self-contained
+# under scripts/, so the gap only surfaced when e40 first ran on hardware.
+PAYLOAD=(scripts configs infra sim requirements.txt)
 
 TARBALL="/tmp/bucketladder-deploy.tar.gz"
 

@@ -57,33 +57,64 @@ this cannot say which one caused it. That matters for the paper's scope: if
 shape; if the GQA ratio drives it, it tracks KV width and generalises by
 attention *type*. Those are different claims about who this work applies to.
 
-**The decomposing control: `Qwen/Qwen1.5-4B-Chat`** (`configs/e01_marginal_cost_qwen15.json`).
-Holds head_dim at 128 and moves only the GQA ratio to 1:1 MHA, in the same
-family at the same parameter count.
+### The hard constraint discovered 2026-08-10: the JAX registry is short
 
-| | head_dim | GQA | reads |
-|---|---|---|---|
-| result ≈ 0.81 (like Qwen3) | 128 | 1:1 | **head_dim drives it** — GQA is irrelevant |
-| result ≈ 0.54 (like SmolLM2) | 128 | 1:1 | **GQA drives it** — head_dim is irrelevant |
-| result in between | 128 | 1:1 | both contribute; report the decomposition |
+`tpu-inference` 0.25.0 implements these architectures natively
+(`tpu_inference/models/jax/`, cross-checked against the loader's registry):
 
-Every outcome is informative, which is the property a control should have.
+```
+LlamaForCausalLM   Qwen3ForCausalLM   Qwen3MoeForCausalLM   Gemma4ForCausalLM
+GptOssForCausalLM  DeepseekV3ForCausalLM   Llama4ForCausalLM   Eagle3LlamaForCausalLM
+Qwen2ForCausalLM (BROKEN, see below)      DFlashForCausalLM
+```
 
-**Why not `allenai/OLMo-2-1124-7B-Instruct`**, the previously identified
-candidate: it is also head_dim 128 + MHA and would work in principle, but
-`max_position_embeddings` is **4096**. Bucket 4096 at occupancy 1.0 needs 4096
-prompt tokens plus an output token — 4097 of context — so the single most
-informative cell, the one where Qwen3 and SmolLM2 diverge most, would have had
-to be shrunk to fit. Qwen1.5-4B has 32768 positions and runs the *identical*
-fractions as every other e01 run, which keeps the comparison clean.
+That is the real menu. It explains earlier results retroactively: SmolLM2 and
+granite are both `LlamaForCausalLM`, which is why SmolLM2 loaded at all, and
+`allenai/OLMo-2-*` is `Olmo2ForCausalLM` — **not on the list**, so the OLMo-2
+plan would have failed at engine start regardless of its context length.
 
-Not perfectly single-variable: Qwen1.5-4B has 40 layers to Qwen3-4B's 36, and
-Qwen3 adds QK-norm. Layer count scales cost but should not change the *shape* of
-the occupancy curve, which is what flatness measures. Stated as a limitation
-rather than hidden.
+**`Qwen2ForCausalLM` is unservable on this version.** `models/jax/qwen2.py:401`
+reads `model_config.hf_config.text_config.hidden_size`, but `text_config` exists
+only on *multimodal* Qwen2 configs. Every text-only Qwen2 model — Qwen1.5 at any
+size, Qwen2-7B — raises `AttributeError: 'Qwen2Config' object has no attribute
+'text_config'` before it ever touches the TPU. This is a bug in the stack, not
+in the configuration. It cost one server boot to find.
 
-TP=4 divisibility checked in advance this time, since that is what killed
-granite: 20 attention heads / 4 = 5, intermediate 6912 / 4 = 1728.
+### The control that survives: `princeton-nlp/Sheared-LLaMA-1.3B`
+
+`configs/e01_marginal_cost_sheared.json`. `LlamaForCausalLM`, head_dim **128**,
+full MHA, 16 heads / 16 kv, intermediate 5504 — all divisible by 4.
+
+It is a **better** control than the Qwen1.5 plan, because the comparison it
+anchors changes exactly one thing:
+
+| | architecture | head_dim | GQA | flatness @ 4096 |
+|---|---|---|---|---|
+| SmolLM2-1.7B-Instruct | Llama | **64** | MHA | 0.54 |
+| **Sheared-LLaMA-1.3B** | Llama | **128** | MHA | ? |
+| Qwen3-4B | Qwen3 | 128 | 4:1 | 0.81 |
+
+Against SmolLM2 the only difference is head_dim, within one architecture at a
+comparable size — a true single-variable contrast, which Qwen1.5 could not have
+given (it would have changed the GQA ratio while also changing family and layer
+count). Against Qwen3-4B it isolates the GQA ratio, with family as a residual
+confound that must be stated.
+
+| outcome | reads |
+|---|---|
+| ≈ 0.81, like Qwen3 | **head_dim drives the gradient**; GQA does not |
+| ≈ 0.54, like SmolLM2 | **head_dim does not**; the cause is GQA or family |
+| in between | both contribute; report the decomposition |
+
+Every outcome is informative, which is the property a control should have, and
+the readings were written down before the run.
+
+**Cost of the 4096-position limit.** `max_position_embeddings` is 4096, so
+bucket 4096 at occupancy 1.0 would need 4097 tokens of context and be rejected.
+The top fraction is therefore 0.99 (4055 tokens), which still maps to bucket
+4096. Flatness is computed from actual lengths, so this is accounted for rather
+than assumed away — but it is a real difference from the SmolLM2 and Qwen3 runs
+and travels with the number.
 
 **Fallback: `gemma-3-4b-it`** once the gated HF access lands. Gemma-3 is the
 most different thing available (head_dim 256, interleaved sliding-window
