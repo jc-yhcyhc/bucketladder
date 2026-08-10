@@ -29,6 +29,8 @@ large-bucket gradient is a tiling artifact, head_dim is where it should move.
 
 ## Choice
 
+**Superseded 2026-08-10 — see "What actually happened" below.**
+
 **Primary: `ibm-granite/granite-3.1-2b-instruct`** — ungated, small (fast to
 load and compile), and a **single-variable** change from Qwen3-4B: head_dim 64
 instead of 128, GQA ratio held at 4:1. That isolates the axis of interest.
@@ -36,6 +38,52 @@ instead of 128, GQA ratio held at 4:1. That isolates the axis of interest.
 **Optional third: `HuggingFaceTB/SmolLM2-1.7B-Instruct`** — head_dim 64 *and*
 full MHA. A stronger contrast, but confounded across two factors, so it is a
 follow-up rather than the control.
+
+## What actually happened, and the control that replaces it
+
+granite-3.1-2b **failed to load at TP=4** (`IndivisibleError`), so the planned
+single-variable run never happened. Session 3 fell back to the confounded
+option, and it produced a real but ambiguous result:
+
+| Model | head_dim | GQA | flatness @ 4096 |
+|---|---|---|---|
+| Qwen3-4B | 128 | 4:1 | **0.81** |
+| SmolLM2-1.7B | **64** | **1:1** | **0.54** |
+
+The gradient moved, which is the R3 finding — the staircase is
+architecture-dependent, not universal. But **two variables moved together**, so
+this cannot say which one caused it. That matters for the paper's scope: if
+`head_dim` drives it, the effect tracks RPA's tiling and generalises by tile
+shape; if the GQA ratio drives it, it tracks KV width and generalises by
+attention *type*. Those are different claims about who this work applies to.
+
+**The decomposing control: `Qwen/Qwen1.5-4B-Chat`** (`configs/e01_marginal_cost_qwen15.json`).
+Holds head_dim at 128 and moves only the GQA ratio to 1:1 MHA, in the same
+family at the same parameter count.
+
+| | head_dim | GQA | reads |
+|---|---|---|---|
+| result ≈ 0.81 (like Qwen3) | 128 | 1:1 | **head_dim drives it** — GQA is irrelevant |
+| result ≈ 0.54 (like SmolLM2) | 128 | 1:1 | **GQA drives it** — head_dim is irrelevant |
+| result in between | 128 | 1:1 | both contribute; report the decomposition |
+
+Every outcome is informative, which is the property a control should have.
+
+**Why not `allenai/OLMo-2-1124-7B-Instruct`**, the previously identified
+candidate: it is also head_dim 128 + MHA and would work in principle, but
+`max_position_embeddings` is **4096**. Bucket 4096 at occupancy 1.0 needs 4096
+prompt tokens plus an output token — 4097 of context — so the single most
+informative cell, the one where Qwen3 and SmolLM2 diverge most, would have had
+to be shrunk to fit. Qwen1.5-4B has 32768 positions and runs the *identical*
+fractions as every other e01 run, which keeps the comparison clean.
+
+Not perfectly single-variable: Qwen1.5-4B has 40 layers to Qwen3-4B's 36, and
+Qwen3 adds QK-norm. Layer count scales cost but should not change the *shape* of
+the occupancy curve, which is what flatness measures. Stated as a limitation
+rather than hidden.
+
+TP=4 divisibility checked in advance this time, since that is what killed
+granite: 20 attention heads / 4 = 5, intermediate 6912 / 4 = 1728.
 
 **Fallback: `gemma-3-4b-it`** once the gated HF access lands. Gemma-3 is the
 most different thing available (head_dim 256, interleaved sliding-window
