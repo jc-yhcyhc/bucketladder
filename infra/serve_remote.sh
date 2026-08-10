@@ -114,6 +114,22 @@ cmd_start() {
                   --no-enable-prefix-caching     # controlled variable: MUST be off
                   --port "$SERVER_PORT")
 
+  # EXTRA_SERVE_ARGS exists for ONE purpose: flipping a controlled variable on
+  # purpose, as a control. e07 found that a ragged batch pays only for its
+  # packed tokens, not its padding -- but every run had chunked prefill ON, and
+  # chunked prefill is exactly what packs requests into a step. Whether the
+  # finding is "TPU serving does not pay length padding" or merely "chunked
+  # prefill removes it" is the difference between a general claim and a narrow
+  # one, and it is what connects this work to LAPS and BucketServe.
+  # Anything set here MUST be recorded in the run config, or the controlled-
+  # variable audit is quietly lying.
+  if [[ -n "${EXTRA_SERVE_ARGS:-}" ]]; then
+    # shellcheck disable=SC2206
+    local -a extra=(${EXTRA_SERVE_ARGS})
+    serve+=("${extra[@]}")
+    log "EXTRA_SERVE_ARGS: ${EXTRA_SERVE_ARGS}  <- a controlled variable is being changed"
+  fi
+
   if [[ -n "$VLLM_TPU_BUCKET_PADDING_GAP" ]]; then
     export VLLM_TPU_BUCKET_PADDING_GAP
     log "VLLM_TPU_BUCKET_PADDING_GAP=$VLLM_TPU_BUCKET_PADDING_GAP (linear ladder)"
