@@ -71,16 +71,28 @@ BLOCK = '''
                     if _bl_req is None:
                         continue
                     _bl_alloc = num_scheduled_tokens[_bl_rid]
-                    # Still in chunked prefill? Only then is deferring tokens a
-                    # no-op for correctness: they are computed next step.
-                    _bl_left = _bl_req.num_tokens - (
-                        _bl_req.num_computed_tokens + _bl_alloc)
-                    if _bl_left <= 0 or _bl_alloc <= 1:
+                    # Is this a PREFILL allocation? If so, trimming it is a
+                    # no-op for correctness: the remainder is computed next
+                    # step, which is what chunked prefill does anyway.
+                    #
+                    # The first version asked whether tokens REMAINED after this
+                    # step, which excluded any request whose whole prompt fit in
+                    # one step -- i.e. essentially every request at 512-token
+                    # prompts against an 8192 budget. The patch was inert and the
+                    # resulting A/B showed a flat 0.2% that meant nothing.
+                    _bl_prefill = (_bl_req.num_computed_tokens + _bl_alloc
+                                   <= _bl_req.num_prompt_tokens)
+                    if not _bl_prefill or _bl_alloc <= 1:
                         continue
                     _bl_cut = min(_bl_excess, _bl_alloc - 1)
                     num_scheduled_tokens[_bl_rid] = _bl_alloc - _bl_cut
                     _bl_excess -= _bl_cut
                 total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
+                if _bl_excess < _bl_target:      # something was actually trimmed
+                    _BL_STATS["trims"] += 1
+                    _BL_STATS["tokens_deferred"] += (_bl_target + _bl_excess
+                                                     - total_num_scheduled_tokens)
+            _BL_STATS["spills_seen"] += 1
 '''
 
 HEADER = '''
@@ -92,6 +104,13 @@ _BL_ALIGN = _bl_os.environ.get("BUCKETLADDER_ALIGN", "") == "1"
 # max_num_batched_tokens (runner/utils.py::get_token_paddings with
 # VLLM_TPU_BUCKET_PADDING_GAP unset).
 _BL_BUCKETS = [16 << i for i in range(0, 20)]
+
+# A null A/B is only meaningful if the patch demonstrably ran. The first attempt
+# produced a flat result that turned out to mean the trim never fired, so the
+# counters are now part of the experiment rather than an afterthought: dumped to
+# /tmp/bl_align_stats.json on every scheduler step so a run can prove it acted.
+_BL_STATS = {"spills_seen": 0, "trims": 0, "tokens_deferred": 0}
+_BL_STATS_PATH = "/tmp/bl_align_stats.json"
 
 
 def _bl_largest_bucket_le(n: int) -> int:
