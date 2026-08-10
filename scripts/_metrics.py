@@ -117,6 +117,70 @@ def scrape(base_url: str, timeout: float = 30.0) -> dict[str, HistoSnapshot]:
         return parse_prometheus(resp.read().decode())
 
 
+# --- histogram buckets ------------------------------------------------------
+# `_sum` and `_count` give the mean and nothing about shape. That is enough for
+# a timing histogram and not enough for `iteration_tokens_total`, where the
+# question is how the scheduler DISTRIBUTED tokens across steps. e04 showed the
+# per-dispatch cost is bimodal with identical total scheduled tokens and, at
+# n=12, an identical step COUNT in both modes — and a count cannot tell 2
+# prefill + 1 decode from 1 prefill + 2 decode. The bucket edges can.
+
+_BUCKET = re.compile(
+    r'^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)_bucket\{(?P<labels>[^}]*)\}\s+(?P<value>[^\s]+)\s*$')
+_LE = re.compile(r'le="(?P<le>[^"]+)"')
+
+
+def parse_buckets(text: str, metric: str) -> dict[float, float]:
+    """Cumulative bucket counts for one histogram, keyed by upper edge.
+
+    Prometheus buckets are cumulative (`le` = "less than or equal"), so
+    differencing adjacent edges gives the per-bucket population. Returned
+    cumulative because the deltas must be taken against another SNAPSHOT first;
+    differencing edges before differencing snapshots would mix the two.
+    """
+    out: dict[float, float] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "_bucket{" not in line:
+            continue
+        m = _BUCKET.match(line)
+        if not m or m.group("name") != metric:
+            continue
+        le = _LE.search(m.group("labels"))
+        if not le:
+            continue
+        edge = float("inf") if le.group("le") in ("+Inf", "Inf") else float(le.group("le"))
+        try:
+            out[edge] = out.get(edge, 0.0) + float(m.group("value"))
+        except ValueError:
+            continue
+    return out
+
+
+def scrape_buckets(base_url: str, metric: str, timeout: float = 30.0) -> dict[float, float]:
+    url = base_url.rstrip("/") + "/metrics"
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return parse_buckets(resp.read().decode(), metric)
+
+
+def bucket_delta(before: dict[float, float], after: dict[float, float]) -> dict[float, float]:
+    """Per-bucket (not cumulative) population added between two snapshots.
+
+    Returns {upper_edge: count} for the steps that ran in between — i.e. the
+    distribution of tokens per scheduler step over exactly this dispatch.
+    """
+    edges = sorted(set(before) | set(after))
+    cum = [(e, after.get(e, 0.0) - before.get(e, 0.0)) for e in edges]
+    out: dict[float, float] = {}
+    prev = 0.0
+    for e, c in cum:
+        n = c - prev
+        if n > 0:
+            out[e] = n
+        prev = c
+    return out
+
+
 def delta(before: dict[str, HistoSnapshot], after: dict[str, HistoSnapshot]) -> dict[str, dict[str, float]]:
     """Per-metric mean over exactly the requests issued between two scrapes.
 
@@ -159,6 +223,12 @@ def metrics_available(base_url: str) -> bool:
 # Mock
 # ---------------------------------------------------------------------------
 
+# vLLM's default histogram edges for iteration_tokens_total are powers of two
+# over the batched-token range. Mirrored here so the mock's bucket arithmetic is
+# the same shape as the server's.
+MOCK_BUCKET_EDGES = (1, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, float("inf"))
+
+
 class MockMetrics:
     """Accumulates fake server-side timings so experiments run with no server.
 
@@ -170,6 +240,7 @@ class MockMetrics:
     def __init__(self) -> None:
         self._sum: dict[str, float] = {m: 0.0 for m in TIMING_METRICS}
         self._count: dict[str, float] = {m: 0.0 for m in TIMING_METRICS}
+        self._iterations: list[float] = []
 
     def record(self, prefill_s: float, queue_s: float = 0.0, decode_s: float = 0.0) -> None:
         for name, v in (
@@ -188,7 +259,17 @@ class MockMetrics:
         telling those apart is the entire point of e04."""
         self._sum["vllm:iteration_tokens_total"] += tokens
         self._count["vllm:iteration_tokens_total"] += 1
+        self._iterations.append(tokens)
 
     def snapshot(self) -> dict[str, HistoSnapshot]:
         return {m: HistoSnapshot(m, self._sum[m], self._count[m])
                 for m in TIMING_METRICS if self._count[m] > 0}
+
+    def bucket_snapshot(self, metric: str) -> dict[float, float]:
+        """Cumulative bucket counts, mirroring Prometheus\'s `le` semantics so
+        the mock exercises the same differencing code the live path uses."""
+        edges = list(MOCK_BUCKET_EDGES)
+        out: dict[float, float] = {}
+        for e in edges:
+            out[e] = float(sum(1 for v in self._iterations if v <= e))
+        return out

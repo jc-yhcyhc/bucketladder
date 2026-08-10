@@ -1,0 +1,33 @@
+{
+  "experiment": "e04_step_count",
+  "description": "Does cost depend on TOTAL TOKENS alone? sim/measured_cost_curve.json is keyed on total tokens in the step, but every run behind it used prompt_len=512, so that generalisation is assumed, not measured. This repeats the cost curve at prompt_len=256: if cost is a function of total tokens, 16x256 must cost what 8x512 costs. If it does not, the model is misspecified and cost depends on the batch shape, not just its token count.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "concurrency": [
+    2,
+    4,
+    6,
+    8,
+    12,
+    16
+  ],
+  "prompt_len": 256,
+  "output_len": 1,
+  "repeats": 21,
+  "warmup_discard": 2,
+  "note_levels": "8 and 16 are unimodal in e02 and act as CONTROLS: the mechanism is only confirmed if cost separates by step count on 9/10/12/14 and does NOT separate on these. Listing them in control_levels is what makes the verdict falsifiable rather than a restatement of 'the metric varies'.",
+  "control_levels": [],
+  "note_matching": "Token counts hit: 512, 1024, 1536, 2048, 3072, 4096 -- every one of them a knot in the fitted curve, so the comparison is direct rather than interpolated."
+}

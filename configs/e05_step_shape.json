@@ -1,0 +1,32 @@
+{
+  "experiment": "e05_step_shape",
+  "description": "Reads the per-step token histogram to explain e02/e04's cost bimodality. Three explanations are already excluded from captured data: total scheduled tokens are identical between modes, step COUNT is identical at n=12 and n=14, and a runs test shows no clustering, so it is a per-dispatch coin flip rather than drift. What remains is how the same tokens were distributed across steps, which only the histogram buckets show.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "concurrency": [
+    8,
+    9,
+    10,
+    12,
+    14,
+    16
+  ],
+  "prompt_len": 512,
+  "output_len": 1,
+  "repeats": 25,
+  "warmup_discard": 2,
+  "note_levels": "8 and 16 are near-unimodal in e02 and act as controls: if the expensive mode uses a higher token bucket at 9-14 but not at 8/16, the mechanism is specific to the region where the bimodality lives.",
+  "note_output_len": "output_len=1 keeps decode iterations from crowding the histogram. e04 confirmed the bimodality is present at output_len=1 (n=12: 87.9 vs 136.5 ms), so nothing is lost by measuring it in the cleaner regime."
+}

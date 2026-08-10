@@ -1,0 +1,35 @@
+{
+  "experiment": "e40_holdout",
+  "description": "RATE holdout. The refit validated at 3.6% MAPE on seeds 201-211, but those reused the fit's rates (25 and 55), so the validation could not catch an error constant across rate. These rates were never fitted or validated on.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "prompt_len": 512,
+  "output_len": 1,
+  "n_requests": 60,
+  "seed": 301,
+  "rates_hz": [
+    15,
+    40,
+    75
+  ],
+  "policies": [
+    "promote",
+    "wait",
+    "hybrid"
+  ],
+  "latency_weight": 1.0,
+  "max_wait_s": 0.5,
+  "note_holdout": "plan_v4 requires MAPE<15% per cell on data the fit never saw. Seeds AND rates are both new here; the earlier holdout varied only seed and server instance."
+}
