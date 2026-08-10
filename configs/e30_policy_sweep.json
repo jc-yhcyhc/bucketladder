@@ -13,7 +13,8 @@
     "kv_cache_dtype": "auto",
     "VLLM_TPU_BUCKET_PADDING_GAP": "",
     "max_model_len": 8192,
-    "XLA_FLAGS": ""
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
   },
   "rates_hz": [
     10,

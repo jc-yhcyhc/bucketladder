@@ -1,13 +1,13 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
-### A measurement study: 36% of executed tokens are padding, and it is free
+### A measurement study: 36% of executed tokens are padding, and ~92% of that is free
 
 **Draft — 2026-08-10.** Target: MLSys 2027 Industrial Track (novelty not required;
 design methodology and detailed benchmarks are). Venue and deadline **unverified**;
 backup venue not yet chosen.
 
 Stack under test: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1,
-on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across seven
+on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across eight
 hardware sessions.
 
 ---
@@ -19,7 +19,7 @@ every workload up to one of a precompiled ladder. The natural inference — that
 rounding up means paying for what you rounded up to — motivates a family of
 proposed optimisations: length bucketing, shape-aware admission control, ladder
 design. We measure what is actually paid in a production TPU serving stack and find
-that **almost none of it is**.
+that **most of it is not**.
 
 Shape quantization here is three-dimensional. Per-request sequence padding **does
 not exist**: a batch of mixed-length requests costs its packed tokens, and rejecting
@@ -30,8 +30,11 @@ The step's token count *is* padded and *is* paid — but only at batch size one,
 which is not a serving regime.
 
 Over 150 instrumented dispatches, **35.9% of executed tokens are padding** (p95
-per-dispatch ratio 99.6%), and doubling the padded token count at fixed real work
-changes cost by ≤2%, frequently downward. The padding is real and free.
+per-dispatch ratio 99.6%). In a randomised straddle that doubles the padded token
+count while moving real work by 1.6%, cost rises **7–11%** — so **6–10% of nominal
+padding is actually paid**, against the 100% the compiled-shape premise predicts.
+Enabling the attention request ladder that the stack disables by default changes
+decode latency by 0.0%.
 
 We report the mechanism for each dimension read from the serving stack's own
 source and confirmed on hardware, a cost model validated on two independent
@@ -68,8 +71,8 @@ showed the premise was wrong. This paper reports what is true instead.
    source by anyone, and it explains an otherwise anomalous decode measurement.
 2. **A measured negative result on the cost lever** (§5), framed as validation:
    Ragged Paged Attention's fine-grained tiling works as designed, and what remains
-   after it had not been measured. 36% of executed tokens are padding and it costs
-   nothing detectable.
+   after it had not been measured. 36% of executed tokens are padding, and doubling
+   that padding costs 7–11% rather than 100%.
 3. **A validated cost model and a provable bound** (§6) for what scheduling *can*
    buy once padding is excluded — which is ordinary batching amortisation, measured
    and bounded rather than assumed.
@@ -197,8 +200,26 @@ dominant cost and its shape never varies, so there is no batch-ladder step to fi
 — in prefill or in decode. The `[8, 16, …]` ladder still applies to non-attention
 work (sampling, logits), which is small.
 
-Hardware agrees. If decode padded 9 sequences up to 16, decode at n=9 would cost
-what n=16 costs:
+**And enabling the ladder buys nothing.** Setting `ATTN_BUCKETIZED_NUM_REQS=1`
+compiles the full `[8, 16, …, 256]` attention ladder — verified in the warmup log,
+which prints it instead of `[256]` — and we measured the same concurrency sweep
+on the same server instance in both modes:
+
+| n | prefill (off → on) | decode (off → on) | e2e (off → on) |
+|---|---|---|---|
+| 8 | 75.8 → 75.8 | 53.2 → 53.2 | 139.3 → 139.1 |
+| 9 | 86.7 → 104.0 | 61.8 → 61.8 | 159.1 → 193.3 |
+| 16 | 158.8 → 153.0 | 86.2 → 88.4 | 254.2 → 254.6 |
+
+Decode is identical to 0.1 ms at n=8 and n=9: compiling attention at the actual
+batch size rather than at 256 changes nothing. The padded request slots hold no
+KV blocks, so carrying them is free — RPA behaving exactly as designed. The n=9
+prefill gap is the bimodal cell of §8, where decode is unchanged, not a flag
+effect. **The default is correct**, and we can now say so with a number instead of
+inferring it from the comment above the function.
+
+Hardware agrees on the batch ladder generally. If decode padded 9 sequences up to
+16, decode at n=9 would cost what n=16 costs:
 
 | n | 8 | **9** (padded to 16) | 16 |
 |---|---|---|---|
@@ -233,15 +254,35 @@ within a few percent.
 | 14 | 7182 | ×1.22 | ×0.99 |
 | 16 | 8208 | ×1.18 | ×0.99 |
 
-Doubling padded tokens moves cost by ≤2%, frequently downward. **D2 is not paid at
-n > 1.** The n=12 cell is the sole exception and is also the cell with an
-unexplained bimodality (§8); its ordering is non-monotone
-(9216→82.6 ms, 10240→136.5, 11264→132.7), so it is not a padding effect either.
+Doubling padded tokens moves cost by ≤2%, frequently downward. The n=12 cell is
+the sole exception and is also the cell with an unexplained bimodality (§8); its
+ordering is non-monotone (9216→82.6 ms, 10240→136.5, 11264→132.7), so it is not a
+padding effect either.
 
-**Consequence.** All three dimensions are inert under batching. A scheduler-side
+**Confirmed under randomised assignment.** The above is a natural experiment —
+the scheduler chose the splits — so we also ran the designed straddle: batch size
+and per-sequence length held fixed, the step's token count moved just across a
+compiled boundary.
+
+| edge | real work | padded work | measured cost | share of padding paid |
+|---|---|---|---|---|
+| 512 → 1024 (4×128 vs 4×130) | ×1.016 | ×2.00 | **×1.110** | **9.6%** |
+| 1024 → 2048 (8×128 vs 8×129) | ×1.008 | ×2.00 | **×1.070** | **6.3%** |
+
+So the honest statement is not that padding is free but that **roughly 6–10% of
+it is paid**. Doubling the padded token count costs 7–11%, where the compiled-
+shape premise predicts 100%. Three of the second edge's nine dispatches per arm
+used more than one prefill step and are therefore smeared; the split counts were
+equal across arms, so the ratio is not obviously biased, but we report it.
+
+**Consequence.** All three dimensions are inert under batching, in the sense
+that none of them turns a doubling of nominal padding into a doubling of cost. A scheduler-side
 optimisation we designed — deferring a marginal chunk rather than spilling into the
 next bucket — is **analysed and rejected on a computed ceiling** rather than left
-untested: the 36% is free, so there is nothing to recover.
+untested. Even at the extreme — eliminating all 36% — the recoverable share is
+6–10% of it, i.e. **2–4% of total execution**, before any deferral latency is
+charged against it. That is below the threshold at which we would trust a
+scheduler change to be a net win.
 
 *Weakness, stated:* this is a natural experiment. The scheduler chose the splits, so
 a lurking variable correlated with both split and cost is not excluded the way
@@ -252,7 +293,8 @@ length remains worth running as confirmation.
 
 ## 6. What scheduling can buy once padding is excluded
 
-With padding free, the only remaining lever is batching efficiency. It is real:
+With padding largely unrecoverable, the remaining lever is batching efficiency,
+and that one is real:
 
 | batch | tokens | cost | per token |
 |---|---|---|---|
@@ -369,9 +411,6 @@ wrong published number:
   top-bucket occupancy (ratios 1.00 and 0.98 at n=9 and n=10). It is a per-dispatch
   coin flip whose cause is not on `/metrics`; resolving it needs XLA profiler
   traces.
-- **`ATTN_BUCKETIZED_NUM_REQS=1` is unmeasured.** We know the flag exists and is
-  off; we have not measured what enabling it costs or saves. That is the one
-  remaining measurement with actionable information in it.
 
 ---
 
@@ -401,8 +440,8 @@ this kind of work; our holdout discipline follows it.
 
 A production TPU serving stack quantizes shapes in three dimensions. One does not
 exist, one is disabled by a default configuration flag, and one is paid only at a
-batch size that never occurs in serving. **36% of executed tokens are padding and it
-costs nothing measurable.**
+batch size that never occurs in serving. **36% of executed tokens are padding, and doubling
+it costs 7–11% rather than the 100% the premise predicts.**
 
 The practical advice is negative and worth stating: do not build length bucketing,
 shape-aware admission control, or ladder design for this stack. What remains for a

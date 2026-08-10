@@ -9,7 +9,8 @@
     "tensor_parallel_size": 4,
     "speculative_model": null,
     "kv_cache_dtype": "auto",
-    "VLLM_TPU_BUCKET_PADDING_GAP": ""
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
   },
   "tpu_type": "v5litepod-4"
 }

@@ -68,6 +68,17 @@ CONTROLLED_VARS: dict[str, Any] = {
     "VLLM_TPU_BUCKET_PADDING_GAP": REQUIRE_EXPLICIT,
     "max_model_len": REQUIRE_EXPLICIT,
     "XLA_FLAGS": REQUIRE_EXPLICIT,
+    # tpu-inference's own env flag, added 2026-08-10. Default False, and when
+    # False `get_attn_req_paddings` returns [max_req_size] — ONE bucket — so
+    # attention executes at 256 requests whatever the batch size, and the
+    # request ladder the warmup log advertises is not the one attention uses.
+    #
+    # Swept (M2 measures what enabling it costs), so any value, but it must be
+    # stated. It is NOT visible in vLLM's engine-config line, so the audit
+    # cannot confirm it the way it confirms prefix caching; the check that it
+    # took effect is the warmup log, where "Prepared attn request paddings"
+    # prints the full ladder instead of [256].
+    "ATTN_BUCKETIZED_NUM_REQS": REQUIRE_EXPLICIT,
 }
 
 
