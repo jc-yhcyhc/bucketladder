@@ -20,9 +20,16 @@ from simulator import Simulator  # noqa: E402
 
 # --- cost model is fitted, not invented ------------------------------------
 
-def test_cost_model_reproduces_the_measured_cells():
-    """Fitted against captured/session3 e02. Within 3% on both anchor cells."""
-    c = CostModel()
+def test_analytic_cost_model_reproduces_the_output_len_8_cells():
+    """The ANALYTIC model, pinned against captured/session3 e02 at output_len=8.
+
+    `knots=()` is now required to get it: the default model interpolates the
+    measured output_len=1 curve, because the analytic form failed e40's hardware
+    holdout at 105.7% MAPE. The analytic constants remain correct for the regime
+    they were fitted in — e02 at output_len=8 really does have a +62 ms step at
+    the 8->16 request-ladder edge — and wrong for the one e40 measures.
+    """
+    c = CostModel(knots=())
     assert c.step_cost_ms(8, 8 * 512) == pytest.approx(75.56, rel=0.05)
     assert c.step_cost_ms(9, 9 * 512) == pytest.approx(137.92, rel=0.05)
 
@@ -106,13 +113,39 @@ def test_waiting_is_cheaper_but_slower_than_stock():
     assert wait.p95_latency_ms > stock.p95_latency_ms
 
 
-def test_hybrid_beats_stock_on_cost_without_losing_latency():
-    """The actual proposal, stated as a test."""
+def test_hybrid_trades_latency_for_cost_far_more_efficiently_than_waiting():
+    """The actual proposal, stated as a test — and NOT as a free lunch.
+
+    This assertion used to be `hyb.p95 <= stock.p95 * 1.05`, i.e. hybrid saves
+    cost at no latency cost. The refitted cost model shows that is false on an
+    efficiently driven server: at 25 req/s hybrid saves ~30% of TPU time and
+    raises p95 by ~188%.
+
+    The measured hardware runs looked latency-free (+14.8%, p=0.570) because
+    e40's harness spends ~24 ms per dispatch scraping /metrics, which inflates
+    STOCK's p95 from ~24 ms to ~86 ms and hides the delay hybrid introduces
+    deliberately. That is a property of our driver, not of the policy.
+
+    What survives, and what this test now pins: hybrid buys its cost saving far
+    more cheaply in latency than wait-to-fill does. Both reach nearly the same
+    cost; wait pays an order of magnitude more p95 for it.
+    """
     s = Simulator()
     tr = s.make_trace(400, 25, 512, 4)
-    stock, hyb = s.run(tr, PromoteNow()), s.run(tr, Hybrid())
+    stock = s.run(tr, PromoteNow())
+    hyb, wt = s.run(tr, Hybrid()), s.run(tr, WaitToFill())
+
     assert hyb.cost_per_request_ms < stock.cost_per_request_ms
-    assert hyb.p95_latency_ms <= stock.p95_latency_ms * 1.05
+    # Nearly all of wait-to-fill's saving...
+    hyb_saving = 1 - hyb.cost_per_request_ms / stock.cost_per_request_ms
+    wait_saving = 1 - wt.cost_per_request_ms / stock.cost_per_request_ms
+    assert hyb_saving > 0.8 * wait_saving
+    # ...for a small fraction of its latency.
+    hyb_penalty = hyb.p95_latency_ms - stock.p95_latency_ms
+    wait_penalty = wt.p95_latency_ms - stock.p95_latency_ms
+    assert hyb_penalty < 0.3 * wait_penalty
+    # And it is a real penalty, not zero. Guards against the old claim.
+    assert hyb.p95_latency_ms > stock.p95_latency_ms
 
 
 def test_matched_traces_are_identical_across_policies():

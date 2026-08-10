@@ -127,10 +127,22 @@ class DownshiftToEdge(AdmissionPolicy):
 
 
 class Oracle(AdmissionPolicy):
-    """Upper bound: knows the future, waits only when a full batch is imminent.
+    """One-step lookahead: sees the next arrival, waits if it is within `horizon_s`.
 
-    Not implementable; it exists so the gap between hybrid and achievable is
-    visible rather than assumed.
+    **NOT an upper bound, despite the name.** It was documented as one until the
+    refitted e30 showed `hybrid` beating it — 27.6% against 24.7% at 25 req/s,
+    and again at 10 and 40 req/s. A policy that only ever looks one arrival
+    ahead, with a fixed horizon, is a heuristic like any other; knowing the next
+    arrival time is not knowing the future.
+
+    So the gap to the true optimum is **unknown**, and no claim of the form
+    "hybrid is within X% of optimal" is supported by anything here. Getting such
+    a bound needs an offline optimum over the whole trace — a DP over dispatch
+    times — which `e20_ladder_dp.py` is the natural place for.
+
+    Kept, under this name, because it is a useful third reference point and
+    because renaming it would silently break comparison with runs already
+    captured.
     """
 
     name = "oracle"

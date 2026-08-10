@@ -104,8 +104,33 @@ class Simulator:
     # 1 us is far below the ~10 ms granularity of anything being modelled.
     MIN_WAIT_S = 1e-6
 
-    def __init__(self, cost: CostModel | None = None) -> None:
+    def __init__(self, cost: CostModel | None = None,
+                 client_overhead_s: float = 0.0) -> None:
+        """`client_overhead_s` is dead time between one dispatch completing and
+        the next being issued — a property of whatever DRIVES the server, not of
+        the server.
+
+        Default 0: e30 asks what a policy costs intrinsically. But e40's harness
+        scrapes /metrics around every batch to get per-batch cost, and that
+        scrape plus HTTP and thread spawn measures **22.6-24.9 ms per dispatch**
+        (median, from `promote`'s own timings on the holdout runs — `promote`
+        never waits, so its whole inter-dispatch gap beyond compute is
+        overhead). At 55 req/s, with arrivals 18.2 ms apart, that silently adds
+        ~1.4 requests to every batch: measured mean batch size was 2.95 where
+        the simulator produced 1.22.
+
+        So validating against e40 requires simulating e40, overhead included.
+        The value is measured from a policy that cannot wait, not tuned to make
+        the holdout pass.
+
+        Consequence for the headline, which is worth stating in the paper: the
+        overhead enlarges batches for EVERY policy, and stock benefits most
+        because it dispatches most often. The measured saving of hybrid over
+        stock is therefore a **lower bound** on the saving against a stock
+        server driven without that overhead.
+        """
         self.cost = cost or CostModel()
+        self.client_overhead_s = client_overhead_s
 
     def make_trace(self, n: int, rate_hz: float, prompt_len: int, seed: int) -> list[Request]:
         """Poisson arrivals. Same seed -> same trace, so policies are compared
@@ -190,7 +215,12 @@ class Simulator:
                 r.completed_s = now + cost_ms / 1000.0
             batches.append(Batch(batch_reqs, now, cost_ms,
                                  padded_batch(len(batch_reqs), self.cost.ladder)))
-            server_free_at = now + cost_ms / 1000.0
+            # Compute finishes, then the driver spends `client_overhead_s`
+            # before it can issue the next dispatch. Requests keep arriving
+            # throughout, which is exactly why it changes batch composition.
+            # It is NOT added to cost_ms: the TPU is idle during it, and the
+            # paper's metric is TPU-busy time.
+            server_free_at = now + cost_ms / 1000.0 + self.client_overhead_s
             now = server_free_at
 
         return self._summarise(policy, requests, batches)

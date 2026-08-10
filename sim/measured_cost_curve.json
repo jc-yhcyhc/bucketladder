@@ -1,0 +1,233 @@
+{
+  "description": "Median per-batch prefill cost against total scheduled tokens, measured on hardware. Replaces the analytic ladder-step model, which failed its holdout at 105.7% MAPE.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "prompt_len": 512,
+  "output_len": 1,
+  "max_num_batched_tokens": 8192,
+  "measured": "2026-08-10",
+  "source": "captured/session4-qwen3*/results/e40_holdout",
+  "fit_seeds": [
+    99,
+    101,
+    103,
+    105,
+    107,
+    109
+  ],
+  "holdout_seeds": [
+    201,
+    203,
+    205,
+    207,
+    209,
+    211
+  ],
+  "n_batches_fit": 785,
+  "statistic": "median per token count; cells with <2 observations dropped",
+  "caveats": [
+    "Calibrated at prompt_len=512 only. Cost is keyed on TOTAL tokens in the step, which is the right variable in principle, but no run has varied prompt_len at fixed total tokens, so that generalisation is untested.",
+    "output_len=1. e02 at output_len=8 shows a different curve with a real +62 ms step at the 8->16 request-ladder edge; this curve must not be used for decode-heavy traces.",
+    "Per-dispatch cost is bimodal at some batch sizes (e02, e04) and the cause is not identified. The median is modelled; the spread is not."
+  ],
+  "knots_tokens_ms": [
+    [
+      512.0,
+      13.151758999811136
+    ],
+    [
+      1024.0,
+      17.234356249900884
+    ],
+    [
+      1536.0,
+      24.442522999985766
+    ],
+    [
+      2048.0,
+      39.22306249990015
+    ],
+    [
+      2560.0,
+      41.22897800002647
+    ],
+    [
+      3072.0,
+      71.97802816669234
+    ],
+    [
+      3584.0,
+      73.91838785698772
+    ],
+    [
+      4096.0,
+      69.07650837496249
+    ],
+    [
+      4608.0,
+      76.81203844463703
+    ],
+    [
+      6144.0,
+      85.67732808338253
+    ],
+    [
+      6656.0,
+      139.22824384618391
+    ],
+    [
+      8192.0,
+      144.75245715631502
+    ]
+  ],
+  "holdout_cells": [
+    {
+      "policy": "promote",
+      "rate_hz": 25,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 11.187254332514945,
+      "measured_ms_per_req": 12.143300897035395,
+      "ape_pct": 7.873036933094979
+    },
+    {
+      "policy": "promote",
+      "rate_hz": 55,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 9.721321181769623,
+      "measured_ms_per_req": 9.504403159945026,
+      "ape_pct": 2.282289778476228
+    },
+    {
+      "policy": "wait",
+      "rate_hz": 25,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 8.811689478350965,
+      "measured_ms_per_req": 8.875461732406443,
+      "ape_pct": 0.7185232270522833
+    },
+    {
+      "policy": "wait",
+      "rate_hz": 55,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 8.61578389001482,
+      "measured_ms_per_req": 9.20556310705994,
+      "ape_pct": 6.406769582545207
+    },
+    {
+      "policy": "hybrid",
+      "rate_hz": 25,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 8.954530437756723,
+      "measured_ms_per_req": 8.920699804586574,
+      "ape_pct": 0.37923743552893935
+    },
+    {
+      "policy": "hybrid",
+      "rate_hz": 55,
+      "n_seeds": 6,
+      "predicted_ms_per_req": 9.41894648541791,
+      "measured_ms_per_req": 8.921426428188484,
+      "ape_pct": 5.576687329477298
+    }
+  ],
+  "holdout_curve_diagnostic": [
+    {
+      "tokens": 512,
+      "n_obs": 316,
+      "measured_ms": 13.101934000133042,
+      "predicted_ms": 13.151758999811136,
+      "ape_pct": 0.3802873658010201
+    },
+    {
+      "tokens": 1024,
+      "n_obs": 147,
+      "measured_ms": 17.167848499866523,
+      "predicted_ms": 17.234356249900884,
+      "ape_pct": 0.3873971163881046
+    },
+    {
+      "tokens": 1536,
+      "n_obs": 88,
+      "measured_ms": 24.3586563331822,
+      "predicted_ms": 24.442522999985766,
+      "ape_pct": 0.34429923250454353
+    },
+    {
+      "tokens": 2048,
+      "n_obs": 51,
+      "measured_ms": 39.14472000008118,
+      "predicted_ms": 39.22306249990015,
+      "ape_pct": 0.2001355478307433
+    },
+    {
+      "tokens": 2560,
+      "n_obs": 17,
+      "measured_ms": 41.168383399963204,
+      "predicted_ms": 41.22897800002647,
+      "ape_pct": 0.1471872224725798
+    },
+    {
+      "tokens": 3072,
+      "n_obs": 15,
+      "measured_ms": 71.9351948333345,
+      "predicted_ms": 71.97802816669234,
+      "ape_pct": 0.059544334949079576
+    },
+    {
+      "tokens": 3584,
+      "n_obs": 15,
+      "measured_ms": 67.39781557163431,
+      "predicted_ms": 73.91838785698772,
+      "ape_pct": 9.674753150453322
+    },
+    {
+      "tokens": 4096,
+      "n_obs": 64,
+      "measured_ms": 68.89694012491532,
+      "predicted_ms": 69.07650837496249,
+      "ape_pct": 0.2606331278596666
+    },
+    {
+      "tokens": 4608,
+      "n_obs": 2,
+      "measured_ms": 73.47415400007169,
+      "predicted_ms": 76.81203844463703,
+      "ape_pct": 4.542936887115537
+    },
+    {
+      "tokens": 5120,
+      "n_obs": 4,
+      "measured_ms": 79.38402799991309,
+      "predicted_ms": 79.76713499088552,
+      "ape_pct": 0.48259958662321306
+    },
+    {
+      "tokens": 5632,
+      "n_obs": 1,
+      "measured_ms": 139.7387289996666,
+      "predicted_ms": 82.72223153713404,
+      "ape_pct": 40.80221558525024
+    },
+    {
+      "tokens": 6144,
+      "n_obs": 4,
+      "measured_ms": 134.68271945841553,
+      "predicted_ms": 85.67732808338253,
+      "ape_pct": 36.38580478037039
+    },
+    {
+      "tokens": 6656,
+      "n_obs": 1,
+      "measured_ms": 138.65320269244947,
+      "predicted_ms": 139.22824384618391,
+      "ape_pct": 0.41473340865408
+    },
+    {
+      "tokens": 8192,
+      "n_obs": 10,
+      "measured_ms": 145.57989849997455,
+      "predicted_ms": 144.75245715631502,
+      "ape_pct": 0.5683760960031677
+    }
+  ]
+}
