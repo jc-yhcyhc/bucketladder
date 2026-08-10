@@ -24,7 +24,7 @@
     211
   ],
   "n_batches_fit": 785,
-  "statistic": "median per token count; cells with <2 observations dropped",
+  "statistic": "median per token count; token counts with <5 observations are dropped and interpolated instead -- the curve is optimised over by e21, so a knot resting on a few draws from a bimodal cell becomes a spurious optimum",
   "caveats": [
     "Calibrated at prompt_len=512 only. Cost is keyed on TOTAL tokens in the step, which is the right variable in principle, but no run has varied prompt_len at fixed total tokens, so that generalisation is untested.",
     "output_len=1. e02 at output_len=8 shows a different curve with a real +62 ms step at the 8->16 request-ladder edge; this curve must not be used for decode-heavy traces.",
@@ -64,18 +64,6 @@
       69.07650837496249
     ],
     [
-      4608.0,
-      76.81203844463703
-    ],
-    [
-      6144.0,
-      85.67732808338253
-    ],
-    [
-      6656.0,
-      139.22824384618391
-    ],
-    [
       8192.0,
       144.75245715631502
     ]
@@ -93,9 +81,9 @@
       "policy": "promote",
       "rate_hz": 55,
       "n_seeds": 6,
-      "predicted_ms_per_req": 9.721321181769623,
+      "predicted_ms_per_req": 9.730898756925148,
       "measured_ms_per_req": 9.504403159945026,
-      "ape_pct": 2.282289778476228
+      "ape_pct": 2.383059653179024
     },
     {
       "policy": "wait",
@@ -109,9 +97,9 @@
       "policy": "wait",
       "rate_hz": 55,
       "n_seeds": 6,
-      "predicted_ms_per_req": 8.61578389001482,
+      "predicted_ms_per_req": 8.792760179033623,
       "measured_ms_per_req": 9.20556310705994,
-      "ape_pct": 6.406769582545207
+      "ape_pct": 4.484276770746693
     },
     {
       "policy": "hybrid",
@@ -125,9 +113,9 @@
       "policy": "hybrid",
       "rate_hz": 55,
       "n_seeds": 6,
-      "predicted_ms_per_req": 9.41894648541791,
+      "predicted_ms_per_req": 9.44582004649155,
       "measured_ms_per_req": 8.921426428188484,
-      "ape_pct": 5.576687329477298
+      "ape_pct": 5.8779122657579865
     }
   ],
   "holdout_curve_diagnostic": [
@@ -191,36 +179,36 @@
       "tokens": 4608,
       "n_obs": 2,
       "measured_ms": 73.47415400007169,
-      "predicted_ms": 76.81203844463703,
-      "ape_pct": 4.542936887115537
+      "predicted_ms": 78.53600197263155,
+      "ape_pct": 6.889290583127941
     },
     {
       "tokens": 5120,
       "n_obs": 4,
       "measured_ms": 79.38402799991309,
-      "predicted_ms": 79.76713499088552,
-      "ape_pct": 0.48259958662321306
+      "predicted_ms": 87.99549557030062,
+      "ape_pct": 10.847859181946475
     },
     {
       "tokens": 5632,
       "n_obs": 1,
       "measured_ms": 139.7387289996666,
-      "predicted_ms": 82.72223153713404,
-      "ape_pct": 40.80221558525024
+      "predicted_ms": 97.45498916796969,
+      "ape_pct": 30.25914156682919
     },
     {
       "tokens": 6144,
       "n_obs": 4,
       "measured_ms": 134.68271945841553,
-      "predicted_ms": 85.67732808338253,
-      "ape_pct": 36.38580478037039
+      "predicted_ms": 106.91448276563875,
+      "ape_pct": 20.61752005338032
     },
     {
       "tokens": 6656,
       "n_obs": 1,
       "measured_ms": 138.65320269244947,
-      "predicted_ms": 139.22824384618391,
-      "ape_pct": 0.41473340865408
+      "predicted_ms": 116.37397636330782,
+      "ape_pct": 16.068309924697395
     },
     {
       "tokens": 8192,

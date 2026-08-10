@@ -102,16 +102,28 @@ def load_batches(tags: list[str]) -> list[dict[str, Any]]:
     return out
 
 
-def fit_knots(batches: list[dict[str, Any]], min_observations: int = 2) -> list[list[float]]:
+def fit_knots(batches: list[dict[str, Any]], min_observations: int = 5) -> list[list[float]]:
     """Median cost at each observed token count.
 
     Median, not mean: e02 and e04 both found per-dispatch cost to be bimodal at
     some batch sizes, and a mean would sit in the empty space between the modes
     — which is exactly how n=10's spurious "dip" appeared in e02.
 
-    Token counts seen fewer than `min_observations` times are dropped; a single
-    dispatch is not an estimate, and a stray knot distorts every interpolation
-    that crosses it.
+    `min_observations` was 2 and is 5, because a curve is not only read, it is
+    OPTIMISED OVER. e21's DP searches for the cheapest schedule, so it seeks out
+    the lowest point on the curve and will happily exploit a spurious one. With
+    the threshold at 2, the 6144-token knot survived on three observations from
+    a bimodal cell — median 85.68 ms, or 7.14 ms per request, the cheapest point
+    anywhere on the curve — and the "optimal" schedule became batches of twelve
+    built on a measurement artifact. Its holdout error at that token count was
+    36.4%, and the refit's own diagnostic had already flagged it.
+
+    Five observations is still not many. The rule is the same one e02 taught at
+    a cost of most of a session: a median of three draws from a bimodal
+    distribution is not an estimate. Token counts below the threshold are
+    interpolated from their neighbours instead, which is the honest treatment of
+    a region nobody has measured properly — the policies visit it on ~1.6% of
+    dispatches, so it barely affects the fit, but it dominated the optimum.
     """
     by_tokens: dict[int, list[float]] = defaultdict(list)
     for b in batches:
@@ -154,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         "fit_seeds": list(FIT_SEEDS),
         "holdout_seeds": list(HOLDOUT_SEEDS),
         "n_batches_fit": len(fit),
-        "statistic": "median per token count; cells with <2 observations dropped",
+        "statistic": "median per token count; token counts with <5 observations are dropped and interpolated instead -- the curve is optimised over by e21, so a knot resting on a few draws from a bimodal cell becomes a spurious optimum",
         "caveats": [
             "Calibrated at prompt_len=512 only. Cost is keyed on TOTAL tokens in the step, which "
             "is the right variable in principle, but no run has varied prompt_len at fixed total "

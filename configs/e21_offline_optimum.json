@@ -1,0 +1,50 @@
+{
+  "experiment": "e21_offline_optimum",
+  "description": "Offline optimal dispatch schedule by DP, giving the cost-latency Pareto frontier a policy can be measured against. Replaces `Oracle`, which was documented as an upper bound and is beaten by hybrid at three rates.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "prompt_len": 512,
+  "n_requests": 60,
+  "seeds": 5,
+  "rates_hz": [
+    10,
+    25,
+    55,
+    90
+  ],
+  "lambdas": [
+    0.0,
+    0.002,
+    0.005,
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.3,
+    1.0,
+    5.0
+  ],
+  "policies": [
+    "promote",
+    "wait",
+    "hybrid",
+    "oracle"
+  ],
+  "latency_weight": 1.0,
+  "max_wait_s": 0.5,
+  "note_n": "60 requests matches e40's trace length, so the frontier is computed on the same workload the hardware measured. The DP is exact but its state is a Pareto set per prefix, so cost grows faster than linearly in n; 60 keeps a full sweep to seconds.",
+  "note_lambda": "lambda is ms of TPU cost traded per ms of summed request latency. 0 is pure cost -- maximal batching, unbounded wait -- and large lambda approaches dispatch-on-arrival. The values are geometric so the frontier is sampled evenly in the region where the curve actually bends.",
+  "note_oracle": "`oracle` is included as a POLICY here, not as a bound, precisely because e30 showed it is not one."
+}

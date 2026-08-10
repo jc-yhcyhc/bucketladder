@@ -82,6 +82,12 @@ class SimResult:
     wasted_slot_fraction: float
     p50_latency_ms: float
     p95_latency_ms: float
+    # Mean, not just percentiles: e21's DP minimises SUMMED latency, so its
+    # Pareto frontier is a mean-latency frontier. Comparing a policy's p50
+    # against a mean-latency bound is not like-for-like and would flatter the
+    # policy whenever the latency distribution is skewed -- which, for a policy
+    # that deliberately holds requests, it always is.
+    mean_latency_ms: float
     p50_queue_ms: float
     mean_batch_occupancy: float
     # TPU-seconds is the paper's unit; at fixed hardware it is proportional to
@@ -241,6 +247,7 @@ class Simulator:
             wasted_slot_fraction=wasted / slots if slots else 0.0,
             p50_latency_ms=statistics.median(lat) if lat else float("nan"),
             p95_latency_ms=lat[int(0.95 * (len(lat) - 1))] if lat else float("nan"),
+            mean_latency_ms=statistics.fmean(lat) if lat else float("nan"),
             p50_queue_ms=statistics.median(q) if q else float("nan"),
             mean_batch_occupancy=(statistics.fmean(b.n / b.padded_to for b in batches)
                                   if batches else float("nan")),
