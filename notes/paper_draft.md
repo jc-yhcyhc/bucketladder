@@ -494,6 +494,13 @@ wrong published number:
 - **The end-to-end value of bucket-aligned packing is unmeasured.** M1 bounds the
   per-step saving (6.6–9.9% on a maximally spilled step); what fraction of real
   steps spill, and what deferral costs in latency, is not known.
+- **The 6.11 ms floor is measured at n=1 only, and n=1 is this project's known
+  degenerate regime.** Per-request padding turned out to be an n=1 artifact
+  (§4.2, §5); there is no evidence yet that the fixed cost is not. LENS fits its
+  intercept *per bucket* rather than globally, which is a published reason to
+  expect it varies. The crossover rule in §5 rests on treating it as a constant,
+  so measuring the intercept across batch sizes and buckets — LENS's own
+  structure, on TPU — is the single highest-value remaining experiment.
 - **An unexplained bimodality.** Per-dispatch cost has two modes ~1.6× apart at
   n=9–14. Excluded so far: differing scheduled tokens (identical between modes),
   differing step count (identical at n=12 and n=14), drift/warmup/thermal (a runs
