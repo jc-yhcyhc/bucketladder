@@ -34,11 +34,13 @@ The step's token count *is* padded and *is* paid — but only at batch size one,
 which is not a serving regime.
 
 Over 150 instrumented dispatches, **35.9% of executed tokens are padding** (p95
-per-dispatch ratio 99.6%). In a randomised straddle that doubles the padded token
-count while moving real work by 1.6%, cost rises **7–11%** — so **6–10% of nominal
-padding is actually paid**, against the 100% the compiled-shape premise predicts.
-Enabling the attention request ladder that the stack disables by default changes
-decode latency by 0.0%.
+per-dispatch ratio 99.6%). Randomised straddles that double the padded token count
+while moving real work by <2% show the share actually paid rising with the
+boundary: **10% at 512→1024, ~24% at 1024→2048 and above**, against the 100% the
+compiled-shape premise predicts. Perfect alignment would therefore recover about
+**12% of execution** — enough that we report the scheduler-side optimisation it
+implies rather than dismissing it. Enabling the attention request ladder that the
+stack disables by default changes decode latency by 0.0%.
 
 We report the mechanism for each dimension read from the serving stack's own
 source and confirmed on hardware, a cost model validated on two independent
@@ -77,10 +79,14 @@ showed the premise was wrong. This paper reports what is true instead.
    Ragged Paged Attention's fine-grained tiling works as designed, and what remains
    after it had not been measured. 36% of executed tokens are padding, and doubling
    that padding costs 7–11% rather than 100%.
-3. **A validated cost model and a provable bound** (§6) for what scheduling *can*
-   buy once padding is excluded — which is ordinary batching amortisation, measured
-   and bounded rather than assumed.
-4. **A methodological rule** (§7), reported with both of the errors that produced
+3. **A 6.11 ms fixed cost per scheduler step**, measured directly, which the cost
+   model had been assuming away and which is what "batching amortisation" is
+   actually amortising (§6). It also rejects a natural-looking optimisation:
+   decomposing a padded residual into exact bucket sizes is **20.6% worse**
+   measured, where the extrapolated model said it won.
+4. **A validated cost model and a provable bound** (§6) for what scheduling *can*
+   buy once padding is excluded.
+5. **A methodological rule** (§7), reported with both of the errors that produced
    it: step-scoped properties require step-scoped instruments.
 
 We explicitly do **not** claim a ladder redesign, an admission-control policy, or a
@@ -273,36 +279,51 @@ the sole exception and is also the cell with an unexplained bimodality (§8); it
 ordering is non-monotone (9216→82.6 ms, 10240→136.5, 11264→132.7), so it is not a
 padding effect either.
 
-**Confirmed under randomised assignment.** The above is a natural experiment —
-the scheduler chose the splits — so we also ran the designed straddle: batch size
-and per-sequence length held fixed, the step's token count moved just across a
-compiled boundary.
+**Quantified under randomised assignment.** The above is a natural experiment —
+the scheduler chose the splits — so we also ran designed straddles: batch size and
+per-sequence length held fixed, the step's token count moved just across a compiled
+boundary, at four boundaries. Only dispatches verified to be a single step count.
 
-| edge | real work | padded work | measured cost | share of padding paid |
+| boundary (n=4) | real work | padded work | measured cost | share of padding paid |
 |---|---|---|---|---|
-| 512 → 1024 (4×128 vs 4×130) | ×1.016 | ×2.00 | **×1.110** | **9.6%** |
-| 1024 → 2048 (8×128 vs 8×129) | ×1.008 | ×2.00 | **×1.070** | **6.3%** |
+| 512 → 1024 | ×1.016 | ×2.00 | ×1.114 | **10.0%** |
+| 1024 → 2048 | ×1.008 | ×2.00 | ×1.227 | **22.1%** |
+| 2048 → 4096 | ×1.004 | ×2.00 | ×1.243 | **24.0%** |
+| 4096 → 8192 | ×1.002 | ×2.00 | ×1.249 | **24.8%** |
 
-So the honest statement is not that padding is free but that **roughly 6–10% of
-it is paid**. Doubling the padded token count costs 7–11%, where the compiled-
-shape premise predicts 100%. Three of the second edge's nine dispatches per arm
-used more than one prefill step and are therefore smeared; the split counts were
-equal across arms, so the ratio is not obviously biased, but we report it.
+**The share paid grows with the boundary and plateaus near 25%.** An earlier
+version of this paper reported 6–10%, from two edges of which one had split
+dispatches and the other sampled the *smallest* boundary. At the boundaries where
+most tokens live it is roughly a quarter.
+
+The same sweep at n=8 produced split dispatches in 4–7 of 9 runs per arm and is
+excluded; a split reintroduces exactly the smearing these experiments exist to
+avoid, and the split arms give visibly inconsistent shares (6.0%, 24.3%, 7.3%).
 
 **Consequence.** All three dimensions are inert under batching, in the sense
 that none of them turns a doubling of nominal padding into a doubling of cost. A scheduler-side
 optimisation we designed — deferring a marginal chunk rather than spilling into the
 next bucket — is **analysed and rejected on a computed ceiling** rather than left
-untested, and the headroom is **not** negligible. A padded token costs 6.3–9.6%
-of a real one (M1's two edges); padding is 56.8% of real tokens on average; so
-padding inflates execution by 3.6–5.5%, and perfect alignment would recover
-**3.45–5.17%**.
+untested, and the headroom is **substantial**. A padded token costs ~24% of a real
+one at boundaries ≥1024; padding runs 56.8% of real tokens; so padding inflates
+execution by **13.7%**, and perfect alignment would recover **12.0%**.
 
-An earlier version of this section rejected the optimisation on a judgement that
-2–4% was "below the threshold worth acting on". That judgement was made after
-seeing the number, overriding a decision rule committed to beforehand which said
-1–5% warrants implementing. It is reinstated here as **pending measurement**, not
-rejected: §8 names the two cheap experiments that would settle it.
+This section twice reached the wrong conclusion, both times by substituting
+judgement for measurement. First it was rejected because 2–4% seemed "below the
+threshold worth acting on" — a judgement made after seeing a number, overriding a
+rule committed to beforehand that said 1–5% warrants implementing. Then the number
+itself turned out to be wrong by 3×, because it came from two straddles of which
+one sampled the smallest boundary on the ladder. Measured properly, the ceiling is
+12% and the pre-committed rule promotes this from a footnote to a headline
+contribution.
+
+**What does not work.** Decomposing a padded residual into exact bucket sizes —
+1808 tokens as 1024+512+256+16 rather than one step padded to 2048 — is **20.6%
+worse** measured (51.06 ms vs 42.33). The cost model predicted it would win by
+1.85 ms, and was wrong because it priced a 16-token step at 0.41 ms by
+extrapolating linearly from the origin. Measured, a 16-token step costs **6.10 ms**
+and a 32-token step costs 6.08: there is a **6.11 ms fixed cost per scheduler
+step**, and four steps pay it four times.
 
 *Weakness, stated:* this is a natural experiment. The scheduler chose the splits, so
 a lurking variable correlated with both split and cost is not excluded the way
@@ -322,6 +343,13 @@ and that one is real:
 | 4 | 2048 | 39.22 ms | 19.2 µs |
 | 8 | 4096 | 69.08 ms | **16.9 µs** |
 | 16 | 8192 | 144.75 ms | 17.7 µs |
+
+The mechanism is a **fixed per-step cost of 6.11 ms**, measured directly by
+extending the curve below its lowest knot: a 16-token step costs 6.10 ms and a
+32-token step 6.08. Sublinearity is that constant being amortised over more
+tokens, and it is nearly half the cost of a 512-token step. The model previously
+extrapolated linearly from the origin below 512 tokens, understating a 16-token
+step by **15×**.
 
 **Cost model.** A piecewise-linear interpolation of the measured curve — not a
 parametric form. Our first model assumed a ladder step and failed its hardware

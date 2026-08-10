@@ -53,12 +53,18 @@ def test_interpolates_between_knots():
     assert lo < mid < hi
 
 
-def test_scales_from_origin_below_the_first_knot():
-    """No measurement exists under 512 tokens. Clamping flat would make a tiny
-    batch cost as much as a real one, which is exactly the quantity the policy
-    comparison turns on."""
+def test_below_the_first_knot_is_floor_plus_linear_not_from_origin():
+    """This test previously asserted the OPPOSITE and was wrong.
+
+    It encoded linear-from-origin — `C(256) == C(512)/2` — on the reasoning that
+    no measurement existed below 512 tokens so scaling was the conservative
+    choice. M3 measured it: there is a 6.11 ms floor per step, and the old rule
+    understated a 16-token step by 15x. A test that pins an assumption is only
+    as good as the assumption, and this one outlived its evidence by eight
+    sessions.
+    """
     c = CostModel()
-    assert c.tokens_cost_ms(256) == pytest.approx(c.tokens_cost_ms(512) / 2, rel=1e-9)
+    assert c.tokens_cost_ms(256) > c.tokens_cost_ms(512) / 2
 
 
 def test_falls_back_to_analytic_form_without_knots():
@@ -90,3 +96,34 @@ def test_client_overhead_enlarges_batches_but_not_tpu_cost():
 def test_overhead_defaults_to_zero():
     """e30 asks what a policy costs intrinsically, not what our harness costs."""
     assert Simulator(CostModel()).client_overhead_s == 0.0
+
+
+def test_small_steps_carry_the_measured_fixed_cost():
+    """M3 measured a 16-token step at 6.10 ms and a 32-token step at 6.08.
+
+    The model used to scale linearly from the origin below its lowest knot,
+    pricing a 16-token step at 0.41 ms — 15x too low. That is not a rounding
+    issue: it reversed the verdict on decomposing a padded residual into exact
+    bucket sizes, which the extrapolation said won by 1.85 ms and which measures
+    20.6% worse.
+    """
+    from cost_model import FIXED_STEP_COST_MS
+    c = CostModel()
+    assert c.tokens_cost_ms(16) > 5.0
+    assert c.tokens_cost_ms(16) == pytest.approx(FIXED_STEP_COST_MS, abs=0.3)
+    # Still monotone, and still meets the first measured knot.
+    assert c.tokens_cost_ms(16) < c.tokens_cost_ms(256) < c.tokens_cost_ms(512)
+    # The floor rule must still meet the first measured knot exactly, whatever
+    # its value happens to be — the curve is regenerated from data, so pinning a
+    # literal here would break on every refit for no reason.
+    assert c.tokens_cost_ms(MEASURED_KNOTS[0][0]) == pytest.approx(MEASURED_KNOTS[0][1], rel=1e-9)
+
+
+def test_decomposing_a_residual_loses():
+    """1808 tokens as one padded step vs 1024+512+256+16. Measured: 42.33 vs
+    51.06 ms. The model must now agree in direction, because four steps pay the
+    fixed cost four times."""
+    c = CostModel()
+    whole = c.tokens_cost_ms(2048)
+    parts = sum(c.tokens_cost_ms(t) for t in (1024, 512, 256, 16))
+    assert parts > whole

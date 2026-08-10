@@ -78,6 +78,13 @@ SLOPE_UNCERTAINTY = (4.18e-3, 1.92e-2)
 
 # Batch-size ladder vLLM reported on hardware (identical across both session-1
 # runs and unaffected by VLLM_TPU_BUCKET_PADDING_GAP).
+# Measured directly by M3 (2026-08-10): a 16-token step costs 6.10 ms and a
+# 32-token step 6.08, so cost does not go to zero with tokens. Nearly half the
+# cost of a 512-token step is this constant, which is what the sublinearity in
+# the curve above — and the "batching amortisation" saving in e30/e40 — is
+# actually amortising.
+FIXED_STEP_COST_MS = 6.11
+
 REQUEST_LADDER = (8, 16, 32, 64, 128, 256)
 MAX_NUM_BATCHED_TOKENS = 8192
 
@@ -139,18 +146,28 @@ class CostModel:
     def tokens_cost_ms(self, total_tokens: float) -> float:
         """Interpolate the measured curve at `total_tokens`.
 
-        Below the first knot, scale linearly from the origin — there is no
-        measurement under 512 tokens, and a flat clamp would make a tiny batch
-        cost as much as a real one, which is exactly the quantity the policy
-        comparison turns on. Above the last knot, continue at the final
-        segment's slope; the simulator caps a step at `max_batched_tokens`
-        anyway, so that path is a guard rather than a working regime.
+        Below the first knot, add the measured FIXED PER-STEP COST to a linear
+        term. That rule replaced linear-from-origin on 2026-08-10, when M3
+        finally measured the region: a 16-token step costs 6.10 ms and a
+        32-token step 6.08, so there is a 6.11 ms floor per step and
+        linear-from-origin understated a 16-token step by 15x.
+
+        It mattered. On the extrapolation, decomposing an 1808-token residual
+        into 1024+512+256+16 beat one padded step by 1.85 ms; measured, it loses
+        by 8.73 ms, because four steps pay the floor four times. An assumption
+        this cheap to test should not have survived eight sessions.
+
+        Above the last knot, continue at the final segment's slope; the
+        simulator caps a step at `max_batched_tokens`, so that is a guard rather
+        than a working regime.
         """
         k = self.knots
         if not k:
             raise ValueError("no measured knots")
         if total_tokens <= k[0][0]:
-            return k[0][1] * (total_tokens / k[0][0])
+            # cost = floor + slope * tokens, anchored so it meets the first knot.
+            slope = (k[0][1] - FIXED_STEP_COST_MS) / k[0][0]
+            return FIXED_STEP_COST_MS + slope * total_tokens
         for (t0, c0), (t1, c1) in zip(k, k[1:]):
             if total_tokens <= t1:
                 return c0 + (c1 - c0) * (total_tokens - t0) / (t1 - t0)
