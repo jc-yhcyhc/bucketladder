@@ -1,0 +1,51 @@
+{
+  "experiment": "i1_eval",
+  "description": "A/B for bucket-aligned step packing. Run once per server mode against the SAME build, with BUCKETLADDER_ALIGN deciding which. Correctness is gated first: greedy completions at prompt lengths chosen to straddle compiled buckets, hashed and compared across modes. If the hashes differ the patch is wrong and no timing here means anything.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "prompt_len": 512,
+  "output_len": 16,
+  "n_requests": 60,
+  "rates_hz": [
+    25,
+    55
+  ],
+  "repeats": 3,
+  "correctness_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "correctness_prompt_lens": [
+    128,
+    520,
+    1032,
+    2056
+  ],
+  "correctness_out": 24,
+  "note_prompt_lens": "520, 1032 and 2056 sit just above 512, 1024 and 2048 -- exactly the steps the patch trims. 128 is a control that never triggers it. If the patch corrupts anything it will be at these lengths.",
+  "note_output_len": "16, not 1. The patch defers PREFILL chunks, so a workload with real decode is the one where deferral could plausibly disturb output, and decode is also where production serving spends its time.",
+  "note_both_sides": "Throughput and p99 are both recorded. The optimisation defers work, so a throughput number without the tail-latency cost would be exactly the one-sided report the plan warned about."
+}
