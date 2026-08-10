@@ -1,0 +1,18 @@
+{
+  "experiment": "e00_smoke_test",
+  "description": "Ladder enumeration and controlled-variable audit for the R3 control model. Run before e01 on Qwen1.5-4B-Chat: the flatness comparison against Qwen3-4B is only meaningful if BOTH servers compiled the same bucket ladder, and that is an assumption until this parses it out of the new server's warmup log.",
+  "model": "Qwen/Qwen1.5-4B-Chat",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  }
+}
