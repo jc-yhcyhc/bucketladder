@@ -1,0 +1,427 @@
+# What Compiled-Shape Padding Actually Costs in Production TPU Serving
+
+### A measurement study: 36% of executed tokens are padding, and it is free
+
+**Draft — 2026-08-10.** Target: MLSys 2027 Industrial Track (novelty not required;
+design methodology and detailed benchmarks are). Venue and deadline **unverified**;
+backup venue not yet chosen.
+
+Stack under test: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1,
+on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across seven
+hardware sessions.
+
+---
+
+## Abstract
+
+TPU executables are compiled for fixed tensor shapes, so a serving stack must round
+every workload up to one of a precompiled ladder. The natural inference — that
+rounding up means paying for what you rounded up to — motivates a family of
+proposed optimisations: length bucketing, shape-aware admission control, ladder
+design. We measure what is actually paid in a production TPU serving stack and find
+that **almost none of it is**.
+
+Shape quantization here is three-dimensional. Per-request sequence padding **does
+not exist**: a batch of mixed-length requests costs its packed tokens, and rejecting
+the per-request-padding model by 44–618% does not depend on chunked prefill. The
+attention kernel's request dimension is **pinned to a single compiled bucket by
+default configuration**, so batch size never changes the attention shape at all.
+The step's token count *is* padded and *is* paid — but only at batch size one,
+which is not a serving regime.
+
+Over 150 instrumented dispatches, **35.9% of executed tokens are padding** (p95
+per-dispatch ratio 99.6%), and doubling the padded token count at fixed real work
+changes cost by ≤2%, frequently downward. The padding is real and free.
+
+We report the mechanism for each dimension read from the serving stack's own
+source and confirmed on hardware, a cost model validated on two independent
+holdouts (2.9% and 3.6% MAPE), a provable optimality bound for the scheduling
+policies the model admits, and two invalid inferences we made and caught — both
+instances of measuring a step-scoped property with a request-scoped instrument.
+
+---
+
+## 1. Introduction
+
+A GPU serving stack launches kernels whose shapes are resolved at runtime. A TPU
+serving stack cannot: XLA compiles for fixed shapes, and recompiling per request is
+impossible at serving latencies. vLLM's TPU backend therefore precompiles a ladder
+of shapes and rounds every step up to the nearest.
+
+This is a quantization, and quantizations usually cost something. The literature
+assumes it does. **BucketServe** derives an optimal length-bucket boundary and then
+declines to compute it, calling it "computationally expensive to calculate in
+practice". **LAPS** captures a CUDA Graph per `(length, batch)` cell, pads to the
+nearest, and notes that "the number of graphs must be limited". Both are GPU work,
+and both take for granted that the padding they are managing is paid.
+
+We set out to design an admission-control policy for exactly that cost on TPU:
+promote a request into a larger already-warm shape and pay the padding, or queue it
+and pay the delay. Six sessions in, a control experiment we should have run first
+showed the premise was wrong. This paper reports what is true instead.
+
+**Contributions, in order of strength.**
+
+1. **The attention request ladder is not the printed request ladder** (§4.3). The
+   ladder the log advertises is not the one attention executes at; attention is
+   pinned to a single bucket by a default-off environment flag. Verifiable from
+   source by anyone, and it explains an otherwise anomalous decode measurement.
+2. **A measured negative result on the cost lever** (§5), framed as validation:
+   Ragged Paged Attention's fine-grained tiling works as designed, and what remains
+   after it had not been measured. 36% of executed tokens are padding and it costs
+   nothing detectable.
+3. **A validated cost model and a provable bound** (§6) for what scheduling *can*
+   buy once padding is excluded — which is ordinary batching amortisation, measured
+   and bounded rather than assumed.
+4. **A methodological rule** (§7), reported with both of the errors that produced
+   it: step-scoped properties require step-scoped instruments.
+
+We explicitly do **not** claim a ladder redesign, an admission-control policy, or a
+throughput improvement.
+
+---
+
+## 2. Method
+
+**Controlled variables.** Prefix caching off (asserted at run start, aborting rather
+than warning), chunked prefill recorded, `max_model_len` 8192,
+`max_num_batched_tokens` 8192, TP=4, `VLLM_TPU_BUCKET_PADDING_GAP` unset (default
+exponential ladder). Every run parses the server's own engine-config line and
+aborts if any controlled variable disagrees with the config it claims to be running.
+
+**Units.** All costs are server-side, from vLLM's Prometheus histograms scraped as
+*deltas* around each measurement block, never client wall-clock. A client stopwatch
+measures network RTT, HTTP, tokenizer and queueing along with compute; the claims
+here are about compute.
+
+**Traceability.** Every run writes `meta.json` before doing any work, records a
+config hash, git SHA and dirty flag, and appends to a manifest. Runs are never
+overwritten. Interrupted runs are marked and excluded from analysis automatically.
+
+**Models.** Qwen3-4B primary (head_dim 128, GQA 4:1); SmolLM2-1.7B-Instruct
+(head_dim 64, MHA) and TinyLlama-1.1B-Chat (head_dim 64, GQA 8:1) for the
+architecture contrast in §4.2.
+
+---
+
+## 3. The three quantized dimensions
+
+Read from `tpu_inference/runner/tpu_runner.py:2133` and `runner/utils.py`, then
+confirmed on hardware. Per scheduler step:
+
+| | quantizes | ladder | source |
+|---|---|---|---|
+| **D1** | prompt length → prefill shape | — | *does not exist* |
+| **D2** | scheduled tokens / step | `[16, 32, …, 8192]` | `get_token_paddings` |
+| **D3** | requests / step | `[8, 16, …, 256]` non-attention; **`[256]` attention** | `get_req_paddings`, `get_attn_req_paddings` |
+
+---
+
+## 4. What each dimension does
+
+### 4.1 D1 — per-request length padding does not exist
+
+We hold batch size and total token count fixed and vary only the *spread* of
+request lengths. Three models coincide on a uniform batch and diverge on a ragged
+one: **packed** (cost tracks summed true lengths), **per-request padded**, and
+**batch padded** (one compiled sequence dimension, everyone padded to the longest).
+
+At `n=4`, `total=2048`, `max_len=1536` the three predict 39.2 / 56.6 / 144.8 ms —
+a 3.7× spread, far outside measurement noise.
+
+| n=8, total=4096 (packed predicts 69.08 ms) | max=512 | 1024 | 2048 | 3072 | 3900 |
+|---|---|---|---|---|---|
+| measured | 69.15 | 75.95 | 73.61 | 83.41 | 88.39 |
+| error vs packed | +0.1% | +10.0% | +6.6% | +20.7% | **+28.0%** |
+| error vs batch-padded | — | −48% | −75% | −86% | −85% |
+
+Uniform controls, where all three models agree, match to 1.9% — so the instrument
+is sound. **Batch padding is rejected by 44–618%.**
+
+The obvious objection is that chunked prefill does the packing, which would make
+this a narrow claim about a scheduler option. It does not. Re-run with
+`--no-enable-chunked-prefill` (vLLM warns this is unofficial for this model but
+accepts it), packed still wins 8 of 10 ragged cells and batch padding is still
+rejected by 75–579%, cell by cell nearly unchanged.
+
+Raggedness is not entirely free: the penalty over pure packed grows with spread to
+**+28%** when one request holds 95% of a batch's tokens. Neither pure model fits
+well (packed mean error 11–12%), and we report the residual rather than choosing a
+winner.
+
+### 4.2 D2 — the token ladder is paid, at batch size one
+
+With a single request in flight, the step's token count *is* the request's length,
+so nothing is smeared. Sweeping length within one compiled bucket and measuring
+server-side prefill time gives a *flatness* statistic — 1.0 means cost is
+independent of true length within the bucket (a perfect staircase), 0.0 means cost
+is proportional to true length.
+
+| bucket | Qwen3-4B (dim 128, GQA 4:1) | TinyLlama (dim 64, GQA 8:1) | SmolLM2 (dim 64, MHA) |
+|---|---|---|---|
+| 512 | 1.00 | 0.90 | 0.84 |
+| 1024 | 0.96 | 0.85 | 0.78 |
+| 2048 | 0.91 | 0.82 | 0.73 |
+| 4096 | 0.81 | — | 0.54 |
+
+The staircase is real and **architecture-dependent**. Holding head_dim at 64 and
+moving only the GQA ratio (SmolLM2 → TinyLlama) raises flatness by +0.07 to +0.09
+at every bucket — roughly half the Qwen3–SmolLM2 gap. Neither head_dim nor the GQA
+ratio alone explains it. Mechanistically the direction is coherent: fewer KV heads
+means less real attention work per token, so the fixed padded cost is a larger
+fraction of the total.
+
+A mechanism check: `request_prefill_kv_computed_tokens` tracks the **true** length,
+never the padded bucket, on every model. RPA does skip padding inside attention;
+whatever is paid is paid outside it.
+
+### 4.3 D3 — the printed request ladder is not the attention ladder
+
+Every boot logs two request ladders and we read past the second one six times:
+
+```
+Prepared request paddings:      [8, 16, 32, 64, 128, 256]
+Prepared attn request paddings: [256]                    <- one entry
+```
+
+The source explains it:
+
+```python
+def get_attn_req_paddings(min_req_size, max_req_size):
+    if not envs.ATTN_BUCKETIZED_NUM_REQS:   # defaults to False
+        reqs = [max_req_size]               # ONE bucket, at the maximum
+```
+
+**Attention always executes at 256 requests, whatever the batch size.** It is the
+dominant cost and its shape never varies, so there is no batch-ladder step to find
+— in prefill or in decode. The `[8, 16, …]` ladder still applies to non-attention
+work (sampling, logits), which is small.
+
+Hardware agrees. If decode padded 9 sequences up to 16, decode at n=9 would cost
+what n=16 costs:
+
+| n | 8 | **9** (padded to 16) | 16 |
+|---|---|---|---|
+| decode phase | 53.3 ms | **51.4 ms** | 91.8 ms |
+
+It costs what n=8 costs. Two sessions were spent hunting a promotion cost at the
+8→16 edge that the default configuration had already excluded.
+
+---
+
+## 5. How much padding is executed, and whether any of it is paid
+
+**The ceiling.** The Prometheus histogram bucket edges for `iteration_tokens_total`
+are powers of two, and so is the compiled token ladder, so a step's reporting bucket
+edge *is* the size it executed at. Over 150 instrumented dispatches:
+
+- padded / real = **1.56×** → **35.9% of executed tokens are padding**
+- mean per-dispatch padding ratio **56.8%**, p95 **99.6%**
+
+**Whether it is paid.** At fixed batch size the real token count is constant, but
+the scheduler chunks differently between repeats — so identical real work executes
+at padded totals differing by up to 2×. This is a natural experiment with a
+property no designed one can match: real work is held *exactly* constant, not to
+within a few percent.
+
+| n | real tokens | padding rises | cost |
+|---|---|---|---|
+| 8 | 4104 | ×1.40 | **×0.80** |
+| 9 | 4617 | ×1.50 | **×1.00** |
+| 10 | 5130 | ×1.43 | **×0.98** |
+| 12 | 6156 | ×1.22 | ×1.61 ← sole exception |
+| 14 | 7182 | ×1.22 | ×0.99 |
+| 16 | 8208 | ×1.18 | ×0.99 |
+
+Doubling padded tokens moves cost by ≤2%, frequently downward. **D2 is not paid at
+n > 1.** The n=12 cell is the sole exception and is also the cell with an
+unexplained bimodality (§8); its ordering is non-monotone
+(9216→82.6 ms, 10240→136.5, 11264→132.7), so it is not a padding effect either.
+
+**Consequence.** All three dimensions are inert under batching. A scheduler-side
+optimisation we designed — deferring a marginal chunk rather than spilling into the
+next bucket — is **analysed and rejected on a computed ceiling** rather than left
+untested: the 36% is free, so there is nothing to recover.
+
+*Weakness, stated:* this is a natural experiment. The scheduler chose the splits, so
+a lurking variable correlated with both split and cost is not excluded the way
+randomisation would exclude it. A designed straddle at fixed n and per-sequence
+length remains worth running as confirmation.
+
+---
+
+## 6. What scheduling can buy once padding is excluded
+
+With padding free, the only remaining lever is batching efficiency. It is real:
+
+| batch | tokens | cost | per token |
+|---|---|---|---|
+| 1 | 512 | 13.15 ms | **25.7 µs** |
+| 4 | 2048 | 39.22 ms | 19.2 µs |
+| 8 | 4096 | 69.08 ms | **16.9 µs** |
+| 16 | 8192 | 145.58 ms | 17.8 µs |
+
+**Cost model.** A piecewise-linear interpolation of the measured curve — not a
+parametric form. Our first model assumed a ladder step and failed its hardware
+holdout at **105.7% MAPE**; the refit passes two independent holdouts: seeds the
+fit never saw (**3.6%**, worst cell 7.9%) and *rates* the fit never saw
+(**2.9%**, worst cell 8.9%).
+
+**Its stated limits.** Calibrated at `prompt_len=512` and `output_len=1`. We tested
+the generalisation and it fails: at `prompt_len=256` and matched total tokens, costs
+differ by −35% to +25%. Above 2048 tokens the transfer is a consistent ~9%; below,
+it is not. Cost is **not** a function of total tokens alone.
+
+**Policy measurement.** Because stock vLLM never holds a request back (measured
+queue time 0.0 ms at every concurrency), admission policy is implementable entirely
+client-side by choosing release timing — no scheduler patch, deployable as a proxy.
+Six paired seeds at 25 req/s:
+
+| | TPU cost vs stock | p95 latency vs stock |
+|---|---|---|
+| hybrid | **−26.1%** CI [2.53, 4.17] ms, p=0.001 | +12.7 ms CI [−22, +35], p=0.570 |
+| wait-to-fill | −26.6%, p=0.001 | **+338 ms** CI [+273, +400], p=0.001 |
+
+Hybrid reaches nearly all of wait-to-fill's saving for a small fraction of its
+latency. **We do not claim this is free.** Our own harness spends ~24 ms per
+dispatch scraping metrics, which inflates *stock's* p95 from ~24 ms to ~86 ms and
+masks the delay hybrid introduces deliberately; simulated without it, hybrid costs
+roughly +188% p95 at 25 req/s. The p95 result above is a property of our driver as
+much as of the policy, and we report it as such.
+
+**A bound, not an oracle.** We compute the offline optimum by dynamic programming
+over contiguous batchings, minimising `cost + λ·latency`, verified against
+brute-force enumeration of every partition at n=9. Comparison uses the Lagrangian
+dual `max_λ [g(λ) − λL]`, which provably lower-bounds every schedule no slower than
+the policy. Cost above that bound, at each policy's own latency:
+
+| rate | promote (stock) | hybrid | wait-to-fill |
+|---|---|---|---|
+| 10 | **2.2%** | 2.7% | 15.7% |
+| 25 | **4.8%** | 6.6% | 8.2% |
+| 55 | 12.8% | 11.1% | **6.7%** |
+| 90 | 17.9% | 14.2% | **7.6%** |
+| worst case | 17.9% | **14.2%** | 15.7% |
+
+**Stock is not badly suboptimal** — 2–5% above the bound at low load. It occupies
+the low-latency end of the frontier. Every fixed policy is near-optimal somewhere
+and poor somewhere else; hybrid's only distinction is the lowest *worst-case*
+regret. That is a minimax claim and a modest one.
+
+This section is dynamic batching, measured. We flag that plainly: the mechanism is
+per-step overhead amortisation, not shape.
+
+---
+
+## 7. Methodological findings
+
+Two of our inferences were invalid. Both are the same error and both were caught by
+our own controls, so we report them rather than quietly fixing them.
+
+**Request-scoped metric → step property.** At `output_len=8`, a batch of 9 behaved
+like a batch of 16 (+62 ms) — exactly the promotion cost the project predicted. At
+`output_len=1` it did not. The likely explanation is interleaving: with multiple
+output tokens some requests decode while others prefill, so a request's measured
+"prefill time" spans other requests' steps. We built a cost model on that 62 ms
+number and it failed its holdout at 105.7%.
+
+**Dispatch-scoped curve → step property.** The dispatch cost curve shows no
+staircase, which we read as evidence against per-step token padding. Invalid: a
+dispatch is 2–4 engine iterations, so its cost is a *sum over steps* whose token
+counts land wherever the scheduler put them, and summing over a staircase smears
+it. The flat curve is *uninformative* about per-step padding, not contrary to it.
+
+**The rule.** Step-scoped properties require step-scoped instruments. Verify
+single-step execution from the `iteration_tokens_total` count delta before
+attributing anything to a step.
+
+Three further process findings, each of which cost real money or nearly produced a
+wrong published number:
+
+- **A three-repeat median of a bimodal cell is not an estimate.** Three repeats put
+  a promotion cost at +16 ms; twenty-one put it at +62.1 ms, matching an earlier
+  session's +62.3 ms to 0.3%.
+- **A cost curve that is optimised over needs more support than one that is only
+  read.** Our DP found the cheapest point on the curve to be a knot resting on
+  three observations of a bimodal cell, and built "optimal" schedules on it.
+- **Model choice on this stack is constrained by packaging, not architecture.**
+  Three server boots were lost to a registered-but-broken architecture, a checkpoint
+  with no safetensors, and a checkpoint carrying `rotary_emb.inv_freq` buffers the
+  loader rejects — none visible in `config.json`. A preflight that reads
+  architecture, weight format, tensor names, TP divisibility and context length now
+  retrodicts all of them in seconds.
+
+---
+
+## 8. Limitations and open questions
+
+- **`output_len=1`** for every cost measurement. Decode is where production serving
+  spends most of its time. We measure decode's *batch* padding (§4.3) but not a
+  decode-dominated cost model.
+- **One accelerator** (v5e-4, TP=4), one primary model, one prompt length for the
+  cost model — whose generalisation across prompt length we tested and rejected.
+- **Synthetic workloads.** Arrivals are Poisson and prompts uniform. No production
+  trace.
+- **An unexplained bimodality.** Per-dispatch cost has two modes ~1.6× apart at
+  n=9–14. Excluded so far: differing scheduled tokens (identical between modes),
+  differing step count (identical at n=12 and n=14), drift/warmup/thermal (a runs
+  test matches randomness — 6 runs observed against 6.1 expected at n=10), and
+  top-bucket occupancy (ratios 1.00 and 0.98 at n=9 and n=10). It is a per-dispatch
+  coin flip whose cause is not on `/metrics`; resolving it needs XLA profiler
+  traces.
+- **`ATTN_BUCKETIZED_NUM_REQS=1` is unmeasured.** We know the flag exists and is
+  off; we have not measured what enabling it costs or saves. That is the one
+  remaining measurement with actionable information in it.
+
+---
+
+## 9. Related work
+
+**Ragged Paged Attention** is the technique our results validate. Its design goal is
+fine-grained tiling for ragged execution; we find per-request padding costs nothing
+measurable, which is what that design predicts. We are not aware of a published
+measurement of what remains after it in a production stack, which is the gap this
+paper fills.
+
+**BucketServe** and **LAPS** both manage length-bucketing overhead, on GPU. Our
+result does not refute them; it bounds their transferability. On this TPU stack the
+padding they target is not paid, so length bucketing has no purchase — and D3 shows
+the batch dimension they would bucket over is pinned to a single shape by default.
+
+**LENS** characterises shape-induced latency steps on NPUs and predicts them to
+2.15%. It is a predictor, not a scheduler, and it is our methodological precedent
+for the flatness statistic rather than a competitor.
+
+**Vidur** established simulator-fidelity validation (<9% error) as the standard for
+this kind of work; our holdout discipline follows it.
+
+---
+
+## 10. Conclusion
+
+A production TPU serving stack quantizes shapes in three dimensions. One does not
+exist, one is disabled by a default configuration flag, and one is paid only at a
+batch size that never occurs in serving. **36% of executed tokens are padding and it
+costs nothing measurable.**
+
+The practical advice is negative and worth stating: do not build length bucketing,
+shape-aware admission control, or ladder design for this stack. What remains for a
+scheduler is ordinary batching amortisation, worth ~26% of TPU time at moderate load
+against a stock baseline that is already within 2–5% of a provable optimum at its
+own latency.
+
+We arrived at this by trying to build the opposite paper, and the control experiment
+that refuted it cost $3 and should have run first.
+
+---
+
+## Appendix A — reproduction
+
+Every number above regenerates from committed configs and captured runs. Hardware
+sessions total [redacted]. `scripts/check_model.py` preflights a model in seconds;
+`scripts/refit_cost_model.py --write` regenerates the cost curve and re-runs both
+holdouts; `scripts/h1_headroom.py` recomputes §5 offline from captured dispatches.
+
+**Still to build:** `reproduce_all.sh` regenerating every figure from the manifest,
+and `paper_numbers.parquet` with claim-id indirection, both required by our own
+verification bar and both currently missing.
