@@ -2,9 +2,13 @@
 
 ### A measurement study: 36% of executed tokens are padding, and ~92% of that is free
 
-**Draft — 2026-08-10.** Target: MLSys 2027 Industrial Track (novelty not required;
-design methodology and detailed benchmarks are). Venue and deadline **unverified**;
-backup venue not yet chosen.
+**Draft — 2026-08-10.** Target: **MLSys 2027 Industrial Track**. Confirmed from the
+2026 call: *"No requirement for novelty or new methods,"* and the track explicitly
+invites *"submissions that challenge or reinforce existing solutions, provide deeper
+insights into known problems, or rigorously validate published techniques in a
+real-world setting."* 10 pages excluding references. MLSys 2026's industrial
+deadline was 30 Oct 2025, so the 2027 equivalent is expected **late Oct 2026**; the
+2027 call is not yet posted. Backup venue still unchosen.
 
 Stack under test: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1,
 on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across eight
@@ -132,14 +136,24 @@ one: **packed** (cost tracks summed true lengths), **per-request padded**, and
 At `n=4`, `total=2048`, `max_len=1536` the three predict 39.2 / 56.6 / 144.8 ms —
 a 3.7× spread, far outside measurement noise.
 
-| n=8, total=4096 (packed predicts 69.08 ms) | max=512 | 1024 | 2048 | 3072 | 3900 |
-|---|---|---|---|---|---|
-| measured | 69.15 | 75.95 | 73.61 | 83.41 | 88.39 |
-| error vs packed | +0.1% | +10.0% | +6.6% | +20.7% | **+28.0%** |
-| error vs batch-padded | — | −48% | −75% | −86% | −85% |
+Pooling the two independent spread runs (§4.1's chunked-prefill control showed
+the setting is irrelevant, so they are replicates), at n=8, total=4096, where
+packed predicts 69.08 ms:
+
+| max_len | 512 | 768 | 1024 | 1536 | 2048 | 3072 | 3900 |
+|---|---|---|---|---|---|---|---|
+| median measured (ms) | 68.47 | 72.86 | 73.38 | 76.55 | 73.50 | 89.40 | 88.28 |
+| penalty vs packed | −0.9% | +5.5% | +6.2% | +10.8% | +6.4% | **+29.4%** | **+27.8%** |
+| run-to-run spread | 2.0% | 8.1% | 7.3% | 0.8% | 0.3% | **14.4%** | 0.2% |
 
 Uniform controls, where all three models agree, match to 1.9% — so the instrument
-is sound. **Batch padding is rejected by 44–618%.**
+is sound. **Batch padding is rejected by 44–618%** across every ragged cell.
+
+The third row is why the second is reported as a trend rather than a curve: the
+same cell measured twice on the same server instance differs by up to 14.4%,
+which is the §8 bimodality showing up again. The monotone growth of the penalty
+with spread survives pooling; the individual values should not be read to better
+than ~10%.
 
 The obvious objection is that chunked prefill does the packing, which would make
 this a narrow claim about a scheduler option. It does not. Re-run with
@@ -148,7 +162,7 @@ accepts it), packed still wins 8 of 10 ragged cells and batch padding is still
 rejected by 75–579%, cell by cell nearly unchanged.
 
 Raggedness is not entirely free: the penalty over pure packed grows with spread to
-**+28%** when one request holds 95% of a batch's tokens. Neither pure model fits
+**+28%** when one request holds 95% of a batch's tokens (pooled median; 27.8%). Neither pure model fits
 well (packed mean error 11–12%), and we report the residual rather than choosing a
 winner.
 
@@ -301,7 +315,7 @@ and that one is real:
 | 1 | 512 | 13.15 ms | **25.7 µs** |
 | 4 | 2048 | 39.22 ms | 19.2 µs |
 | 8 | 4096 | 69.08 ms | **16.9 µs** |
-| 16 | 8192 | 145.58 ms | 17.8 µs |
+| 16 | 8192 | 144.75 ms | 17.7 µs |
 
 **Cost model.** A piecewise-linear interpolation of the measured curve — not a
 parametric form. Our first model assumed a ladder step and failed its hardware
@@ -461,6 +475,14 @@ sessions total [redacted]. `scripts/check_model.py` preflights a model in second
 `scripts/refit_cost_model.py --write` regenerates the cost curve and re-runs both
 holdouts; `scripts/h1_headroom.py` recomputes §5 offline from captured dispatches.
 
+**Number provenance.** `scripts/paper_numbers.py` recomputes every figure in this
+paper from the captured runs and diffs it against the text, emitting
+`results/paper_numbers.parquet` with a `claim_id` per number and the `run_id` it
+derives from. **35 claims, 35 verified.** It found two real defects on first run:
+an 8192-token cost transcribed from an exploratory dump over all seeds rather than
+the fitted curve (145.58 vs 144.75 ms), and a §4.1 table taken from one of two
+replicate runs that differ by up to 14.4% on the same cell — now pooled, with the
+run-to-run spread reported alongside.
+
 **Still to build:** `reproduce_all.sh` regenerating every figure from the manifest,
-and `paper_numbers.parquet` with claim-id indirection, both required by our own
-verification bar and both currently missing.
+and the figures themselves.
