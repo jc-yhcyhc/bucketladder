@@ -1,0 +1,223 @@
+{
+  "experiment": "m5_lens_form",
+  "description": "REGIME MAP, prefill arm. Intercept and slope per (bucket, n) across n in {1,2,4,8,16,32}. We have measured only corners -- n=1 and n=4 -- and asserted a structure between them. This says whether step cost falls smoothly with n or steps between levels, which is the difference between a continuum and the 'two regimes' description the draft is deliberately not using yet.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 7,
+  "warmup_discard": 3,
+  "cells": [
+    {
+      "bucket": 512,
+      "n": 1,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 512,
+      "n": 2,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 512,
+      "n": 4,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 512,
+      "n": 8,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 512,
+      "n": 16,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 1024,
+      "n": 1,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 1024,
+      "n": 2,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 1024,
+      "n": 4,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 1024,
+      "n": 8,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 1024,
+      "n": 16,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 1024,
+      "n": 32,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 2048,
+      "n": 1,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 2048,
+      "n": 2,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 2048,
+      "n": 4,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 2048,
+      "n": 8,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 2048,
+      "n": 16,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 2048,
+      "n": 32,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 4096,
+      "n": 1,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 4096,
+      "n": 2,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 4096,
+      "n": 4,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 4096,
+      "n": 8,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 4096,
+      "n": 16,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 4096,
+      "n": 32,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 8192,
+      "n": 2,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    },
+    {
+      "bucket": 8192,
+      "n": 4,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    },
+    {
+      "bucket": 8192,
+      "n": 8,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    },
+    {
+      "bucket": 8192,
+      "n": 16,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    },
+    {
+      "bucket": 8192,
+      "n": 32,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    }
+  ],
+  "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
+  "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
+  "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len."
+}

@@ -1,0 +1,64 @@
+{
+  "experiment": "m1_boundary",
+  "description": "REGIME MAP, padding arm. The same 2048->4096 boundary straddled at every batch size, so the paid-padding fraction is measured against n with the boundary held fixed. M1/M4 varied boundary and n together; this separates them.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 7,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "n1:2048/4096",
+      "n": 1,
+      "seq_len_below": 2048,
+      "seq_len_above": 2049
+    },
+    {
+      "name": "n2:2048/4096",
+      "n": 2,
+      "seq_len_below": 1024,
+      "seq_len_above": 1025
+    },
+    {
+      "name": "n4:2048/4096",
+      "n": 4,
+      "seq_len_below": 512,
+      "seq_len_above": 513
+    },
+    {
+      "name": "n8:2048/4096",
+      "n": 8,
+      "seq_len_below": 256,
+      "seq_len_above": 257
+    },
+    {
+      "name": "n16:2048/4096",
+      "n": 16,
+      "seq_len_below": 128,
+      "seq_len_above": 129
+    },
+    {
+      "name": "n32:2048/4096",
+      "n": 32,
+      "seq_len_below": 64,
+      "seq_len_above": 65
+    }
+  ],
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+  "note_budget": "Every 'above' arm stays under max_num_batched_tokens=8192 so the dispatch is one step: the largest is 8x513=4104. Splits are counted per arm and warned about."
+}
