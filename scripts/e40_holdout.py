@@ -127,13 +127,28 @@ def drive(base_url: str, model: str, trace, policy, cost: CostModel,
         for th in threads:
             th.join()
         batch_ms = float("nan")
+        n_seen, queue_ms = float("nan"), float("nan")
         if scrape_each:
             after_b = mock_metrics.snapshot() if mock_metrics else scrape(base_url)
-            dd = delta(before_b, after_b).get("vllm:request_prefill_time_seconds")
+            d = delta(before_b, after_b)
+            dd = d.get("vllm:request_prefill_time_seconds")
             if dd:
                 batch_ms = dd["mean_ms"]      # == this batch's duration T_i
+                n_seen = dd["count"]
+            qq = d.get("vllm:request_queue_time_seconds")
+            if qq:
+                queue_ms = qq["mean_ms"]
+        # SPLIT DIAGNOSTIC. `batch_ms` is the batch's duration only if the whole
+        # released group landed in ONE server-side step. If vLLM split it, the
+        # delta's mean is the average over several steps while the simulator's
+        # cost is their sum, and the APE is then measuring the release mechanism
+        # rather than the cost model. Two signals distinguish the cases:
+        # `n_seen != n` means requests leaked across the scrape window, and
+        # queue_ms > 0 means somebody waited for a later step (e02 measured
+        # stock queue time at 0.0 ms, so any positive value here is a split).
         dispatched.append({"n": len(group), "padded_to": padded_batch(len(group), cost.ladder),
-                           "t_s": elapsed(), "batch_ms": batch_ms})
+                           "t_s": elapsed(), "batch_ms": batch_ms,
+                           "n_seen": n_seen, "queue_ms": queue_ms})
 
     while idx < len(trace) or pending:
         now = elapsed()
@@ -191,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         rows: list[dict[str, Any]] = []
+        batch_rows: list[dict[str, Any]] = []
         for cell in cells:
             pname, rate = cell["policy"], cell["rate_hz"]
             trace = sim.make_trace(n_req, rate, plen, seed=cfg.get("seed", 0))
@@ -205,13 +221,39 @@ def main(argv: list[str] | None = None) -> int:
 
             ape = (abs(measured - predicted) / measured * 100.0
                    if measured and not math.isnan(measured) else float("nan"))
+
+            # Did the client-side release actually produce the batches we asked
+            # for? Without this, a failing APE cannot be attributed.
+            split = [b for b in out["batches"]
+                     if not math.isnan(b["n_seen"]) and b["n_seen"] != b["n"]]
+            queued = [b["queue_ms"] for b in out["batches"]
+                      if not math.isnan(b["queue_ms"]) and b["queue_ms"] > 0.0]
+            split_pct = 100.0 * len(split) / len(out["batches"]) if out["batches"] else float("nan")
+            for b in out["batches"]:
+                batch_rows.append({"policy": pname, "rate_hz": rate, **b})
+
             rows.append({"policy": pname, "rate_hz": rate,
                          "predicted_ms_per_req": predicted,
                          "measured_ms_per_req": measured, "ape_pct": ape,
-                         "n_requests": n_req})
+                         "n_requests": n_req, "n_batches": len(out["batches"]),
+                         "split_batch_pct": split_pct,
+                         "mean_queue_ms": statistics.fmean(queued) if queued else 0.0})
+            flag = "" if not split else f"   SPLIT {split_pct:.0f}% of batches"
             print(f"[e40] {pname:<10} {rate:>4} req/s   predicted {predicted:7.2f}  "
-                  f"measured {measured:7.2f}  APE {ape:5.1f}%")
+                  f"measured {measured:7.2f}  APE {ape:5.1f}%{flag}")
         save_table(run, "holdout", rows)
+        save_table(run, "batches", batch_rows)
+
+        # A split rate above a few percent means the APE is testing the release
+        # mechanism, not the cost model — report it before the verdict, so a
+        # FAIL is never silently attributed to the wrong thing.
+        worst_split = max((r["split_batch_pct"] for r in rows
+                           if not math.isnan(r["split_batch_pct"])), default=0.0)
+        if worst_split > 5.0:
+            print(f"[e40] WARNING batches split from their released group in up to "
+                  f"{worst_split:.0f}% of dispatches. Client-side release is NOT "
+                  f"cleanly controlling batch composition, so the APE below is not "
+                  f"a clean test of the cost model.", file=sys.stderr)
 
         apes = [r["ape_pct"] for r in rows if not math.isnan(r["ape_pct"])]
         if apes:
