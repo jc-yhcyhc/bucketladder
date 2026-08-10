@@ -1,0 +1,51 @@
+{
+  "experiment": "e07_ragged_batch",
+  "description": "THE GATE. Does a mixed-length batch pay for its padding, or only for its tokens? The project is named for ragged workloads and every trace so far gave every request the same length, so nothing measured to date bears on raggedness. Holds n and total tokens fixed and varies only the spread, which separates three cost models that otherwise coincide.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "output_len": 1,
+  "repeats": 21,
+  "warmup_discard": 2,
+  "cells": [
+    {
+      "n": 4,
+      "total_tokens": 2048,
+      "max_len": 512
+    },
+    {
+      "n": 4,
+      "total_tokens": 2048,
+      "max_len": 1024
+    },
+    {
+      "n": 4,
+      "total_tokens": 2048,
+      "max_len": 1536
+    },
+    {
+      "n": 8,
+      "total_tokens": 4096,
+      "max_len": 512
+    },
+    {
+      "n": 8,
+      "total_tokens": 4096,
+      "max_len": 1024
+    }
+  ],
+  "note_controls": "The two max_len=512 cells are uniform, so all three models predict the same cost. They cannot distinguish anything and are not meant to: they check the MEASUREMENT. If a control disagrees with every model, the verdict on the ragged cells is untrustworthy.",
+  "note_budget": "Cells are chosen so even the fully batch-padded token count stays within max_num_batched_tokens=8192, keeping the dispatch in one scheduler step. n=8/max=2048 was dropped for this reason: it would pad to 16384 and split, confounding the comparison with the cost of splitting.",
+  "note_separation": "Predicted costs at n=4, total=2048, max=1536 are 39.2 / 56.6 / 144.8 ms for packed / per-request-padded / batch-padded -- a 3.7x spread, far outside the measurement noise, so the cell decides rather than hints."
+}
