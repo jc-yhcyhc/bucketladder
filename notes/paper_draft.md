@@ -293,10 +293,16 @@ equal across arms, so the ratio is not obviously biased, but we report it.
 that none of them turns a doubling of nominal padding into a doubling of cost. A scheduler-side
 optimisation we designed — deferring a marginal chunk rather than spilling into the
 next bucket — is **analysed and rejected on a computed ceiling** rather than left
-untested. Even at the extreme — eliminating all 36% — the recoverable share is
-6–10% of it, i.e. **2–4% of total execution**, before any deferral latency is
-charged against it. That is below the threshold at which we would trust a
-scheduler change to be a net win.
+untested, and the headroom is **not** negligible. A padded token costs 6.3–9.6%
+of a real one (M1's two edges); padding is 56.8% of real tokens on average; so
+padding inflates execution by 3.6–5.5%, and perfect alignment would recover
+**3.45–5.17%**.
+
+An earlier version of this section rejected the optimisation on a judgement that
+2–4% was "below the threshold worth acting on". That judgement was made after
+seeing the number, overriding a decision rule committed to beforehand which said
+1–5% warrants implementing. It is reinstated here as **pending measurement**, not
+rejected: §8 names the two cheap experiments that would settle it.
 
 *Weakness, stated:* this is a natural experiment. The scheduler chose the splits, so
 a lurking variable correlated with both split and cost is not excluded the way
@@ -418,6 +424,14 @@ wrong published number:
   cost model — whose generalisation across prompt length we tested and rejected.
 - **Synthetic workloads.** Arrivals are Poisson and prompts uniform. No production
   trace.
+- **The cost curve below 512 tokens is unmeasured.** The model scales linearly
+  from the origin there, which is an assumption, not a measurement. It decides
+  whether decomposing a padded residual into exact bucket sizes wins or loses:
+  on the extrapolation, `C(1024+512+256+16) = 37.37 ms` beats `C(2048) = 39.22`,
+  but a fixed per-step launch cost would reverse it. Five cells would close it.
+- **The end-to-end value of bucket-aligned packing is unmeasured.** M1 bounds the
+  per-step saving (6.6–9.9% on a maximally spilled step); what fraction of real
+  steps spill, and what deferral costs in latency, is not known.
 - **An unexplained bimodality.** Per-dispatch cost has two modes ~1.6× apart at
   n=9–14. Excluded so far: differing scheduled tokens (identical between modes),
   differing step count (identical at n=12 and n=14), drift/warmup/thermal (a runs
