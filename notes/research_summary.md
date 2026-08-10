@@ -6,6 +6,18 @@
 
 ---
 
+## 0. The claim, in one sentence
+
+**The cost of a compiled step in a production TPU serving stack is not a property
+of the step — it depends on batch size, and treating it as a constant produces a
+series of plausible-looking wrong conclusions, several of which we made and
+caught.**
+
+Everything below either supports that, bounds it, or records what we withdrew on
+the way to it.
+
+---
+
 ## 1. What we set out to do, and what happened instead
 
 **The plan:** on compiled-shape accelerators every request is padded up to one of
@@ -68,7 +80,16 @@ now with a number rather than an inference from a code comment.
 
 Absent from RPA, absent from LENS, absent from vLLM's TPU documentation.
 
-### 3.2 Shape-quantization cost is not a property of the step
+### 3.2 LENS's protocol does not transfer
+
+LENS predicts NPU latency to 2.15% with a per-bucket `intercept + slope × length`
+fitted from two measurements per bucket. Run on TPU with a withheld mid-bucket
+point: **MAPE 5.23%, worst 22.41%** — near-perfect at n=1–2 (0.0–0.6%) and failing
+at n=4 (17–24%). Its single-regime form does not survive the batch sizes
+production uses. Validation of a published technique on hardware its authors never
+ran.
+
+### 3.3 Shape-quantization cost is not a property of the step
 
 It depends on batch size, and the dependence is large:
 
@@ -76,7 +97,30 @@ It depends on batch size, and the dependence is large:
 |---|---|---|
 | n=1 | 1.61 µs/token | flat within a bucket — a staircase |
 | n=2 | 0.75 µs/token | flat |
-| n=4 | 17.18 µs/token | linear in tokens |
+| n=4 | 17.18 µs/token | **not flat — but see below** |
+
+**The n=4 slope is fragile and we say so rather than let a reviewer find it.**
+The sequence is non-monotonic — 1.61 → 0.75 → 17.18 — which reads as a
+measurement artifact before it reads as a finding. Inspecting the underlying
+points at bucket 512 shows why:
+
+```
+n=1   seq 320/384/512   cost 13.36 / 13.37 / 13.33   flat
+n=2   seq 160/192/256   cost 10.57 / 10.51 / 10.62   flat
+n=4   seq  80/ 96/128   cost  9.78 / 13.13 / 13.15   two flat, one low
+```
+
+Two of the three n=4 points are flat like n=1 and n=2; the 23× slope is
+`(13.15 − 9.78)/192`, carried entirely by the 320-token measurement. And all
+three sequence lengths pad to the same sequence bucket *and* the same token
+bucket, so **neither padding model predicts any difference between them**.
+
+We therefore claim only that step cost is batch-size-dependent — supported
+independently by the paid-padding fractions (~85% at n=1–2, 10–25% at n=4–8,
+measured in a separate experiment) and by LENS failing at exactly n=4. **The
+shape of that dependence, and the mechanism behind it, are unexplained.** Three
+things break at n=4 — our slope, our paid fraction, and a published predictor —
+and we could not identify what changes there.
 
 Equivalently, as the share of nominal padding actually paid: **~85% at n=1–2,
 10–25% at n=4–8**. Above n=8 the quantity **cannot be isolated** — zero of
@@ -84,7 +128,7 @@ fourteen cells produced a single-step dispatch, because the scheduler splits eve
 one. Whether the transition is a step or a smooth decay is **unknown**, and not
 obtainable with a `/metrics`-delta instrument.
 
-### 3.3 Padding is abundant and mostly free
+### 3.4 Padding is abundant and mostly free
 
 **35.9% of executed tokens are padding** (p95 per-dispatch ratio 99.6%), and the
 share actually paid rises with the boundary — 10.0% at 512→1024, 22.1% at
@@ -94,7 +138,7 @@ Per-request *length* padding does not exist at all: a mixed-length batch costs i
 packed tokens, rejecting the batch-padding model by 44–618%, and **not because of
 chunked prefill** — disabling it leaves the result unchanged.
 
-### 3.4 Decode is smooth, and decode is what production runs
+### 3.5 Decode is smooth, and decode is what production runs
 
 | n | 1 | 2 | 4 | 8 | 16 | 32 |
 |---|---|---|---|---|---|---|
@@ -104,15 +148,6 @@ chunked prefill** — disabling it leaves the result unchanged.
 Per-step cost rises **2.4×** while n rises **32×**; per-sequence cost falls **13×**
 monotonically, no discontinuity anywhere — across exactly the range prefill could
 not reach. **The pathology is real and lives in the phase that matters least.**
-
-### 3.5 LENS's protocol does not transfer
-
-LENS predicts NPU latency to 2.15% with a per-bucket `intercept + slope × length`
-fitted from two measurements per bucket. Run on TPU with a withheld mid-bucket
-point: **MAPE 5.23%, worst 22.41%** — near-perfect at n=1–2 (0.0–0.6%) and failing
-at n=4 (17–24%). Its single-regime form does not survive the batch sizes
-production uses. Validation of a published technique on hardware its authors never
-ran.
 
 ### 3.6 The bimodality, localised
 
@@ -184,7 +219,27 @@ silently drops prompt tokens ships as a 29% throughput win.
 
 ---
 
-## 6. Scope
+## 6. Limitations
+
+**Prefill step cost is unmeasurable above n=4.** Zero of fourteen cells at n≥8
+produced a single-step dispatch; the scheduler splits every one, so a
+`/metrics`-delta instrument cannot isolate a step there. **That is the regime
+production runs in.** Resolving it needs profiler traces, not more of this.
+
+**What is actually recoverable is ~4–9%, not 36%.** 35.9% of executed tokens are
+padding, but only 10–25% of nominal padding is paid, so the recoverable share of
+execution is **roughly 4–9%** — and that assumes alignment at constant step count,
+which no mechanism we tested achieves. Stated explicitly because a reader will do
+this subtraction, and should not have to.
+
+**The n=4 anomaly is unexplained** (§3.3), and three independent observations
+converge on it.
+
+**One accelerator, one primary model, synthetic uniform workloads.**
+
+---
+
+## 7. Scope
 
 Measured: one accelerator (v5e-4, TP=4), one primary model (Qwen3-4B) with two
 others for the architecture contrast, uniform 512-token prompts with Poisson
@@ -196,7 +251,7 @@ the mechanism behind non-deterministic splitting; any hardware other than v5e.
 
 ---
 
-## 7. Artifacts
+## 8. Artifacts
 
 `scripts/check_model.py` preflights a model in seconds and retrodicts all four
 load failures; `scripts/paper_numbers.py` ties 42 claims to `run_id`s, recomputes
