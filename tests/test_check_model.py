@@ -86,3 +86,32 @@ def test_attention_type_reported(heads, kv, expect):
     report head_dim and the GQA ratio, not merely pass or fail."""
     r = evaluate("m", cfg("LlamaForCausalLM", heads=heads, kv=kv), ST, tp=4, max_model_len=4096)
     assert r["attn"] == expect
+
+
+def test_inv_freq_buffers_are_fatal():
+    """NousResearch/Llama-2-7b-chat-hf. Ideal geometry -- Llama arch, head_dim
+    128, MHA -- and unloadable: Llama-2-era exports persist rotary_emb.inv_freq
+    into the weights, and the loader rejects it as an invalid param path AFTER
+    downloading 13 GB. Invisible in config.json; only the safetensors header
+    shows it."""
+    tensors = ["model.embed_tokens.weight"] + [
+        f"model.layers.{i}.self_attn.rotary_emb.inv_freq" for i in range(24)]
+    r = evaluate("llama2", cfg("LlamaForCausalLM", maxpos=4096), ST, tp=4,
+                 max_model_len=4096, tensors=tensors)
+    assert not r["ok"]
+    assert any("inv_freq" in f and "24" in f for f in r["fatal"])
+
+
+def test_clean_weights_pass():
+    """TinyLlama / SmolLM2 / Qwen3 all carry zero such buffers."""
+    tensors = ["model.embed_tokens.weight", "model.layers.0.self_attn.q_proj.weight"]
+    r = evaluate("tinyllama", cfg("LlamaForCausalLM", hidden=2048, heads=32, kv=4,
+                                  inter=5632, maxpos=2048, layers=22),
+                 ST, tp=4, max_model_len=2048, tensors=tensors)
+    assert r["ok"], r["fatal"]
+
+
+def test_unreadable_header_is_silent_not_a_verdict():
+    """A header we could not fetch must not manufacture a pass or a failure."""
+    r = evaluate("x", cfg("LlamaForCausalLM"), ST, tp=4, max_model_len=4096, tensors=None)
+    assert r["ok"] and not any("inv_freq" in f for f in r["fatal"])

@@ -2,9 +2,8 @@
 """
 Can this model actually be served? Answers in seconds, from a laptop, for $0.
 
-Session 4 lost two server boots — about 25 minutes of billed v5e-4 — to two
-model properties that are both readable from the HuggingFace API before
-anything is provisioned:
+Session 4 lost THREE server boots — roughly 35 minutes of billed v5e-4 — to
+model properties that are all readable before anything is provisioned:
 
   1. `Qwen/Qwen1.5-4B-Chat` is `Qwen2ForCausalLM`. tpu-inference 0.25.0's
      `models/jax/qwen2.py` reads `hf_config.text_config.hidden_size`, which
@@ -14,15 +13,23 @@ anything is provisioned:
      right attention geometry, and ships only `pytorch_model.bin`. The JAX
      loader requires `*.safetensors` and raises "Cannot find any *.safetensors
      files" after the weights have already been downloaded.
+  3. `NousResearch/Llama-2-7b-chat-hf` has ideal geometry — Llama arch,
+     head_dim 128, MHA — and its weights carry 24 `rotary_emb.inv_freq`
+     buffers, which the loader rejects with "is not a valid param path" after
+     downloading 13 GB. Llama-2-era exports persist those buffers; TinyLlama,
+     SmolLM2 and Qwen3 have none.
 
-Neither failure is visible in `config.json`'s architecture field alone, and
-both are fatal. The earlier `granite-3.1-2b` loss (IndivisibleError at TP=4)
-is a third instance of the same class.
+None of the three is visible in `config.json`'s architecture field, and all are
+fatal. The earlier `granite-3.1-2b` loss (IndivisibleError at TP=4) is a fourth
+instance of the same class. The pattern: **the binding constraints on model
+choice here are packaging, not architecture.**
 
 What this checks, in the order that costs the least to be wrong about:
 
     architecture   is it in tpu-inference's JAX registry at all?
     weights        are there *.safetensors, or only .bin?
+    tensor names   do the weights carry buffers the loader refuses? (read from
+                   the safetensors header via two ranged GETs, no download)
     sharding       do heads / kv-heads / intermediate divide by TP?
     context        does max_position_embeddings fit the intended max_model_len?
     attention      head_dim and GQA ratio, reported so a control model can be
@@ -38,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 import urllib.error
 import urllib.request
@@ -84,6 +92,32 @@ def fetch(model: str) -> tuple[dict[str, Any], list[str]]:
     return cfg, files
 
 
+def safetensors_tensor_names(model: str, fname: str, timeout: float = 60.0) -> list[str]:
+    """Tensor names from a safetensors header, without downloading the weights.
+
+    The format begins with a little-endian uint64 giving the length of a JSON
+    header, so two ranged GETs of a few KB reveal every tensor name in a file
+    that may be 13 GB. Worth the trouble: `rotary_emb.inv_freq` is invisible in
+    config.json and kills the load only after the full download completes.
+    """
+    url = f"{HF}/{model}/resolve/main/{fname}"
+    req = urllib.request.Request(url, headers={"Range": "bytes=0-7", "User-Agent": "bucketladder/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        n = struct.unpack("<Q", r.read(8))[0]
+    req = urllib.request.Request(url, headers={"Range": f"bytes=8-{8 + n - 1}",
+                                               "User-Agent": "bucketladder/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        head = json.loads(r.read().decode())
+    return [k for k in head if k != "__metadata__"]
+
+
+# Buffers that some exporters persist into the weights and that tpu-inference's
+# JAX loader rejects outright ("<path> is not a valid param path"). Learned from
+# NousResearch/Llama-2-7b-chat-hf, which carries 24 of them; Llama-2-era exports
+# have them, and TinyLlama / SmolLM2 / Qwen3 have none.
+REJECTED_TENSOR_SUBSTRINGS = ("rotary_emb.inv_freq",)
+
+
 def check(model: str, tp: int, max_model_len: int) -> dict[str, Any]:
     try:
         cfg, files = fetch(model)
@@ -92,15 +126,25 @@ def check(model: str, tp: int, max_model_len: int) -> dict[str, Any]:
                                                        f"({'gated or private' if e.code in (401, 403) else 'not found'})"]}
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         return {"model": model, "ok": False, "fatal": [f"could not reach HuggingFace: {e}"]}
-    return evaluate(model, cfg, files, tp, max_model_len)
+
+    tensors: list[str] | None = None
+    st = sorted(f for f in files if f.endswith(".safetensors"))
+    if st:
+        try:
+            tensors = safetensors_tensor_names(model, st[0])
+        except Exception:  # noqa: BLE001
+            tensors = None   # unreadable header is not a verdict; say nothing
+    return evaluate(model, cfg, files, tp, max_model_len, tensors)
 
 
 def evaluate(model: str, cfg: dict[str, Any], files: list[str],
-             tp: int, max_model_len: int) -> dict[str, Any]:
+             tp: int, max_model_len: int,
+             tensors: list[str] | None = None) -> dict[str, Any]:
     """The decision, separated from the fetch so it is testable offline.
 
     Every rule here was learned from a specific failed boot; the tests pin them
-    against the exact configurations that failed.
+    against the exact configurations that failed. `tensors` is optional because
+    a header that cannot be read should produce silence, not a false verdict.
     """
     fatal: list[str] = []
     warn: list[str] = []
@@ -115,6 +159,14 @@ def evaluate(model: str, cfg: dict[str, Any], files: list[str],
     if not any(f.endswith(".safetensors") for f in files):
         fatal.append("no *.safetensors — the JAX loader cannot read pytorch_model.bin, and it "
                      "fails only AFTER downloading the weights")
+
+    if tensors is not None:
+        bad = sorted({s for s in REJECTED_TENSOR_SUBSTRINGS
+                      if any(s in t for t in tensors)})
+        for s in bad:
+            n = sum(1 for t in tensors if s in t)
+            fatal.append(f"weights carry {n} '{s}' buffer(s); tpu-inference's loader raises "
+                         f"'is not a valid param path' on them, after the download completes")
 
     hidden = cfg.get("hidden_size")
     heads = cfg.get("num_attention_heads")
