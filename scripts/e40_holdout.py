@@ -62,6 +62,20 @@ from cost_model import CostModel, padded_batch  # noqa: E402
 from policies import ALL_POLICIES, Hybrid  # noqa: E402
 from simulator import Simulator  # noqa: E402
 
+# Dead time this harness itself adds between one dispatch finishing and the next
+# being issued: the /metrics scrape around every batch, plus HTTP and thread
+# spawn. Measured at a median 22.6-24.9 ms from `promote`'s own inter-dispatch
+# gaps, where the policy contributes no waiting of its own.
+#
+# It belongs in the PREDICTION, because arrivals accumulate during it and change
+# which requests end up in a batch. Leaving it at zero made the simulator form
+# batches of 1.22 where the hardware formed 2.95, and showed up as `promote`
+# being over-predicted by 18-27% at 40 and 75 req/s in the rate holdout — the
+# one policy that dispatches often enough for the overhead to dominate.
+# The refit's own validation modelled it; this script did not, which is why the
+# two disagreed about the same cost model.
+HARNESS_OVERHEAD_S = 0.024
+
 
 def build_policy(name: str, cfg: dict[str, Any]):
     if name == "hybrid":
@@ -223,7 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     status, err = "ok", None
     try:
         cost = CostModel()
-        sim = Simulator(cost)
+        # Predict the system we are actually measuring, harness included.
+        # Zero under --mock: the constant describes the LIVE harness, whose cost
+        # is an HTTP /metrics scrape and thread spawn against a real server. The
+        # mock does neither, so charging it there would make the self-consistency
+        # check fail for a reason that has nothing to do with the cost model.
+        overhead = 0.0 if args.mock else cfg.get("client_overhead_s", HARNESS_OVERHEAD_S)
+        sim = Simulator(cost, client_overhead_s=overhead)
         mock_metrics = MockMetrics() if args.mock else None
         use_metrics = bool(mock_metrics) or metrics_available(args.base_url)
         if not use_metrics:

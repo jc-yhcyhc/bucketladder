@@ -64,12 +64,8 @@ import pyarrow.parquet as pq  # noqa: E402
 
 CURVE_PATH = HERE.parent / "sim" / "measured_cost_curve.json"
 
-# Dead time per dispatch introduced by e40's own harness: the /metrics scrape
-# it performs around every batch, plus HTTP and thread spawn. Measured as the
-# median inter-dispatch gap beyond server compute for `promote`, which never
-# waits, so its entire excess is overhead: 22.6 ms at 25 req/s and 24.9 ms at
-# 55 req/s over the holdout runs.
-HARNESS_OVERHEAD_S = 0.024
+# Single definition, in the script whose harness it describes.
+from e40_holdout import HARNESS_OVERHEAD_S  # noqa: E402
 
 FIT_SEEDS = (99, 101, 103, 105, 107, 109)
 HOLDOUT_SEEDS = (201, 203, 205, 207, 209, 211)
