@@ -54,7 +54,7 @@ problem. The problems are elsewhere.
 |---|---|---|
 | **R1 units** | ✅ **fixed** — headline from `vllm:request_prefill_time_seconds` | Client TTFT retained alongside as a proxy |
 | **R2 restart** | ✅ **satisfied 2026-08-09** — two restarts agree within 0.02; across-restart CV 0.32% | The gradient is real, not drift |
-| **R3 models** | ✅ **satisfied** — SmolLM2 replication (granite failed TP=4 sharding) | **The staircase is architecture-dependent**: flatness 0.54 vs 0.81 at 4096 |
+| **R3 models** | ✅ **satisfied, and DECOMPOSED 2026-08-10** — three models: Qwen3-4B, SmolLM2, TinyLlama | **The staircase is architecture-dependent**, and about half of the gradient is attributable to the GQA ratio alone — see below |
 | **R4 intervals** | ✅ **fixed** — `_stats.flatness_ci` bootstraps the statistic itself | e01 now prints `0.97 [0.94, 1.01]` and warns when a CI exceeds 0.5 |
 | **R5 mechanism** | ✅ **satisfied** — `prefill_kv_computed_tokens` == true length always | RPA *does* skip padding in attention; the cost is the dense path running on the padded shape |
 
@@ -68,6 +68,32 @@ in session 2 on a different day with a different instrument. It is now among the
 better-supported numbers in the project — and R3 showed it is
 *architecture-dependent*, which turned it from a curiosity into the finding that
 scopes the paper's central claim.
+
+### R3 decomposed, 2026-08-10
+
+Session 3 satisfied R3 with a **confounded** contrast: Qwen3-4B (head_dim 128,
+GQA 4:1) at 0.81 against SmolLM2 (head_dim 64, MHA) at 0.54, moving head_dim,
+the GQA ratio *and* model family together. "Architecture-dependent" was true but
+unattributable, and the two candidate explanations imply different scopes — a
+head_dim effect generalises by RPA tile shape, a GQA effect by attention type.
+
+TinyLlama-1.1B-Chat holds head_dim at 64 against SmolLM2 and moves only the GQA
+ratio, in the same `LlamaForCausalLM` architecture:
+
+| bucket | Qwen3-4B (128, 4:1) | TinyLlama (64, 8:1) | SmolLM2 (64, MHA) |
+|---|---|---|---|
+| 512 | 1.00 | 0.90 | 0.84 |
+| 1024 | 0.96 | 0.85 | 0.78 |
+| 2048 | 0.91 | 0.82 | 0.73 |
+
+The GQA ratio alone moves flatness **+0.07 to +0.09 at every bucket**, about
+half the 0.18 Qwen3−SmolLM2 gap at 2048. The remainder travels with head_dim and
+family, which this run does not separate from each other.
+
+**Neither variable alone explains the gradient.** The paper reports the
+decomposition. Closing the head_dim half needs a head_dim-128 MHA model that
+this stack can actually load, and the three obvious candidates all failed on
+packaging rather than architecture (`notes/model_selection.md`).
 
 ---
 

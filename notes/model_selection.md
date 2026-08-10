@@ -80,39 +80,76 @@ size, Qwen2-7B — raises `AttributeError: 'Qwen2Config' object has no attribute
 'text_config'` before it ever touches the TPU. This is a bug in the stack, not
 in the configuration. It cost one server boot to find.
 
-### The control that survives: `princeton-nlp/Sheared-LLaMA-1.3B`
+### Two more failures, and the pattern behind all of them
 
-`configs/e01_marginal_cost_sheared.json`. `LlamaForCausalLM`, head_dim **128**,
-full MHA, 16 heads / 16 kv, intermediate 5504 — all divisible by 4.
+`princeton-nlp/Sheared-LLaMA-1.3B` was the next choice — `LlamaForCausalLM`,
+head_dim 128, MHA — and it ships **only `pytorch_model.bin`**. The JAX loader
+requires `*.safetensors` and fails *after* downloading the weights.
 
-It is a **better** control than the Qwen1.5 plan, because the comparison it
-anchors changes exactly one thing:
+`NousResearch/Llama-2-7b-chat-hf` was the next — the same ideal geometry, with
+safetensors — and its weights carry **24 `rotary_emb.inv_freq` buffers**, which
+the loader rejects with `is not a valid param path`. Llama-2-era exports persist
+those buffers into the checkpoint; TinyLlama, SmolLM2 and Qwen3 carry none.
 
-| | architecture | head_dim | GQA | flatness @ 4096 |
+Four failures now, and only one of them is about architecture:
+
+| model | why it cannot serve | visible in |
+|---|---|---|
+| granite-3.1-2b | `IndivisibleError` at TP=4 | config arithmetic |
+| Qwen1.5-4B-Chat | registered arch, broken loader | neither |
+| OLMo-2-7B | arch absent from the registry | config |
+| Sheared-LLaMA-1.3B | no safetensors | file listing |
+| Llama-2-7b-chat | `inv_freq` buffers in the weights | safetensors header |
+
+**The binding constraints on model choice here are packaging, not
+architecture.** `scripts/check_model.py` now checks all five before anything is
+provisioned, and retrodicts every one of these outcomes; the three lost boots
+cost roughly 35 minutes of billed v5e-4 between them.
+
+### The control that worked: `TinyLlama/TinyLlama-1.1B-Chat-v1.0`
+
+`configs/e01_marginal_cost_tinyllama.json`. `LlamaForCausalLM`, head_dim **64**,
+GQA **8:1**, 32 heads / 4 kv, intermediate 5632 — all divisible by 4.
+
+It takes the decomposition from the other side. Rather than holding the GQA
+ratio and moving head_dim, it holds **head_dim at 64** against SmolLM2 and moves
+**only the GQA ratio**, within one architecture at a comparable size:
+
+| | architecture | head_dim | GQA | flatness @ 2048 |
 |---|---|---|---|---|
-| SmolLM2-1.7B-Instruct | Llama | **64** | MHA | 0.54 |
-| **Sheared-LLaMA-1.3B** | Llama | **128** | MHA | ? |
-| Qwen3-4B | Qwen3 | 128 | 4:1 | 0.81 |
+| Qwen3-4B | Qwen3 | 128 | 4:1 | 0.91 |
+| **TinyLlama-1.1B-Chat** | Llama | **64** | **8:1** | **0.82** |
+| SmolLM2-1.7B-Instruct | Llama | **64** | **MHA** | 0.73 |
 
-Against SmolLM2 the only difference is head_dim, within one architecture at a
-comparable size — a true single-variable contrast, which Qwen1.5 could not have
-given (it would have changed the GQA ratio while also changing family and layer
-count). Against Qwen3-4B it isolates the GQA ratio, with family as a residual
-confound that must be stated.
+Its 2048-position limit costs nothing, because the Qwen3/SmolLM2 gap is present
+at *every* bucket rather than only at 4096 — 1.00 vs 0.84 at 512, 0.96 vs 0.78
+at 1024, 0.91 vs 0.73 at 2048.
 
-| outcome | reads |
-|---|---|
-| ≈ 0.81, like Qwen3 | **head_dim drives the gradient**; GQA does not |
-| ≈ 0.54, like SmolLM2 | **head_dim does not**; the cause is GQA or family |
-| in between | both contribute; report the decomposition |
+**Result, 2026-08-10.** Holding head_dim at 64 and moving MHA → 8:1 raises
+flatness by **+0.07 to +0.09 at every bucket** (0.90 vs 0.84 at 512, 0.85 vs
+0.78 at 1024, 0.82 vs 0.73 at 2048). That is about **half** of the 0.18
+Qwen3−SmolLM2 gap at bucket 2048; the remainder travels with head_dim and
+family, which this run does not separate from each other.
 
-Every outcome is informative, which is the property a control should have, and
-the readings were written down before the run.
+This is the "in between" reading, registered before the run: **neither variable
+alone explains the gradient, and the paper reports the decomposition rather than
+attributing the effect to one axis.**
 
-**Cost of the 4096-position limit.** `max_position_embeddings` is 4096, so
-bucket 4096 at occupancy 1.0 would need 4097 tokens of context and be rejected.
-The top fraction is therefore 0.99 (4055 tokens), which still maps to bucket
-4096. Flatness is computed from actual lengths, so this is accounted for rather
+The direction is mechanistically coherent. Fewer KV heads means less real
+attention work per token, so the fixed padded cost is a larger fraction of the
+total and the staircase reads as flatter. `kv_computed` tracks true length on
+TinyLlama exactly as on Qwen3, so RPA skips padding inside attention on both and
+the paid cost sits outside the attention kernel.
+
+**Residual differences**, stated rather than claimed away: 1.1B against
+SmolLM2's 1.7B, and 22 layers against 24. Flatness is a ratio of differences
+within one bucket, so absolute scale cancels, but parameter count is not held
+constant.
+
+**Cost of the 2048-position limit.** `max_position_embeddings` is 2048, so
+bucket 2048 at occupancy 1.0 would need 2049 tokens of context and be rejected.
+The top fraction is therefore 0.99 (2027 tokens), which still maps to bucket
+2048. Flatness is computed from actual lengths, so this is accounted for rather
 than assumed away — but it is a real difference from the SmolLM2 and Qwen3 runs
 and travels with the number.
 
