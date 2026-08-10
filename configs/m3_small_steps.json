@@ -1,0 +1,45 @@
+{
+  "experiment": "m3_small_steps",
+  "description": "The cost curve below 512 tokens, which the model currently extrapolates from the origin, plus a direct measurement of whether decomposing a padded residual into exact bucket sizes wins. Both hinge on the fixed per-step cost, which linear-from-origin assumes is zero and which no dispatch under 512 tokens has ever tested.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 9,
+  "warmup_discard": 3,
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+  "token_sizes": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "decomposition": {
+    "whole_tokens": 1808,
+    "parts": [
+      1024,
+      512,
+      256,
+      16
+    ]
+  },
+  "note_sizes": "Every size is exactly a compiled bucket edge, so these measure REAL cost with zero padding. 512 and 1024 overlap existing knots (13.15 and 17.23 ms) and act as a consistency check on the whole exercise.",
+  "note_decomposition": "1808 = 1024+512+256+16 exactly, and 1808 pads to 2048. On the extrapolated curve decomposition wins by 1.85 ms; that depends entirely on C(16)=0.41 ms, which is an assumption. Measured directly here."
+}
