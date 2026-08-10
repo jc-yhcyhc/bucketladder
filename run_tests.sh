@@ -40,6 +40,10 @@ echo; echo "=== e30 policy sweep (simulation, free) ==="
 "$PY" scripts/e30_policy_sweep.py --config configs/e30_policy_sweep.json --results-root "$TMP/e30" \
   | grep -E "^\[e30\] --- (25|90) req|hybrid|wait " | head -6
 
+echo; echo "=== e40 holdout harness self-consistency (mock) ==="
+"$PY" scripts/e40_holdout.py --config configs/e40_holdout.json --mock --results-root "$TMP/e40" \
+  | tail -3
+
 echo; echo "=== controlled-variable contract aborts on the bad config ==="
 if "$PY" scripts/e00_smoke_test.py --config configs/e00_BAD_apc_unrecorded.json --mock --results-root "$TMP" 2>/dev/null; then
   echo "  FAIL: bad config was accepted"; exit 1

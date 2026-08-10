@@ -129,3 +129,38 @@ def test_token_budget_is_never_exceeded():
     r = s.run(s.make_trace(300, 200, 512, 5), PromoteNow())
     # 8192/512 = 16 requests max per step
     assert r.n_batches >= 300 / 16
+
+
+# --- e40 holdout harness ---------------------------------------------------
+# A mock PASS proves the HARNESS is correct — that predicted equals measured
+# when the server obeys the cost model exactly. It says nothing about whether
+# real hardware obeys it. Only the hardware run tests that.
+
+def test_holdout_harness_is_self_consistent(tmp_path):
+    """Against a server that follows the cost model exactly, MAPE must be ~0.
+    If this drifts, the harness is broken and any hardware MAPE is meaningless."""
+    import json
+    sys.path.insert(0, str(REPO / "scripts"))
+    import e40_holdout as e40
+    from _common import read_manifest
+    import pandas as pd
+
+    cfg = json.loads((REPO / "configs" / "e40_holdout.json").read_text())
+    cfg.update({"n_requests": 24, "rates_hz": [40], "policies": ["promote", "wait"]})
+    p = tmp_path / "cfg.json"; p.write_text(json.dumps(cfg))
+
+    assert e40.main(["--config", str(p), "--mock", "--results-root", str(tmp_path / "r")]) == 0
+    entry = read_manifest(tmp_path / "r")[0]
+    v = pd.read_parquet(Path(entry["path"]) / "verdict.parquet").iloc[0]
+    assert v["worst_ape_pct"] < 15.0, f"harness self-consistency broken: {v['worst_ape_pct']:.1f}%"
+    assert v["verdict"] == "PASS"
+
+
+def test_holdout_reports_per_cell_not_just_mean():
+    """plan_v4's rule is <15% PER CELL. A good mean hiding one bad cell must
+    still fail, so the verdict is computed on the worst cell."""
+    import json
+    sys.path.insert(0, str(REPO / "scripts"))
+    import e40_holdout as e40
+    src = (REPO / "scripts" / "e40_holdout.py").read_text()
+    assert 'worst_ape_pct' in src and 'worst < 15.0' in src

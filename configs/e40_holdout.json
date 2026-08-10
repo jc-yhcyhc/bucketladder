@@ -1,0 +1,34 @@
+{
+  "experiment": "e40_holdout",
+  "description": "Holdout validation of the e30 cost model on real hardware. Policies are implemented CLIENT-SIDE by controlling release timing, which is faithful because stock vLLM never holds requests back (measured in e02: queue time 0.0 ms at every level). No scheduler patch needed.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": ""
+  },
+  "prompt_len": 512,
+  "output_len": 1,
+  "n_requests": 60,
+  "seed": 99,
+  "rates_hz": [
+    25,
+    55
+  ],
+  "policies": [
+    "promote",
+    "wait",
+    "hybrid"
+  ],
+  "latency_weight": 1.0,
+  "max_wait_s": 0.5,
+  "note_holdout": "seed 99 and these rates were NOT used to fit the cost model \u2014 the fit came from e02's concurrency sweep at fixed n. plan_v4 requires MAPE<15% per cell on data the fit never saw."
+}
