@@ -93,6 +93,10 @@ BLOCK = '''
                     _BL_STATS["tokens_deferred"] += (_bl_target + _bl_excess
                                                      - total_num_scheduled_tokens)
             _BL_STATS["spills_seen"] += 1
+            # Dump periodically rather than per step: a file write on every
+            # scheduler step would perturb the very thing being measured.
+            if _BL_STATS["spills_seen"] % 25 == 0:
+                _bl_dump_stats()
 '''
 
 HEADER = '''
@@ -111,6 +115,21 @@ _BL_BUCKETS = [16 << i for i in range(0, 20)]
 # /tmp/bl_align_stats.json on every scheduler step so a run can prove it acted.
 _BL_STATS = {"spills_seen": 0, "trims": 0, "tokens_deferred": 0}
 _BL_STATS_PATH = "/tmp/bl_align_stats.json"
+
+
+def _bl_dump_stats() -> None:
+    """Write the counters so a run can PROVE the trim fired.
+
+    Session 9's A/B came back flat and it took reading the guard to discover the
+    patch had never executed. A null result without a positive control is not a
+    result, so these are written where the harness can read them.
+    """
+    try:
+        import json as _bl_json
+        with open(_BL_STATS_PATH, "w") as _f:
+            _bl_json.dump(_BL_STATS, _f)
+    except Exception:
+        pass
 
 
 def _bl_largest_bucket_le(n: int) -> int:
