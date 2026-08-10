@@ -11,7 +11,7 @@ deadline was 30 Oct 2025, so the 2027 equivalent is expected **late Oct 2026**; 
 2027 call is not yet posted. Backup venue still unchosen.
 
 Stack under test: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1,
-on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across eight
+on `v5litepod-4` (4 chips, TP=4). Total measurement cost: **[redacted]** across ten
 hardware sessions.
 
 ---
@@ -37,10 +37,15 @@ Over 150 instrumented dispatches, **35.9% of executed tokens are padding** (p95
 per-dispatch ratio 99.6%). Randomised straddles that double the padded token count
 while moving real work by <2% show the share actually paid rising with the
 boundary: **10% at 512→1024, ~24% at 1024→2048 and above**, against the 100% the
-compiled-shape premise predicts. Perfect alignment would therefore recover about
-**12% of execution** — enough that we report the scheduler-side optimisation it
-implies rather than dismissing it. Enabling the attention request ladder that the
+compiled-shape premise predicts. Enabling the attention request ladder that the
 stack disables by default changes decode latency by 0.0%.
+
+The practical consequence follows from one further measurement rather than from a
+patch. A scheduler step carries a **6.11 ms fixed cost**, and paid padding scales
+with the bucket while that cost does not, so the two cross at ~2048 tokens:
+deferring work to align a step **loses by 4.7× at the 512→1024 boundary** and wins
+only above 2048. For the small steps that dominate decode-heavy serving the advice
+inverts — reduce step count and tolerate padding.
 
 We report the mechanism for each dimension read from the serving stack's own
 source and confirmed on hardware, a cost model validated on two independent
@@ -79,11 +84,13 @@ showed the premise was wrong. This paper reports what is true instead.
    Ragged Paged Attention's fine-grained tiling works as designed, and what remains
    after it had not been measured. 36% of executed tokens are padding, and doubling
    that padding costs 7–11% rather than 100%.
-3. **A 6.11 ms fixed cost per scheduler step**, measured directly, which the cost
-   model had been assuming away and which is what "batching amortisation" is
-   actually amortising (§6). It also rejects a natural-looking optimisation:
-   decomposing a padded residual into exact bucket sizes is **20.6% worse**
-   measured, where the extrapolated model said it won.
+3. **A 6.11 ms fixed cost per scheduler step**, measured directly, and the
+   **crossover rule it implies** (§5): step-for-alignment trades lose below ~2048
+   tokens and win above. It rejects two natural-looking optimisations — decomposing
+   a padded residual is **20.6% worse** measured, and bucket-aligned packing is
+   net-negative by 4.7× at the smallest boundary — and it explains why our own
+   implementation attempt was inert at 512-token prompts: it was optimising the
+   term that loses.
 4. **A validated cost model and a provable bound** (§6) for what scheduling *can*
    buy once padding is excluded.
 5. **A methodological rule** (§7), reported with both of the errors that produced
