@@ -304,18 +304,45 @@ avoid, and the split arms give visibly inconsistent shares (6.0%, 24.3%, 7.3%).
 that none of them turns a doubling of nominal padding into a doubling of cost. A scheduler-side
 optimisation we designed — deferring a marginal chunk rather than spilling into the
 next bucket — is **analysed and rejected on a computed ceiling** rather than left
-untested, and the headroom is **substantial**. A padded token costs ~24% of a real
-one at boundaries ≥1024; padding runs 56.8% of real tokens; so padding inflates
-execution by **13.7%**, and perfect alignment would recover **12.0%**.
+untested, and the answer follows from two measured quantities rather than from a
+patch. Deferring a marginal chunk to align a step avoids the *paid* part of that
+step's padding, and — when the deferred work does not already have a step waiting
+— creates one, at the measured fixed cost of **6.11 ms**. Both sides are
+measurable, so the rule is derived:
 
-This section twice reached the wrong conclusion, both times by substituting
-judgement for measurement. First it was rejected because 2–4% seemed "below the
-threshold worth acting on" — a judgement made after seeing a number, overriding a
-rule committed to beforehand that said 1–5% warrants implementing. Then the number
-itself turned out to be wrong by 3×, because it came from two straddles of which
-one sampled the smallest boundary on the ladder. Measured properly, the ceiling is
-12% and the pre-committed rule promotes this from a footnote to a headline
-contribution.
+| boundary | paid padding | vs the 6.11 ms step | verdict |
+|---|---|---|---|
+| 512 → 1024 | 1.30 ms | 0.2× | **deferring loses by 4.7×** |
+| 1024 → 2048 | 4.62 ms | 0.8× | loses |
+| 2048 → 4096 | 9.36 ms | 1.5× | wins |
+| 4096 → 8192 | 18.82 ms | 3.1× | wins |
+
+Paid padding scales with the bucket; the step cost does not. **They cross between
+2048 and 4096 tokens.** Below that, an alignment optimisation that trades a step
+for alignment is not marginal but decisively wrong — by nearly 5× at the smallest
+boundary. Above it, alignment pays.
+
+**This is the paper's actionable result, and it inverts the usual intuition.** In
+this stack the fixed per-step cost exceeds the paid padding cost at every
+boundary below 2048 tokens. For the small steps that dominate a
+decode-heavy workload, the advice is the opposite of shape alignment: **reduce
+step count, tolerate padding.**
+
+Two conditions attach to it, and both matter.
+
+*Saturation removes the penalty.* The 6.11 ms is charged only when deferral
+creates a step that would not otherwise have run. Under sustained load the next
+step exists regardless, deferral merely moves tokens into it, and alignment wins
+at every boundary. The rule above is the unsaturated case, which is also the
+case where the padding matters least in absolute terms.
+
+*The 12% ceiling assumes a constant step count.* §5's figure is already
+discounted by the paid fraction — it is 36% of tokens × ~24% paid, not 36% of
+execution — but it presumes alignment is free, i.e. achieved by repacking rather
+than by deferring. Under the deferral counterfactual the recoverable amount is
+much smaller and boundary-dependent, and at boundaries below 2048 it is negative.
+Quoting 12% without that assumption attached would be quoting a different
+quantity.
 
 **What does not work.** Decomposing a padded residual into exact bucket sizes —
 1808 tokens as 1024+512+256+16 rather than one step padded to 2048 — is **20.6%
@@ -526,5 +553,14 @@ the fitted curve (145.58 vs 144.75 ms), and a §4.1 table taken from one of two
 replicate runs that differ by up to 14.4% on the same cell — now pooled, with the
 run-to-run spread reported alongside.
 
-**Still to build:** `reproduce_all.sh` regenerating every figure from the manifest,
-and the figures themselves.
+**A falsified external prediction, recorded.** Before D1 was measured, the
+explanation offered for it was that chunked prefill makes the compiled shape the
+*chunk* rather than the prompt, so per-request padding cannot exist. That
+prediction is wrong: with `--no-enable-chunked-prefill` the result is unchanged
+(§4.1). The packing is structural to the TPU serving path, not a consequence of
+that scheduler feature. We report it because a plausible mechanistic argument
+that survives scrutiny and dies on measurement is the paper's own thesis applied
+to itself.
+
+**Still to build:** `reproduce_all.sh` regenerating every figure from the
+manifest, and the figures themselves.
