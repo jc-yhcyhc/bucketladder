@@ -100,3 +100,61 @@ whatever is runnable up to `max_num_batched_tokens`. A client can influence it
 by release timing but cannot choose it. And the measured 26% saving is still
 principally batching amortisation (25.7 µs/token at n=1 against 16.9 at n=8),
 which is standard dynamic batching.
+
+---
+
+## H1 + M1, answered offline from captured runs (2026-08-10, $0)
+
+### 36% of executed tokens are padding
+
+Reporting-histogram bucket edges are powers of two and so is the compiled token
+ladder, so a step's bucket edge **is** the size it executed at. Over 150 e05
+dispatches: padded/real = **1.56×**, i.e. **35.9% of executed tokens are
+padding**, mean per-dispatch ratio 56.8%, p95 99.6%.
+
+Well above the 5% threshold that would have made packing a headline
+contribution — if any of it were paid.
+
+### It is not paid, and the data to show that was already collected
+
+At fixed batch size the real token count is constant while the scheduler chunks
+differently between repeats, so the same real work executes at padded totals
+differing by up to 2×. That is the boundary-straddling comparison M1 was
+designed to construct, already present across 150 dispatches, and **stronger**:
+real work is held *exactly* constant rather than to 1.6%.
+
+| n | real | padding rises | cost |
+|---|---|---|---|
+| 8 | 4104 | ×1.40 | **×0.80** |
+| 9 | 4617 | ×1.50 | **×1.00** |
+| 10 | 5130 | ×1.43 | **×0.98** |
+| 12 | 6156 | ×1.22 | ×1.61 ← only exception |
+| 14 | 7182 | ×1.22 | ×0.99 |
+| 16 | 8208 | ×1.18 | ×0.99 |
+
+Doubling padded tokens moves cost by ≤2% and frequently downward. **D2 is not
+paid at n > 1.**
+
+n=12 is the sole exception and is also the cell with the unexplained
+bimodality — its ordering is non-monotone (9216→82.6, 10240→136.5,
+11264→132.7), so it is not a padding effect either.
+
+### Consequences
+
+- **All three dimensions are inert under batching.** D1 does not exist, D3 is
+  pinned to one attention bucket, D2 is paid only at n=1 — which is not a
+  serving regime.
+- **§4 bucket-aligned step packing is analysed-and-rejected**, on a computed
+  ceiling rather than a guess: the 36% is free.
+- The headline sentence improves rather than weakens: *36% of executed tokens
+  on a production TPU serving stack are shape padding, and it costs nothing
+  measurable.* That is a sharper validation of RPA's ragged-execution design
+  than "padding is small".
+
+### The weakness, stated
+
+This is a natural experiment. The scheduler chose the splits, so a lurking
+variable correlated with both split and cost is not excluded the way
+randomisation would exclude it. A designed M1 — straddling a bucket boundary at
+fixed n and per-sequence length, 512 vs 520 real tokens — remains worth ~$3 as
+confirmation, and should be run alongside M2 rather than instead of it.
