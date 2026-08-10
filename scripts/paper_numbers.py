@@ -187,16 +187,21 @@ CLAIMS: list[Claim] = [
      lambda: (max(min(c[f"err_{k}_pct"] for k in ("packed", "per_request_padded", "batch_padded"))
                   for c in runs("session6-gate/results/e07_ragged_batch/*", "cells")[-1][2]
                   if c["is_control"]), "e07")),
+    # The four pooled D1 claims combine the chunked-prefill-ON and -OFF spread
+    # runs. e08 measured that the setting does not change the result (packed
+    # still wins 8/10 ragged cells, batch padding still rejected by 75-579%),
+    # which is what makes them replicates rather than different conditions. The
+    # guardrail flagged them until that was stated, which is the point of it.
     ("D1.n8.max512", "4.1", "n=8 max=512 pooled median ms", 68.47, 0.3,
-     lambda: e07_spread_pooled(8, 512)),
+     lambda: e07_spread_pooled(8, 512), ("controlled",)),
     ("D1.n8.max1024", "4.1", "n=8 max=1024 pooled median ms", 73.38, 0.3,
-     lambda: e07_spread_pooled(8, 1024)),
+     lambda: e07_spread_pooled(8, 1024), ("controlled",)),
     ("D1.n8.max3900", "4.1", "n=8 max=3900 pooled median ms", 88.28, 0.3,
-     lambda: e07_spread_pooled(8, 3900)),
+     lambda: e07_spread_pooled(8, 3900), ("controlled",)),
     ("D1.pen.max3072", "4.1", "penalty vs packed at max=3072", 29.4, 0.6,
-     lambda: e07_penalty(8, 3072)),
+     lambda: e07_penalty(8, 3072), ("controlled",)),
     ("D1.pen.max3900", "4.1", "penalty vs packed at max=3900", 27.8, 0.6,
-     lambda: e07_penalty(8, 3900)),
+     lambda: e07_penalty(8, 3900), ("controlled",)),
     ("D1.reject", "4.1", "batch-padded rejected by 44-618%", 618.0, 5.0,
      lambda: (max(r["err_batch_padded_pct"]
                   for _, _, rows in runs("session6-gate/results/e07_ragged_batch/*", "cells")
@@ -254,6 +259,76 @@ CLAIMS: list[Claim] = [
 ]
 
 
+# --- the guardrail --------------------------------------------------------
+# Six of this project's errors share one cause: a quantity measured under one
+# configuration used under another. The first version of this rule said "no
+# derivation may combine quantities measured at different BATCH SIZES", which
+# would not have caught session 4's failure -- a cost model fitted at
+# output_len=8 and run at output_len=1. The general form costs the same to
+# implement and catches the whole class.
+#
+# For any claim derived from more than one run, diff the runs' configs and
+# require the claim to name every differing field as one it asserts invariance
+# over. Resolving to be careful is not a control; this is.
+# Diff EVERY config key, not a chosen list. A whitelist missed the axis that
+# caused the error it was built for: batch size is not a top-level field -- it
+# lives inside `edges` for the straddle experiments and is implicit (n=1) in
+# M3's `token_sizes`. Any whitelist someone writes will omit the field that
+# matters next time, so the default is "everything differs until asserted", and
+# free text is the only exemption.
+IGNORED_FIELDS = {"description", "mode", "mode_label", "warmup_log_path"}
+
+
+def run_config(run_id: str) -> dict[str, Any] | None:
+    for d in glob.glob(str(ROOT / "captured" / "*" / "results" / "*" / run_id)):
+        m = pathlib.Path(d) / "meta.json"
+        if m.exists():
+            return json.loads(m.read_text()).get("config")
+    return None
+
+
+def differing_fields(run_ids: list[str]) -> list[str]:
+    cfgs = [c for c in (run_config(r) for r in run_ids) if c]
+    if len(cfgs) < 2:
+        return []
+    keys = set()
+    for c in cfgs:
+        keys |= {k for k in c if not k.startswith("note_") and k not in IGNORED_FIELDS}
+    out = []
+    for f in sorted(keys):
+        vals = {json.dumps(c.get(f), sort_keys=True, default=str) for c in cfgs}
+        if len(vals) > 1:
+            out.append(f)
+    return out
+
+
+def check_invariance(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Report claims that combine runs differing in an unasserted config field."""
+    flags = []
+    for c in claims:
+        ids = [x for x in str(c.get("source_run", "")).split(";") if x and "__" in x]
+        if len(ids) < 2:
+            continue
+        diff = differing_fields(ids)
+        unasserted = [f for f in diff if f not in c.get("invariant_over", ())]
+        if unasserted:
+            flags.append({"claim_id": c["claim_id"], "n_runs": len(ids),
+                          "unasserted_fields": ",".join(unasserted)})
+    return flags
+
+
+# Retired claims, kept so the guardrail can be shown working on the error it was
+# built for. The crossover combined a step cost measured at n=1 with a padding
+# fraction measured at n=4; both authors of this project built that equation,
+# and both noticed one turn too late.
+RETIRED = [
+    {"claim_id": "S5.crossover(RETIRED)", "section": "5",
+     "claim": "step-for-alignment crosses at ~2048 tokens",
+     "source_run": "m3_small_steps__20260810T182131Z__9b0dc2baf9ad;m1_boundary__20260810T182212Z__0c4087987fd2",
+     "invariant_over": ()},
+]
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--write", action="store_true")
@@ -261,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rows: list[dict[str, Any]] = []
     bad, unver = 0, 0
-    for cid, sec, what, stated, tol, fn in CLAIMS:
+    for claim in CLAIMS:
+        cid, sec, what, stated, tol, fn = claim[:6]
+        inv = claim[6] if len(claim) > 6 else ()
         try:
             got, src = fn()
         except Exception as exc:  # noqa: BLE001
@@ -275,12 +352,23 @@ def main(argv: list[str] | None = None) -> int:
         rows.append({"claim_id": cid, "section": sec, "claim": what,
                      "stated": stated, "recomputed": got, "tolerance": tol,
                      "delta": got - stated if got == got else float("nan"),
-                     "verdict": verdict, "source_run": src})
+                     "verdict": verdict, "source_run": src, "invariant_over": inv})
         mark = {"ok": "  ", "MISMATCH": "!!", "UNVERIFIED": "??"}[verdict]
         print(f"{mark} {cid:<20} §{sec:<4} stated {stated:>8.2f}  recomputed "
               f"{got:>8.2f}  {verdict}")
 
     print(f"\n{len(rows)} claims: {len(rows) - bad - unver} ok, {bad} MISMATCH, {unver} UNVERIFIED")
+
+    flags = check_invariance(rows + RETIRED)
+    print(f"\n--- invariance guardrail: {len(flags)} claim(s) combine runs with "
+          f"unasserted config differences ---")
+    for f in flags:
+        print(f"  !! {f['claim_id']:<28} {f['n_runs']} runs differ in: {f['unasserted_fields']}")
+    if not flags:
+        print("  (none)")
+    live = [f for f in flags if "RETIRED" not in f["claim_id"]]
+    if live:
+        bad += len(live)
     if args.write:
         import pyarrow as pa
         out = ROOT / "results" / "paper_numbers.parquet"
