@@ -74,14 +74,25 @@ def gap_ladder(max_model_len: int, padding_gap: int, min_bucket: int = MIN_BUCKE
     return out
 
 
-def build_ladder(max_model_len: int, padding_gap: int | str | None = None) -> list[int]:
+def build_ladder(max_batched_tokens: int, padding_gap: int | str | None = None) -> list[int]:
     """Dispatch on the VLLM_TPU_BUCKET_PADDING_GAP value.
 
     "" / None -> exponential (vLLM's default). An int -> gap ladder.
+
+    THE ARGUMENT IS `max_num_batched_tokens`, NOT `max_model_len`. The token
+    ladder pads the number of tokens in one SCHEDULER STEP, and a step may hold
+    many requests, so its extent is the batched-token budget. Every run through
+    session 3 set both limits to 8192, which made the two indistinguishable;
+    passing max_model_len was wrong and produced identical output anyway.
+
+    TinyLlama-1.1B separated them — max_model_len 2048, max_num_batched_tokens
+    8192 — and e00's gate immediately failed with predicted [16..2048] against
+    observed [16..8192]. That is the gate doing its job, and it is why the
+    predicted ladder is compared against the server's log rather than trusted.
     """
     if padding_gap in (None, "", "none"):
-        return exponential_ladder(max_model_len)
-    return gap_ladder(max_model_len, int(padding_gap))
+        return exponential_ladder(max_batched_tokens)
+    return gap_ladder(max_batched_tokens, int(padding_gap))
 
 
 def bucket_for(length: int, ladder: Sequence[int]) -> int:

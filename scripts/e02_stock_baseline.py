@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     config["mode"] = "mock" if args.mock else "live"
     controlled = config["controlled"]
-    ladder = build_ladder(controlled["max_model_len"], controlled["VLLM_TPU_BUCKET_PADDING_GAP"])
+    ladder = build_ladder(controlled["max_num_batched_tokens"], controlled["VLLM_TPU_BUCKET_PADDING_GAP"])
 
     req_ladder = config.get("request_ladder", DEFAULT_REQUEST_LADDER)
     edge = config.get("edge", 8)

@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     config["mode"] = "mock" if args.mock else "live"
     config["restart_block"] = args.restart_block
     controlled = config["controlled"]
-    ladder = build_ladder(controlled["max_model_len"], controlled["VLLM_TPU_BUCKET_PADDING_GAP"])
+    ladder = build_ladder(controlled["max_num_batched_tokens"], controlled["VLLM_TPU_BUCKET_PADDING_GAP"])
 
     probe_len = config.get("probe_len", 512)
     output_len = config.get("output_len", 1)

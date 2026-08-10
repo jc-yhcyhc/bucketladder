@@ -176,3 +176,20 @@ def test_reduced_sweep_does_fit():
 def test_compile_estimate_rejects_bad_input():
     with pytest.raises(ValueError):
         compile_time_estimate(0)
+
+
+def test_ladder_extent_is_the_batched_token_budget_not_the_context_length():
+    """Regression: TinyLlama-1.1B, max_model_len 2048, max_num_batched_tokens 8192.
+
+    Every run through session 3 set both limits to 8192, so passing
+    max_model_len to build_ladder produced the right answer for the wrong
+    reason. TinyLlama separated them and e00's gate failed immediately --
+    predicted [16..2048], observed [16..8192] in the server's own warmup log.
+
+    A scheduler step pads the TOTAL tokens across the requests in it, and a step
+    can hold many requests, so the ladder's extent is the batched-token budget.
+    """
+    assert build_ladder(8192, "")[-1] == 8192
+    assert build_ladder(2048, "")[-1] == 2048
+    # The observed ladder on that server, verbatim from the warmup log.
+    assert build_ladder(8192, "") == [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]

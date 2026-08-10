@@ -99,7 +99,7 @@ def parse_warmup_log(lines: Iterable[str]) -> list[int]:
     return sorted(found)
 
 
-def mock_warmup_log(max_model_len: int, padding_gap: Any) -> list[str]:
+def mock_warmup_log(max_batched_tokens: int, padding_gap: Any) -> list[str]:
     """Synthetic log matching what ladder.py predicts.
 
     Deliberately generated FROM the predicted ladder so the mock path proves
@@ -107,7 +107,7 @@ def mock_warmup_log(max_model_len: int, padding_gap: Any) -> list[str]:
     — only the on-TPU run does that, which is why this script's gate output
     records which mode produced it.
     """
-    ladder = build_ladder(max_model_len, padding_gap)
+    ladder = build_ladder(max_batched_tokens, padding_gap)
     lines = ["INFO 08-09 00:00:00 [__init__.py:76] TPU info: tpu_type=v5litepod-4"]
     lines.append(
         "(EngineCore pid=1) INFO 08-09 00:00:01 [utils.py:210] "
@@ -244,13 +244,15 @@ def main(argv: list[str] | None = None) -> int:
     status, err = "ok", None
     try:
         controlled = config["controlled"]
-        max_model_len = controlled["max_model_len"]
+        # The ladder's extent is the batched-token budget, not the context
+        # length: a scheduler step pads TOTAL tokens across the requests in it.
+        max_batched_tokens = controlled["max_num_batched_tokens"]
         padding_gap = controlled["VLLM_TPU_BUCKET_PADDING_GAP"]
 
-        predicted = build_ladder(max_model_len, padding_gap)
+        predicted = build_ladder(max_batched_tokens, padding_gap)
 
         if args.mock:
-            log_lines = mock_warmup_log(max_model_len, padding_gap)
+            log_lines = mock_warmup_log(max_batched_tokens, padding_gap)
         elif args.warmup_log:
             log_lines = args.warmup_log.read_text().splitlines()
         else:
