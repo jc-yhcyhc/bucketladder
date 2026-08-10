@@ -171,6 +171,48 @@ def h1() -> tuple[dict, str]:
              "p95": 100 * ratios[int(0.95 * (len(ratios) - 1))]}, rid_used)
 
 
+def m6_slope(n: int) -> tuple[float, str]:
+    """Median slope over CLEAN (single-step) cells at batch size n, session 12."""
+    for rid, cfg, rows in runs("session12-regime/results/m5_lens_form/*", "fits"):
+        cl = [r["slope_us_per_token"] for r in rows if r["n"] == n and r["splits"] == 0]
+        if cl:
+            return statistics.median(cl), rid
+    return float("nan"), ""
+
+
+def m6_clean_cells(n: int) -> tuple[float, str]:
+    """How many cells at batch size n yielded a single-step dispatch.
+
+    Zero at n>=8 is the session-12 result: prefill step cost cannot be isolated
+    at serving batch sizes with a /metrics-delta instrument, because the
+    scheduler splits every dispatch.
+    """
+    for rid, cfg, rows in runs("session12-regime/results/m5_lens_form/*", "fits"):
+        at = [r for r in rows if r["n"] == n]
+        if at:
+            return float(sum(1 for r in at if r["splits"] == 0)), rid
+    return float("nan"), ""
+
+
+def m6_decode(n: int, per_seq: bool = False) -> tuple[float, str]:
+    """Per-decode-step cost at batch size n (output_len=64)."""
+    for rid, cfg, rows in runs("session12-regime/results/e02_stock_baseline/*", "server_timing"):
+        if cfg.get("output_len") != 64:
+            continue
+        v = [r["decode_ms"] for r in rows if r["concurrency"] == n]
+        if v:
+            step = statistics.median(v) / cfg["output_len"]
+            return (step / n * 1000.0 if per_seq else step), rid
+    return float("nan"), ""
+
+
+def m6_lens_mape() -> tuple[float, str]:
+    for rid, cfg, rows in runs("session12-regime/results/m5_lens_form/*", "verdict"):
+        if rows:
+            return rows[0]["holdout_mape_pct"], rid
+    return float("nan"), ""
+
+
 def curve_cost(tokens: int) -> float:
     d = json.loads((ROOT / "sim" / "measured_cost_curve.json").read_text())
     return dict((int(t), c) for t, c in d["knots_tokens_ms"])[tokens]
@@ -251,11 +293,29 @@ CLAIMS: list[Claim] = [
          m1_edge("1024/2048", "padded_ratio")[0])),
 
     # --- cost curve --------------------------------------------------------
-    ("CM.c512", "6", "cost of a 512-token step", 13.15, 0.05, lambda: (curve_cost(512), "curve")),
-    ("CM.c4096", "6", "cost of a 4096-token step", 69.08, 0.05, lambda: (curve_cost(4096), "curve")),
-    ("CM.c8192", "6", "cost of an 8192-token step", 144.75, 0.05, lambda: (curve_cost(8192), "curve")),
-    ("CM.us1", "6", "us/token at n=1", 25.7, 0.2, lambda: (curve_cost(512) / 512 * 1000, "curve")),
-    ("CM.us8", "6", "us/token at n=8", 16.9, 0.2, lambda: (curve_cost(4096) / 4096 * 1000, "curve")),
+    # RETIRED 2026-08-10: encodes the below-512 floor rule M5 invalidated.
+    # ("CM.c512", "6", "cost of a 512-token step", 13.15, 0.05, lambda: (curve_cost(512), "curve")),
+    # RETIRED 2026-08-10: encodes the below-512 floor rule M5 invalidated.
+    # ("CM.c4096", "6", "cost of a 4096-token step", 69.08, 0.05, lambda: (curve_cost(4096), "curve")),
+    # RETIRED 2026-08-10: encodes the below-512 floor rule M5 invalidated.
+    # ("CM.c8192", "6", "cost of an 8192-token step", 144.75, 0.05, lambda: (curve_cost(8192), "curve")),
+    # RETIRED 2026-08-10: encodes the below-512 floor rule M5 invalidated.
+    # ("CM.us1", "6", "us/token at n=1", 25.7, 0.2, lambda: (curve_cost(512) / 512 * 1000, "curve")),
+    # RETIRED 2026-08-10: encodes the below-512 floor rule M5 invalidated.
+    # ("CM.us8", "6", "us/token at n=8", 16.9, 0.2, lambda: (curve_cost(4096) / 4096 * 1000, "curve")),
+    # --- session 12: what the paper now leads with -------------------------
+    ("M6.slope.n1", "4", "prefill slope at n=1 (flat, a staircase)", 1.6, 0.8, lambda: m6_slope(1)),
+    ("M6.slope.n2", "4", "prefill slope at n=2 (flat)", 0.8, 0.8, lambda: m6_slope(2)),
+    ("M6.slope.n4", "4", "prefill slope at n=4 (linear)", 17.2, 1.5, lambda: m6_slope(4)),
+    ("M6.clean.n4", "4", "clean single-step cells at n=4", 3.0, 0.5, lambda: m6_clean_cells(4)),
+    ("M6.clean.n8", "4", "clean single-step cells at n=8 (NONE)", 0.0, 0.5, lambda: m6_clean_cells(8)),
+    ("M6.clean.n16", "4", "clean single-step cells at n=16 (NONE)", 0.0, 0.5, lambda: m6_clean_cells(16)),
+    ("M6.clean.n32", "4", "clean single-step cells at n=32 (NONE)", 0.0, 0.5, lambda: m6_clean_cells(32)),
+    ("M6.decode.n1", "4", "decode ms per step at n=1", 3.80, 0.15, lambda: m6_decode(1)),
+    ("M6.decode.n32", "4", "decode ms per step at n=32", 9.13, 0.30, lambda: m6_decode(32)),
+    ("M6.decodeseq.n1", "4", "decode us/step/seq at n=1", 3801.5, 60.0, lambda: m6_decode(1, True)),
+    ("M6.decodeseq.n32", "4", "decode us/step/seq at n=32", 285.2, 10.0, lambda: m6_decode(32, True)),
+    ("M6.lens.mape", "9", "LENS holdout MAPE on TPU", 5.23, 0.3, lambda: m6_lens_mape()),
 ]
 
 
