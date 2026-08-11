@@ -100,16 +100,53 @@ def assert_controlled_vars(config: Mapping[str, Any]) -> None:
             f"with keys: {sorted(CONTROLLED_VARS)}"
         )
 
+    # A control may be DECLARED as an experiment's independent variable. Session
+    # 13's tensor-parallel ablation was designed, deployed, and refused by this
+    # function -- `tensor_parallel_size: is 2, must be 4` -- because the contract
+    # could not tell an undeclared drift from a deliberate, recorded variation.
+    # That is the correct default and the wrong outcome: the experiment that
+    # would answer the paper's generality question could not run.
+    #
+    # The declaration is not an escape hatch. It must name the variable and give
+    # a reason, both land in `meta.json`, and the guardrail in paper_numbers.py
+    # then sees the arms differ in that field and demands any cross-arm claim
+    # assert invariance over it explicitly. Relaxing the contract would have lost
+    # that; declaring keeps the variation on the record where a claim must
+    # confront it.
+    declared = config.get("independent_vars")
+    if declared is not None and not isinstance(declared, Mapping):
+        raise ControlledVarError(
+            "'independent_vars' must be a mapping of {variable: reason}, so the "
+            f"reason is recorded with the run; got {type(declared).__name__}"
+        )
+    declared = dict(declared or {})
+
     problems: list[str] = []
+    unknown_declared = sorted(set(declared) - set(CONTROLLED_VARS))
+    if unknown_declared:
+        problems.append(
+            f"independent_vars names {unknown_declared}, which are not controlled "
+            "variables — only a control can be declared as an independent variable"
+        )
+    for name, reason in declared.items():
+        if not isinstance(reason, str) or len(reason.strip()) < 20:
+            problems.append(
+                f"independent_vars[{name!r}] needs a reason of at least 20 characters "
+                "explaining why varying it is the point of this experiment"
+            )
+
     for name, expected in CONTROLLED_VARS.items():
         if name not in controlled:
             problems.append(f"{name}: MISSING (must be stated explicitly)")
             continue
         actual = controlled[name]
-        if expected is REQUIRE_EXPLICIT:
+        if expected is REQUIRE_EXPLICIT or name in declared:
             continue
         if actual != expected:
-            problems.append(f"{name}: is {actual!r}, must be {expected!r}")
+            problems.append(
+                f"{name}: is {actual!r}, must be {expected!r} "
+                f"(declare it in 'independent_vars' if varying it is the experiment)"
+            )
 
     unknown = sorted(set(controlled) - set(CONTROLLED_VARS))
     if unknown:

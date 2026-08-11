@@ -87,6 +87,62 @@ def test_aborts_on_wrong_tp_size():
         assert_controlled_vars(good_config(tensor_parallel_size=8))
 
 
+# --- declaring a control as an experiment's independent variable -------------
+#
+# Session 13's TP ablation was designed, deployed to hardware, and refused by the
+# contract, which could not tell a deliberate variation from a drift. These pin
+# the fix so it cannot regress into a plain escape hatch: declaring must be
+# possible, must be deliberate, and must not weaken the default.
+
+REASON = ("The TP ablation varies sharding deliberately to test whether "
+          "request-dimension padding is free only in this layout.")
+
+
+def declaring(independent_vars, **overrides):
+    """A config with a top-level declaration. `independent_vars` sits beside
+    `controlled`, not inside it -- it is a statement about the experiment, not a
+    setting the server was launched with."""
+    cfg = good_config(**overrides)
+    cfg["independent_vars"] = independent_vars
+    return cfg
+
+
+def test_declared_independent_var_is_allowed_to_vary():
+    assert_controlled_vars(declaring({"tensor_parallel_size": REASON},
+                                     tensor_parallel_size=2))
+
+
+def test_undeclared_change_is_still_refused():
+    """The default must not move. This is the whole value of the contract."""
+    with pytest.raises(ControlledVarError, match="tensor_parallel_size"):
+        assert_controlled_vars(good_config(tensor_parallel_size=2))
+
+
+def test_declaration_requires_a_substantive_reason():
+    """A one-word reason is a rubber stamp; the record has to say why."""
+    with pytest.raises(ControlledVarError, match="reason"):
+        assert_controlled_vars(declaring({"tensor_parallel_size": "because"},
+                                         tensor_parallel_size=2))
+
+
+def test_cannot_declare_something_that_is_not_a_control():
+    with pytest.raises(ControlledVarError, match="not controlled variables"):
+        assert_controlled_vars(declaring({"prompt_len": REASON}))
+
+
+def test_declaration_must_be_a_mapping_with_reasons():
+    """A bare list would let a declaration exist with no reason recorded."""
+    with pytest.raises(ControlledVarError, match="mapping"):
+        assert_controlled_vars(declaring(["tensor_parallel_size"]))
+
+
+def test_declaring_one_var_does_not_excuse_another():
+    with pytest.raises(ControlledVarError, match="enable_prefix_caching"):
+        assert_controlled_vars(declaring({"tensor_parallel_size": REASON},
+                                         tensor_parallel_size=2,
+                                         enable_prefix_caching=True))
+
+
 def test_explicit_vars_accept_any_value_but_must_exist():
     assert_controlled_vars(good_config(enable_chunked_prefill=False))
     assert_controlled_vars(good_config(VLLM_TPU_BUCKET_PADDING_GAP=512))
