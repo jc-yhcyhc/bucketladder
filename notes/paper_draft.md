@@ -10,6 +10,8 @@ validate published techniques in a real-world setting."* 10 pages excluding
 references. MLSys 2026's industrial deadline was 30 Oct 2025, so 2027's is
 expected **late Oct 2026**; that call is not yet posted.
 
+All figures regenerate from `captured/` via `./reproduce_all.sh --figures`.
+
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
 `v5litepod-4` (4 chips, TP=4). Twelve hardware sessions, **[redacted]**.
 
@@ -157,6 +159,11 @@ mid-bucket point from each fit:
 **MAPE 5.23%, worst 22.4%.** Near-perfect at n=1–2 (0.0–0.6%); failing at n=4
 (17–24%) — which is where serving operates.
 
+**[Figure 3 — `figures/fig3_lens.png`]** *Held-out prediction error against batch
+size, with LENS's reported 2.15% as a reference line and the failure region
+shaded. The claim is not that the predictor is inaccurate; it is that the error
+is localised.*
+
 Its single-regime form does not survive the batch sizes production uses. We report
 this as validation rather than criticism: the terms of §4.3 are already in LENS's
 model; what it does not do is hold across batch size, and no prior work had tested
@@ -194,6 +201,10 @@ paid rises with the boundary: 10.0% at 512→1024, 22.1% at 1024→2048, 24.0% a
 2048→4096, 24.8% at 4096→8192. **Recoverable: ~4–9% of execution**, and only under
 a constant-step-count counterfactual no mechanism we tested achieves.
 
+**[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
+paid at each compiled boundary, against the 100% the compiled-shape premise
+predicts.*
+
 Per-request *length* padding does not exist. Holding batch size and total tokens
 fixed and varying only the spread of request lengths, the batch-padding model is
 rejected by **44–618%**; cost tracks packed tokens. Uniform controls, where all
@@ -207,6 +218,10 @@ cells, batch padding rejected by 75–579%).
 |---|---|---|---|---|---|---|
 | ms/step | 3.80 | 4.25 | 4.30 | 4.98 | 6.52 | 9.13 |
 | µs/step/sequence | 3802 | 2127 | 1075 | 622 | 407 | **285** |
+
+**[Figure 1 — `figures/fig1_decode.png`]** *Decode cost per sequence against
+batch size, log–log. Smooth and monotone across the full range prefill could not
+reach.*
 
 Per-step cost rises **2.4×** while batch size rises **32×**; per-sequence cost
 falls **13×** monotonically with no discontinuity — across exactly the range
