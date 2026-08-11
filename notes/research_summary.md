@@ -1,6 +1,6 @@
 # Research summary — what was done, and what it showed
 
-**Seventeen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
+**Eighteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
 verified numerical claims, 192 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
@@ -381,6 +381,26 @@ share.
 **Every class-two error was caught by a measurement disagreeing with an
 independent one. That is not a mechanism, and it is the open methodological
 problem.**
+
+### The pattern the failure list does not show
+
+The measurements have survived three rounds of external review largely intact;
+the explanations have not. Withdrawn, in order: a crossover rule, a
+recoverable-headroom figure, a microbenchmark and the mechanism it claimed to
+isolate, the memory-bandwidth account of why request padding is free, and the
+frontier bound derived from it. **Four of the last five retractions were
+mechanism claims. None was a number that failed to reproduce.**
+
+The cause is structural. Every measurement runs through a contract that aborts on
+an unstated variable, is tied to a `run_id`, and is recomputed by a script that
+fails closed. **No comparable machinery exists for explanations.** The bandwidth
+account survived four sessions and two reviews because nothing in the pipeline
+could reject it, not because evidence supported it.
+
+Registered predictions are the nearest fix, and both of ours failed —
+productively. One became a calibrated cost model, the other established that the
+regime map is independent of parameter count. A mechanism that never generates a
+falsifiable number is not doing work.
 
 ### Other machinery that paid for itself
 

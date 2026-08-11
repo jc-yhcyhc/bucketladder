@@ -1,7 +1,7 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
-`v5litepod-4` (4 chips, TP=4). Seventeen hardware sessions, **[redacted]**.
+`v5litepod-4` (4 chips, TP=4). Eighteen hardware sessions, **[redacted]**.
 
 ---
 
@@ -31,9 +31,10 @@ Most of it is not paid.
 Per-request *length* padding does not exist, and not because of chunked prefill —
 disabling it changes nothing. Decode, which dominates production serving, is
 well-behaved: per-step cost rises 2.4× while batch size rises 32×, with no
-discontinuity, and a roofline analysis shows why — the step reads the entire
-weight set regardless of batch size, so padding on the request dimension falls
-inside a floor that batch size does not move.
+discontinuity to n=32. Request-dimension padding is free because Ragged Paged
+Attention does no work for padded request slots — a data-structure property we
+arrived at only after measuring to n=256 and refuting our own bandwidth
+explanation, which predicted 49% model-FLOPs utilisation there and met 5.1%.
 
 We report four optimisations we designed, measured and rejected, and ten
 invalid inferences we made and caught — most sharing one cause, and now blocked
@@ -66,10 +67,10 @@ reports what is true instead.
    and vendor documentation.
 2. **LENS's model form does not transfer to TPU** (§4.2), and the length term it
    turns on never earns its place at any batch size we measured.
-3. **Shape-quantization cost is batch-size-dependent** (§4.3), with a
-   memory-bandwidth mechanism (§4.5) that explains why the request dimension is
-   nearly free, and a sharding ablation (§4.7) showing the mechanism is not an
-   artifact of the layout we measured it in.
+3. **Shape-quantization cost is batch-size-dependent** (§4.3), and
+   request-dimension padding is free because the ragged attention kernel does no
+   work for padded slots (§4.5) — a data-structure property, not a bandwidth
+   one, established by refuting our own bandwidth account at n=256.
 4. **Four optimisations measured and rejected** (§5), with the measurement that
    killed each.
 5. **A methodological rule with a mechanical guardrail** (§6), including two
@@ -342,112 +343,99 @@ candidate models agree, match to 1.9%. **This is not chunked prefill**: with
 `--no-enable-chunked-prefill` the result is unchanged (packed wins 8/10 ragged
 cells, batch padding rejected by 75–579%).
 
-### 4.5 Decode is well-behaved, and the reason is bandwidth
+### 4.5 Decode is well-behaved, and the reason is not bandwidth
 
-`prompt_len=256`, `output_len=64`:
+`prompt_len=256`, `output_len=64`, measured across the full compiled request
+ladder:
 
-| n | 1 | 2 | 4 | 8 | 16 | 32 |
+| n | 1 | 8 | 32 | 64 | 128 | 256 |
 |---|---|---|---|---|---|---|
-| ms/step | 3.80 | 4.25 | 4.30 | 4.98 | 6.52 | 9.13 |
-| µs/step/sequence | 3802 | 2127 | 1075 | 622 | 407 | **285** |
+| ms/step | 4.02 | 4.91 | 9.19 | 15.32 | 27.90 | 51.83 |
+| µs/step/sequence | 4020 | 614 | 287 | 239 | 218 | **203** |
+| queue (ms) | 0.0 | 0.0 | 0.0 | 0.1 | 62.2 | 298.3 |
 
 **[Figure 3 — `figures/fig3_decode.png`]** *Decode cost per sequence against
-batch size, log–log. Smooth and monotone across the full range prefill could not
-reach.*
+batch size, log–log.*
 
-Per-step cost rises **2.4×** while batch size rises **32×**; per-sequence cost
-falls **13×** monotonically with no discontinuity.
+Two regimes, and the boundary is sharp. Below n≈8 the step barely moves: batch
+rises 8× for 1.22× the cost, and per-sequence cost falls almost as fast as batch
+rises. **Above n≈32 the step is nearly linear in batch** — 1.67×, 1.82×, 1.86×
+for successive doublings — and per-sequence cost flattens at roughly 200 µs
+rather than continuing to fall.
 
-A roofline built from these step times and the model's published dimensions gives
-the mechanism. Per chip, per decode step:
+Queue time at n=128 and n=256 means those two columns are not clean wide batches;
+requests are not all resident. Nothing below rests on them. The n=64 column has a
+0.1 ms queue and already shows the second regime.
 
-| n | achieved HBM BW | BW utilisation | MFU | bound by |
-|---|---|---|---|---|
-| 1 | 532 GB/s | 64.9% | 0.27% | memory |
-| 8 | 421 GB/s | 51.4% | 1.68% | memory |
-| 32 | 258 GB/s | 31.4% | 3.65% | memory |
+**What the mechanism is not.** Earlier drafts explained free request padding with
+a memory-bandwidth argument: the step reads the whole weight set regardless of
+batch, so padded slots ride inside a floor batch size cannot move. That story
+predicts a specific thing — utilisation climbing toward the compute roof as batch
+grows past the ridge near 240 — and we published a frontier table predicting
+**MFU ≈49% at n=256**. Measured:
 
-**2.01 GB of weights crosses HBM every decode step regardless of batch size** —
-99% of all bytes moved at n≤2 and 89% at n≥16. Model-FLOPs utilisation never
-exceeds 3.65%; every cell is memory-bound. The step pays a weight-load floor that
-batch size does not move, so additional sequences — real or padded — are nearly
-free until that floor is left. This is why padding on the request dimension costs
-nothing, and it is the same memory-bound regime Pope et al. characterise
-analytically for TPU inference; our contribution here is the measurement landing
-in it and the consequence for compiled-shape ladders, not the regime itself.
+| n | 1 | 8 | 32 | 64 | 256 |
+|---|---|---|---|---|---|
+| MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
+| HBM BW utilisation | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
 
-**The roofline is not independent evidence about step time**, and an earlier
-draft implied it was. Achieved bandwidth is `bytes / measured time`, so it
-restates the step time it is computed from; what it independently establishes is
-the byte accounting — that the weight term dominates and that the compute roof is
-far away (MFU ≤3.65%). An operator-level profile *is* independent evidence, and
-settles what kind of answer §4.3's convergence can have. Share of TPU device time
-by category:
+MFU never exceeds 5.1%, an order of magnitude below the prediction, and bandwidth
+utilisation *falls* rather than rising. **At n=256 the step sits at 5% of the
+compute roof and 11% of the memory roof — bound by neither.** The frontier table
+and the claim that every cell is memory-bound are both **withdrawn**. The
+roofline retains one honest use, byte accounting: 2.01 GB of weights crosses HBM
+every decode step regardless of batch, which is 99% of bytes moved at n≤2 and
+falls below half by n=64 as KV traffic overtakes it. That is arithmetic about
+bytes, not an explanation of time — achieved bandwidth is `bytes / measured
+time`, so it restates the step time it is computed from.
+
+**What the mechanism is.** It was in §4.1 the whole time. `ATTN_BUCKETIZED_NUM_REQS`
+is off, so attention executes at 256 request slots always — and **RPA's padded
+slots hold no KV blocks, so they do no work.** Request-dimension padding is free
+because the ragged kernel skips it, as a property of the data structure, at any
+batch size. This needs no ridge, predicts no crossover, and is consistent with
+every measurement above including the ones that refuted the bandwidth account. It
+also explains why the free-padding result survived the sharding ablation (§4.7):
+ragged tiling does not care how the weights are split.
+
+The two accounts were distinguishable, and only above n=32. Bandwidth predicted a
+bend toward the compute roof near the ridge; ragged tiling predicted none. There
+is none.
+
+**An operator profile**, which unlike the roofline is a direct observation of
+where time went. Share of TPU device time:
 
 | n | attention | collective | matmul/fusion |
 |---|---|---|---|
 | 1 | 6.8% | 13.5% | **78.5%** |
-| 2 | 10.0% | 13.3% | 75.6% |
 | 4 | 15.4% | 13.9% | 69.6% |
-| 8 | 24.0% | 13.4% | 61.6% |
 | 16 | 34.2% | 13.4% | **51.4%** |
 
-The projection and MLP matmuls — which are where the weights are read — dominate
-at low batch size and give way to attention as the KV cache grows with n, while
-the inter-chip collectives hold a flat ~13.4%. That is the roofline's story in
-kernels rather than in bytes, and unlike the roofline it is a direct observation
-of where the time went.
+Matmuls dominate at low batch and give way to attention as KV grows; collectives
+hold a flat ~13.4%, and their latency component is not modelled by any roofline.
+Nothing moves discontinuously at n=4 — every category's share changes less into
+n=4 than across some other adjacent pair — so **§4.3's convergence is not visible
+at operator granularity.**
 
 **A microbenchmark that measured the wrong thing — retracted.** An isolated
 matmul at the model's real sharded shapes returned 142.9 µs at M=1, flat to
-143.6 µs at M=256, which an earlier version of this section called the
-weight-load floor with confounds removed. It is not. The qkv projection holds
-7.86 MB of weights per chip; at peak bandwidth that is 9.6 µs, so the measurement
-sits 15× above the bandwidth floor at an implied 55 GB/s — **7% of peak**. What
-was timed is per-dispatch overhead, and the per-row column was `constant / M`.
+143.6 µs at M=256, which an earlier version called the weight-load floor with
+confounds removed. The qkv projection holds 7.86 MB per chip; at peak bandwidth
+that is 9.6 µs, so the measurement sat 15× above the floor at an implied 55 GB/s
+— **7% of peak**. What was timed is per-dispatch overhead, and the per-row column
+was `constant / M`. The design also could not discriminate: for that shape the
+memory floor and compute at M=256 cross near M≈240, so bandwidth alone predicts a
+flat curve across the whole sweep while tile padding predicts flat only to M≈8 —
+tiling's prediction is a subset of bandwidth's everywhere the test looked.
 
-The design could also not have discriminated. For that shape the memory floor
-(9.6 µs) and compute at M=256 (10.2 µs) cross near M≈240, so bandwidth alone
-predicts a flat curve across the whole sweep; tile padding predicts flat only to
-M≈8. Tiling's prediction is a subset of bandwidth's over M∈[1,256], so no outcome
-in that range separates them. The tiling hypothesis is therefore **untested**,
-not rejected — and two further attempts did not settle it. An amortised version
-reported 1250% of peak utilisation, because XLA hoisted the loop-invariant matmul
-out of the loop; a third, with each iteration consuming the previous result, is
-physically valid at 79% of peak bandwidth and shows the curve flat from M=1 to
-M=16 and rising slowly after, with no knee at 4 or 8. But that arm streams its
+Two further attempts did not settle it. An amortised version reported 1250% of
+peak, because XLA hoisted the loop-invariant matmul; a third, chaining each
+iteration onto the previous, is physically valid at 79% of peak bandwidth and
+shows the curve flat from M=1 to M=16 with no knee at 4 or 8 — but it streams
 weights from HBM every iteration, so it is bandwidth-bound and still does not
-isolate tile structure. Settling the question needs weights genuinely resident in
-VMEM, which on this stack means an explicit Pallas kernel. **We leave it open.**
-
-**Where does free padding end?** Decode is measured to n=32 while the compiled
-request ladder runs to 256, so the claim needs a bound rather than an
-extrapolation. As batch grows the weight term is amortised away and arithmetic
-intensity rises toward a limit set by the per-sequence terms, against a ridge
-point of 241 FLOP/byte:
-
-| context | limit (FLOP/byte) | margin to ridge | MFU at n=256 |
-|---|---|---|---|
-| 256 | 217 | **10%** | **49%** |
-| 1024 | 57 | 76% | 20% |
-| 4096 | 17 | 93% | 7% |
-| 8192 | 11 | 96% | 4% |
-
-There is no formal crossover within n≤4096 — KV bytes grow with batch alongside
-the flops — so the whole ladder stays nominally memory-bound. **The margin is not
-uniform.** At 256-token context it is 10%, and MFU at the top of the ladder
-reaches 49%. Free padding is comfortable at long context and marginal at short
-context with high batch. This is a bound, not a measurement, and it is
-falsifiable: a nonzero paid share measured at n=64 or n=128, well inside the
-frontier, would show the mechanism is incomplete.
-
-Two further observations. The decode attention kernel is emitted as
-`RPAd-p_256-bq_1_1-bkv_8192_8192`: **the compiler writes the 256-request padding
-of §4.1 into the kernel's own name**, which is the most direct confirmation of
-that finding we have. And nothing here moves discontinuously at n=4 — every
-category's share changes by less into n=4 than it does across some other
-adjacent pair. **The n=4 convergence is not visible at operator granularity.**
-We now say that rather than implying an unfound mechanism is waiting there.
+isolate tile structure. Settling it needs weights genuinely resident in VMEM,
+which here means a Pallas kernel. **The tiling hypothesis is untested, not
+rejected.**
 
 **The pathology is real and lives in the phase that matters least.**
 
@@ -635,13 +623,46 @@ target as a formula in the lever and why the derivative is nonzero — the check
 that would have caught it before any hardware was provisioned. That is one
 instance and we do not oversell it, but the class is no longer entirely open.
 
+### The pattern the failure list does not show
+
+Ten entries above are inferences from numbers. Counting them alone hides
+something the project's history makes obvious: **the measurements have survived
+three rounds of external review largely intact, and the explanations have not.**
+
+Every headline measurement in §4 still stands as measured. What has been
+withdrawn, in order, is a crossover rule, a recoverable-headroom figure, a
+microbenchmark and the mechanism it claimed to isolate, a memory-bandwidth
+account of why request padding is free, and the frontier bound derived from that
+account. Four of the last five retractions were mechanism claims. Not one was a
+number that failed to reproduce.
+
+The asymmetry has a cause, and it is structural rather than careless. Every
+measurement in this repo runs through a contract that aborts on an unstated
+variable, is tied to a `run_id`, and is recomputed from captured data by a script
+that exits non-zero on disagreement. **No comparable machinery exists for
+explanations.** A mechanism is prose; it can be written, believed, cited by three
+later sections, and carried across drafts without ever being executed. The
+bandwidth account survived four sessions and two reviews not because evidence
+supported it but because nothing in the pipeline was capable of rejecting it.
+
+The registered-prediction discipline of §4.7 and §4.8 is the closest thing we
+have to a fix, and its record is instructive: both predictions **failed**, and
+both failures were more informative than the successes would have been — one
+became a calibrated two-term cost model, the other established that the regime
+map is independent of parameter count. A mechanism that never generates a
+falsifiable number is not doing work, and this project shipped three of them.
+
+We state this as the paper's least comfortable finding rather than as a
+methodological flourish. A reader should trust §4's numbers considerably more
+than §4's explanations, and we would rather say so than have it discovered.
+
 ---
 
 ## 7. Limitations
 
 **One accelerator, one primary model.** v5e with a 4B model places per-chip
-weights in the low hundreds of megabytes — an operating point where decode is
-bandwidth-bound. The sharding objection, at least, we can answer: a TP=1/2/4
+weights in the low hundreds of megabytes. Decode is bandwidth-bound only at
+n≤8; by n=64 it is bound by neither roof (§4.5). The sharding objection, at least, we can answer: a TP=1/2/4
 ablation (§4.7) finds the weight floor dominates at every sharding and dominates
 *more* with less of it. The remaining exposure is model scale and multi-host
 topology, where weight streaming and inter-chip collectives change what padding
@@ -654,6 +675,10 @@ not a corrected point estimate.
 **Prefill step cost above n=16 is still not isolable.** The barrier moved from
 n=8 to somewhere between 16 and 32 (§4.3); it did not disappear. At n=16 itself
 the clean sample is 7–11 dispatches per arm.
+
+**Decode above n=64 is measured but not clean.** Queue time at n=128 and n=256
+means those batches are not fully resident, so the reachable width of the request
+ladder under this configuration is itself unmeasured.
 
 **The n=4 convergence is unexplained, and is not an operator effect.** Three
 independent observations break there. An operator-level profile (§4.5) shows
@@ -725,8 +750,9 @@ The practical advice is negative, and it is bounded by what we measured: on this
 stack, at batch sizes up to 16, with a 4B model at any sharding of four v5e
 chips, do not build
 length bucketing, shape-aware admission control, or ladder design. The phase that
-dominates production serving is smooth, close to linear, and memory-bound for a
-reason that has nothing to do with compiled shapes.
+dominates production serving is smooth to n=32 and close to linear above it, and
+request-dimension padding is free for a reason that has nothing to do with
+compiled shapes: the ragged attention kernel does no work for padded slots.
 
 We arrived here by trying to build the opposite paper. The control experiment
 that refuted it cost $3 and should have run first.
