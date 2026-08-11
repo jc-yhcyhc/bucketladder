@@ -225,21 +225,20 @@ attention as KV grows; collectives are flat. **Nothing moves discontinuously at
 n=4**: every category's share changes less into n=4 than across some other
 adjacent pair. The convergence is not visible at operator granularity.
 
-**The mechanism, isolated.** A matmul microbenchmark with the model's real
-sharded weight shapes, no server and no scheduler, times the same matmul at
-M = 1 … 256 rows:
+**A microbenchmark that measured the wrong thing — retracted.** An isolated
+matmul at the model's real sharded shapes returned 142.9 µs at M=1, flat to
+143.6 µs at M=256, which an earlier version of this section called the
+weight-load floor with confounds removed. It is not. The qkv projection holds
+7.86 MB of weights per chip; at peak bandwidth that is 9.6 µs, so the measurement
+sits 15× above the bandwidth floor at an implied 55 GB/s — **7% of peak**. What
+was timed is per-dispatch overhead, and the per-row column was `constant / M`.
 
-| M | 1 | 8 | 64 | 256 |
-|---|---|---|---|---|
-| qkv_proj | 142.9 µs | 142.5 | 140.7 | 143.6 |
-| per row | 142.9 | 17.8 | 2.20 | **0.56** |
-
-**Total time is flat across the whole range** — 1.04× from M=1 to M=256 — so
-per-row cost falls as 1/M with no knee anywhere. This is the weight-load floor
-with every confound removed, and it is the cleanest statement of the mechanism in
-this paper. It also rejects the tiling hypothesis for §4.3's n=4 convergence: an
-MXU tile boundary would produce a knee, and there is none at 4 or anywhere else
-below 256.
+The design could also not have discriminated. For that shape the memory floor
+(9.6 µs) and compute at M=256 (10.2 µs) cross near M≈240, so bandwidth alone
+predicts a flat curve across the whole sweep; tile padding predicts flat only to
+M≈8. Tiling's prediction is a subset of bandwidth's over M∈[1,256], so no outcome
+in that range separates them. The tiling hypothesis is therefore **untested**,
+not rejected.
 
 **Where does free padding end?** Decode is measured to n=32 and the compiled
 request ladder runs to 256, so the claim needs a bound rather than an

@@ -1,0 +1,65 @@
+{
+  "experiment": "m17_tile_discriminating",
+  "description": "Two-arm matmul microbenchmark that can discriminate bandwidth from MXU tiling, replacing M15 which could not. Every cell reports implied GB/s and FLOP/s; cells below a utilisation floor are refused rather than interpreted.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "mode": "microbenchmark",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "hardware": {
+    "peak_bf16_flops_per_chip": 197000000000000.0,
+    "hbm_bw_bytes_per_s_per_chip": 819000000000.0
+  },
+  "repeats": 20,
+  "rise_threshold": 1.15,
+  "utilisation_floor_pct": 20.0,
+  "note_floor": "M15 ran at 7% of peak bandwidth and its curve was per-dispatch overhead. Any cell below 20% of either roof is dispatch-bound and is reported but not interpreted.",
+  "arms": [
+    {
+      "name": "real_shapes",
+      "K": 2560,
+      "N": 1536,
+      "iters": 200,
+      "m_values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256,
+        512
+      ],
+      "note": "Real qkv shape, amortised over 200 iterations so dispatch is divided away. Tests m13's frontier: flat to M~240, rising after."
+    },
+    {
+      "name": "tile_probe",
+      "K": 512,
+      "N": 512,
+      "iters": 2000,
+      "m_values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
+      ],
+      "note": "Small resident weights so bandwidth is NOT the binding constraint and MXU tile width is the only structure left. This is the only arm in which a knee at M=4 is identifiable."
+    }
+  ]
+}

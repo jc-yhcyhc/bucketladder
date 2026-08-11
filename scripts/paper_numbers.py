@@ -469,10 +469,12 @@ CLAIMS: list[Claim] = [
      lambda: m8_clean("n8:4096/8192")),
 
     # --- session 16: the mechanism at its purest, and a failed prediction ---
-    ("M15.flat.qkv", "4.5", "qkv matmul time M=256 / M=1", 1.00, 0.10,
-     lambda: m15_flat("qkv_proj")),
-    ("M15.flat.mlp", "4.5", "mlp_up matmul time M=256 / M=1", 1.08, 0.10,
-     lambda: m15_flat("mlp_up")),
+    # RETRACTED 2026-08-11. These timed per-dispatch overhead, not the weight
+    # load: 7.86 MB of qkv weights at 142.9 us implies 55 GB/s, 7% of peak. The
+    # sweep also could not discriminate tiling from bandwidth, because for this
+    # shape both predict a flat curve over M in [1, 256]. Replaced by m17.
+    # ("M15.flat.qkv", "4.5", "qkv matmul time M=256 / M=1", 1.00, 0.10, ...),
+    # ("M15.flat.mlp", "4.5", "mlp_up matmul time M=256 / M=1", 1.08, 0.10, ...),
     ("M16.tiny.n4", "4.5", "TinyLlama paid share n=4, 1024/2048 %", 13.4, 1.5,
      lambda: m16_share("n4:1024/2048")),
     ("M16.tiny.n8", "4.5", "TinyLlama paid share n=8, 1024/2048 %", 5.9, 1.5,
