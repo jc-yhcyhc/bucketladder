@@ -22,11 +22,12 @@ absolute percentage error (MAPE) on NPUs; reproduced on TPU with a withheld
 point it gives 5.23%, and a constant-only predictor with no length term matches
 it at batch sizes 1–2 and *beats* it at 4. And **the cost of a compiled step is
 not a property of the step** — roughly 85% of nominal padding is paid at batch
-size 1–2, 10–25% at 4–8, and approximately none at 16.
+size 1–2, a median of 23.1% at n=4 and 14.3% at n=8 with ranges that overlap,
+and approximately none at 16.
 
-Padding is abundant, and how abundant is a property of the workload rather than
-of the stack: across four prompt-length distributions at one arrival rate the
-padded share of executed tokens spans **27.3% to 51.0%**. Most of it is not paid.
+Padding is abundant, and **how abundant is a property of the workload rather than
+of the stack** — a single-figure characterisation of the stack is not available.
+Most of it is not paid.
 Per-request *length* padding does not exist, and not because of chunked prefill —
 disabling it changes nothing. Decode, which dominates production serving, is
 well-behaved: per-step cost rises 2.4× while batch size rises 32×, with no
@@ -106,8 +107,13 @@ milliseconds. §4.3 shows this changes what is measurable.
 **Definitions.** Three quantities are used throughout and are defined here rather
 than at first use.
 
-- **Flatness** — the ratio of measured cost growth to growth proportional to real
-  tokens. 1.0 means cost rises exactly with real work; below 1.0 is sublinear.
+- **Flatness** — how far a short request's cost sits from what proportional
+  scaling would predict, as a fraction of the distance to the full-bucket cost:
+  `(cost(L) − p) / (cost(B) − p)` where `p = cost(B) · L/B`. **1.0 is a pure
+  staircase** — cost independent of true length, padding fully paid — and **0.0
+  is pure linear**, cost proportional to real tokens, padding free. An earlier
+  draft defined this with the polarity reversed, which contradicted both places
+  it is used; the usages were correct and the definition was not.
 - **Share of nominal padding paid** — `(measured − real) / (padded − real)`,
   where `real` is the cost ratio predicted by real tokens alone and `padded` the
   ratio predicted if the full compiled shape were paid. 0 means padding is free;
@@ -274,8 +280,9 @@ and changed what is reachable:
 **The real barrier sits between 16 and 32, not at 8.** Under a synchronised
 launch, n=16 becomes measurable, and the paid share there is indistinguishable
 from zero across three boundaries that each double the padded token count. The
-trend is monotone: padding stops being paid as batch size rises, and by n=16 it
-is free. The clean sample is small — 7 to 11 dispatches per arm after excluding
+ends of the range are separable even though the middle is not: padding is
+substantially paid at n≤2 and indistinguishable from zero at n=16. The clean
+sample is small — 7 to 11 dispatches per arm after excluding
 splits — so we report the sign and the trend rather than a precise value.
 
 **We do not claim a shape for this dependence.** A within-bucket slope sweep gave
@@ -299,12 +306,21 @@ stack. Across four prompt-length distributions at one Poisson arrival rate
 | bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
 | uniform | 0.60 | **27.3%** | 89 / 261 ms | 6.4 / 14.9 ms |
 
-The spread is **27.3% to 51.0%**, and the ordering is not intuitive: the *most*
-uniform workload pads most, because a fixed length that sits just above a
-boundary pads every single step by the same large amount, while a spread
-distribution lands across buckets and averages out. Any single figure here
-characterises a workload. We previously reported 35.9% as a stack property; it
-was not one.
+The ordering is not intuitive: the **fixed-length** workload pads most, because a
+length sitting just above a boundary pads every single step by the same large
+amount, while a spread distribution lands across buckets and averages out.
+
+**The 27.3–51.0% spread is confounded and we withdraw it as a range.** The four
+arms were matched on request rate, not on offered *tokens*: mean prompt lengths
+are roughly 256, 384, 704 and 2056, so the uniform arm carries about 8× the token
+load of fixed-256. Its TTFT p50 of 89 ms against 17–19 ms for the others is the
+tell — that is a different point on the load curve, not only a different shape.
+The spread therefore mixes distribution shape with utilisation, which is the
+error class §6 names as this project's dominant one, found in our own table. What
+survives is the qualitative claim, which does not depend on the magnitudes:
+**padded share is a property of the workload, not of the stack**, and the 35.9%
+we previously reported as a stack property was not one. A matched re-run is
+needed before any range is quoted.
 
 **[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
 paid at each compiled boundary, against the 100% the compiled-shape premise
@@ -467,6 +483,23 @@ which the roofline cannot explain because it does not model the inter-chip
 collectives the higher-TP arms pay. And the shape is not preserved: the curve
 gets **flatter** with less sharding, which is what a larger per-chip weight floor
 implies — more of the step is floor, so batch size moves it less.
+
+**The two misses are one omitted term.** Fitting `T(TP) = W/TP + F` — a weight
+load that shards, plus a fixed cost that does not — to the three levels gives
+
+    T(TP) = 2.48/TP + 0.38     (normalised to the TP=4 step)
+
+    TP        4      2      1
+    measured  1.00   1.63   2.86
+    fitted    1.00   1.62   2.86
+
+with a total absolute error of 0.01 across three points and one free parameter.
+The prediction failed because it omitted `F`, not because the weight-floor idea
+was wrong: **fixed, non-sharding cost is 38% of the TP=4 step** — roughly 1.5 ms
+at n=1 — and that single term explains both the sub-proportional level and the
+flattening of the curve. What was reported as a failed prediction is better read
+as a calibrated two-term cost model, and it independently bounds the per-step
+fixed overhead that §4.5's retracted microbenchmark was groping for.
 
 Both misses point the same way, and together they answer the objection. If
 request-dimension padding were cheap only because that dimension is not the

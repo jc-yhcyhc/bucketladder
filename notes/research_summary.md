@@ -175,10 +175,17 @@ Across four prompt-length distributions at one Poisson arrival rate (8 req/s,
 | bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
 | uniform | 0.60 | **27.3%** | 89 / 261 ms | 6.4 / 14.9 ms |
 
-**27.3% to 51.0%** — and the ordering is counter-intuitive: the *most uniform*
-workload pads *most*, because a fixed length just above a boundary pads every
-step by the same large amount, while a spread distribution lands across buckets
-and averages out. Any single figure characterises a workload, not the stack.
+The ordering is counter-intuitive: the **fixed-length** workload pads *most*,
+because a length just above a boundary pads every step by the same large amount,
+while a spread distribution lands across buckets and averages out.
+
+**The 27.3–51.0% spread is withdrawn as a range.** The arms were matched on
+request rate, not offered tokens — mean prompt lengths are roughly 256, 384, 704
+and 2056, so the uniform arm carries ~8× the token load of fixed-256, and its
+TTFT p50 of 89 ms against 17–19 ms is the tell. The spread mixes distribution
+shape with utilisation, which is §5's dominant error class appearing in our own
+table. The qualitative claim survives and does not depend on the magnitudes:
+padded share is a property of the workload, not of the stack.
 
 Per-request *length* padding does not exist: cost tracks packed tokens, the
 batch-padding model is rejected by 44–618%, and uniform controls where all
@@ -290,6 +297,15 @@ preserved.
 model the inter-chip collectives the higher-TP arms pay. And shape is not
 preserved: the curve gets *flatter* with less sharding, which a larger per-chip
 weight floor implies.
+
+**The two misses are one omitted term.** Fitting `T(TP) = W/TP + F` — a weight
+load that shards, plus a fixed cost that does not — gives `T = 2.48/TP + 0.38`
+normalised to the TP=4 step, reproducing 1.00 / 1.62 / 2.86 against measured
+1.00 / 1.63 / 2.86: total absolute error 0.01 across three points with one free
+parameter. The prediction failed because it omitted `F`, not because the
+weight-floor idea was wrong. **Fixed, non-sharding cost is 38% of the TP=4
+step**, ~1.5 ms at n=1, and that one term explains both the sub-proportional
+level and the flattening.
 
 Both misses point the same way and answer the objection. If request-dimension
 padding were cheap only because that dimension is not the bottleneck at TP=4,
