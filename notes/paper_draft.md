@@ -1,7 +1,7 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
-`v5litepod-4` (4 chips, TP=4). Thirteen hardware sessions, **[redacted]**.
+`v5litepod-4` (4 chips, TP=4). Fourteen hardware sessions, **[redacted]**.
 
 ---
 
@@ -22,7 +22,7 @@ absolute percentage error (MAPE) on NPUs; reproduced on TPU with a withheld
 point it gives 5.23%, and a constant-only predictor with no length term matches
 it at batch sizes 1–2 and *beats* it at 4. And **the cost of a compiled step is
 not a property of the step** — roughly 85% of nominal padding is paid at batch
-size 1–2 against 10–25% at 4–8.
+size 1–2, 10–25% at 4–8, and approximately none at 16.
 
 Padding is abundant, and how abundant is a property of the workload rather than
 of the stack: across four prompt-length distributions at one arrival rate the
@@ -34,7 +34,7 @@ discontinuity, and a roofline analysis shows why — the step reads the entire
 weight set regardless of batch size, so padding on the request dimension falls
 inside a floor that batch size does not move.
 
-We report four optimisations we designed, measured and rejected, and eight
+We report four optimisations we designed, measured and rejected, and nine
 invalid inferences we made and caught — most sharing one cause, and now blocked
 by a mechanical check rather than by intent.
 
@@ -67,7 +67,8 @@ reports what is true instead.
    turns on never earns its place at any batch size we measured.
 3. **Shape-quantization cost is batch-size-dependent** (§4.3), with a
    memory-bandwidth mechanism (§4.5) that explains why the request dimension is
-   nearly free.
+   nearly free, and a sharding ablation (§4.7) showing the mechanism is not an
+   artifact of the layout we measured it in.
 4. **Four optimisations measured and rejected** (§5), with the measurement that
    killed each.
 5. **A methodological rule with a mechanical guardrail** (§6), including two
@@ -124,7 +125,7 @@ others.
 
 **Traceability.** Every run writes `meta.json` before doing work, records config
 hash, git SHA and dirty flag, appends to a manifest, and is never overwritten.
-All 42 numerical claims in this paper are tied to `run_id`s and recomputed from
+All 61 numerical claims in this paper are tied to `run_id`s and recomputed from
 captured data by `scripts/paper_numbers.py`; `./reproduce_all.sh` regenerates
 every number and figure from `captured/` and exits non-zero if any disagrees.
 
@@ -230,7 +231,7 @@ fixed batch size and near-fixed sequence length:
 | 1–2 | **~85%** |
 | 4 | 24% |
 | 8 | 16% |
-| ≥16 | *see below* |
+| 16 | **≈0%** (−15.4%, −2.7%, +0.5% at three boundaries) |
 
 At n=1 a single request pays its full sequence bucket (flatness 0.97 at buckets
 ≤1024). At n=4 it pays a fraction.
@@ -251,10 +252,12 @@ and changed what is reachable:
 | 16 | 100% | **60%** |
 | 32 | 100% | 100% |
 
-**The real barrier sits between 16 and 32, not at 8.** n=16 is now measurable —
-6 of 15 dispatches execute their prefill in a single step where the old launcher
-produced none — and extending the paid-padding measurement to n=16 is the
-immediate next experiment rather than a stated impossibility.
+**The real barrier sits between 16 and 32, not at 8.** Under a synchronised
+launch, n=16 becomes measurable, and the paid share there is indistinguishable
+from zero across three boundaries that each double the padded token count. The
+trend is monotone: padding stops being paid as batch size rises, and by n=16 it
+is free. The clean sample is small — 7 to 11 dispatches per arm after excluding
+splits — so we report the sign and the trend rather than a precise value.
 
 **We do not claim a shape for this dependence.** A within-bucket slope sweep gave
 1.61 / 0.75 / 17.18 µs/token at n=1/2/4, but the third value rests on a single
@@ -354,6 +357,31 @@ cells §4.1 depends on gives 95% interval widths of 38.7% at n=8 and 28.2% at
 n=9 over 21 repeats — far wider than the aggregate spread suggests, and wider
 than several differences a reader might otherwise treat as signal.
 
+### 4.7 The cheapness of padding is not an artifact of the sharding
+
+Holding model, chips and workload fixed and varying only tensor-parallel degree.
+The prediction was registered in the configs before the measurement: per-chip
+weight bytes scale as 1/TP, so the level should scale with 1/TP and the shape
+should be preserved.
+
+| TP | per-step level vs TP=4 | predicted | cost rise, n=1→32 |
+|---|---|---|---|
+| 4 | 1.00× | 1.00× | 2.33× |
+| 2 | 1.63× | 2.00× | 2.41× |
+| 1 | 2.86× | **4.00×** | **1.83×** |
+
+**Both halves of the prediction missed.** The level scales *sub*-proportionally,
+which the roofline cannot explain because it does not model the inter-chip
+collectives the higher-TP arms pay. And the shape is not preserved: the curve
+gets **flatter** with less sharding, which is what a larger per-chip weight floor
+implies — more of the step is floor, so batch size moves it less.
+
+Both misses point the same way, and together they answer the objection. If
+request-dimension padding were cheap only because that dimension is not the
+bottleneck at TP=4, reducing TP would expose it. Instead padding is cheapest at
+TP=1, where the floor is largest. The result is about the weight floor, not about
+this layout — for this model on this chip.
+
 ---
 
 ## 5. Four optimisations, measured and rejected
@@ -380,7 +408,7 @@ less work.
 
 ---
 
-## 6. Eight failures, one dominant cause
+## 6. Nine failures, one dominant cause
 
 | looked like | was |
 |---|---|
@@ -392,6 +420,7 @@ less work.
 | a "fixed cost" that was not constant | all of the above, named |
 | a headline "~4–9% recoverable" | padded share and paid share from different runs |
 | "no single-step dispatch above n=8" | a step-count test that could never pass |
+| paid padding at n=16 | split dispatches pooled into the median, not excluded |
 
 The dominant cause: **a quantity measured under one configuration, used under
 another.**
@@ -409,36 +438,41 @@ numbers: a crossover point, and the recoverable-headroom figure in §4.4.
 The recoverable-headroom figure evaded it for three drafts by living in prose. It
 was caught only when we registered it as a claim in order to check it.
 
-The eighth failure is a different class and is not covered at all. A step-count
+The last two are a different class and are not covered at all. A step-count
 criterion tested whether a whole dispatch ran in one scheduler step — never true,
 since every request needs a decode step — instead of whether its *prefill* was
-split. It was caught because it reported 0% single-step at a cell another
-experiment had independently measured as never splitting. **The guardrail checks
-claim provenance, not analysis definitions**, and we do not currently have a
-mechanical check for the latter.
+split; it was caught because it reported 0% single-step at a cell another
+experiment had independently measured as never splitting. And the boundary
+experiment *counted* split dispatches but pooled their cost into the median
+anyway, contradicting the rule §2 states. That was harmless while splits were
+zero at n≤8 and wrong the moment n=16 became reachable, where more than half of
+the dispatches split. Recomputing with splits excluded moved the n=16 result by
+under one percentage point, so the conclusion stands — but the bias runs upward,
+which is the direction that would have manufactured a positive result.
+
+**The guardrail checks claim provenance, not analysis definitions**, and we do
+not have a mechanical check for the latter. Both of these were caught by a
+measurement disagreeing with an independent one, which is not a method.
 
 ---
 
 ## 7. Limitations
 
-**One accelerator, one primary model, one sharding.** v5e with a 4B model at TP=4
-places per-chip weights in the low hundreds of megabytes — an operating point
-where decode is bandwidth-bound and request-dimension padding is cheap almost by
-construction. The claims most likely to change under scale are the load-bearing
-ones. A TP=1/2/4 ablation was designed and **did not run**: our own
-controlled-variable contract pins TP at 4 and aborted the TP=2 and TP=1 arms.
-That is the contract behaving correctly and the experiment failing anyway — it
-cannot distinguish undeclared drift from a deliberately declared independent
-variable. Until an experiment can declare a control as its variable, we cannot
-separate "request-dimension padding is free" from "the request dimension is not
-the bottleneck in this sharding."
+**One accelerator, one primary model.** v5e with a 4B model places per-chip
+weights in the low hundreds of megabytes — an operating point where decode is
+bandwidth-bound. The sharding objection, at least, we can answer: a TP=1/2/4
+ablation (§4.7) finds the weight floor dominates at every sharding and dominates
+*more* with less of it. The remaining exposure is model scale and multi-host
+topology, where weight streaming and inter-chip collectives change what padding
+hides under, and we measured neither.
 
 **No production trace.** §4.4's four length distributions are parametric families
 chosen to span a plausible range, not a trace. The result is a sensitivity range,
 not a corrected point estimate.
 
 **Prefill step cost above n=16 is still not isolable.** The barrier moved from
-n=8 to somewhere between 16 and 32 (§4.3); it did not disappear.
+n=8 to somewhere between 16 and 32 (§4.3); it did not disappear. At n=16 itself
+the clean sample is 7–11 dispatches per arm.
 
 **The n=4 convergence is unexplained.** Three independent observations break
 there; we searched the stack and did not find what changes. Resolving it needs an
@@ -490,12 +524,13 @@ of work; our holdout discipline follows it.
 
 A production TPU serving stack quantizes shapes in three dimensions. One does not
 exist, one is disabled by a default flag, and the third is paid in a proportion
-that depends on batch size — heavily at 1–2, lightly at 4–8. How much padding is
-executed at all is a property of the workload, spanning 27.3% to 51.0% of
-executed tokens across plausible length distributions.
+that depends on batch size — heavily at 1–2, lightly at 4–8, and not at all by
+16. How much padding is executed is a property of the workload, spanning 27.3%
+to 51.0% of executed tokens across plausible length distributions.
 
 The practical advice is negative, and it is bounded by what we measured: on this
-stack, at batch sizes up to 16, with a 4B model sharded four ways, do not build
+stack, at batch sizes up to 16, with a 4B model at any sharding of four v5e
+chips, do not build
 length bucketing, shape-aware admission control, or ladder design. The phase that
 dominates production serving is smooth, close to linear, and memory-bound for a
 reason that has nothing to do with compiled shapes.

@@ -210,6 +210,32 @@ def m1_share(edge: str) -> float:
     return float("nan")
 
 
+def m14_share(edge: str) -> tuple[float, str]:
+    """Paid padding share at n=16, from CLEAN dispatches only.
+
+    Recomputed here from raw per-dispatch rows rather than read from the run's
+    `edges` table, because the run that produced that table pooled split
+    dispatches into the median -- the ninth failure in §6, and the one the
+    paper's own §2 said could not happen. Reading the stored summary back would
+    launder it. A split executes more steps and therefore more padding, so
+    pooling biases this share upward.
+    """
+    for rid, cfg, rows in runs("session14-ablation/results/m1_boundary/*", "dispatches"):
+        olen = cfg["output_len"]
+        arms = {}
+        for arm in ("below", "above"):
+            g = [r for r in rows if r["edge"] == edge and r["arm"] == arm
+                 and r["n_steps"] == r["n_steps"] and r["n_steps"] <= 1 + olen
+                 and r["step_latency_ms"] == r["step_latency_ms"]]
+            if not g:
+                return float("nan"), ""
+            arms[arm] = (statistics.median([r["step_latency_ms"] for r in g]),
+                         g[0]["tokens_real"], g[0]["tokens_padded"])
+        b, a = arms["below"], arms["above"]
+        rr, pr = a[1] / b[1], a[2] / b[2]
+        return 100 * ((a[0] / b[0]) - rr) / (pr - rr), rid
+    return float("nan"), ""
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -358,6 +384,14 @@ CLAIMS: list[Claim] = [
     ("M6.const.n1", "4.2", "constant-only MAPE at n=1 %", 0.96, 0.05, lambda: m6_ab(1, "const_mape_pct")),
     ("M6.const.n4", "4.2", "constant-only MAPE at n=4 %", 14.80, 0.1, lambda: m6_ab(4, "const_mape_pct")),
     ("M6.lens.n4", "4.2", "LENS MAPE at n=4 %", 19.77, 0.1, lambda: m6_ab(4, "lens_mape_pct")),
+
+    # --- session 14: the regime the paper called unmeasurable ---------------
+    ("M14.share.e1", "4.3", "paid padding share at n=16, 512/1024 %", -15.4, 2.0,
+     lambda: m14_share("n16:512/1024")),
+    ("M14.share.e2", "4.3", "paid padding share at n=16, 1024/2048 %", -2.7, 2.0,
+     lambda: m14_share("n16:1024/2048")),
+    ("M14.share.e3", "4.3", "paid padding share at n=16, 2048/4096 %", 0.5, 2.0,
+     lambda: m14_share("n16:2048/4096")),
 
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),

@@ -157,13 +157,20 @@ def main(argv: list[str] | None = None) -> int:
                                  "repeat_idx": rep, "step_latency_ms": r["prefill_ms"],
                                  "iteration_tokens_delta": r["scheduled_tokens"],
                                  "n_steps": r["n_steps"]})
-                    if r["prefill_ms"] == r["prefill_ms"]:
-                        costs.append(r["prefill_ms"])
                     # A prefill split across steps reintroduces the smearing this
-                    # experiment exists to avoid, so count it rather than average
-                    # over it. output_len adds its own decode step(s).
-                    if r["n_steps"] == r["n_steps"] and r["n_steps"] > 1 + olen:
+                    # experiment exists to avoid. §2 of the paper states that such
+                    # dispatches are EXCLUDED rather than averaged; until session 14
+                    # this loop only counted them and pooled their cost anyway.
+                    # That was harmless while splits were zero at n<=8 and wrong the
+                    # moment n=16 was reachable, where 10-18 of 25 dispatches split.
+                    # A split dispatch executes more steps and therefore more padding,
+                    # so pooling biases the paid share UPWARD -- the direction that
+                    # would have manufactured a positive result.
+                    split = r["n_steps"] == r["n_steps"] and r["n_steps"] > 1 + olen
+                    if split:
                         splits += 1
+                    elif r["prefill_ms"] == r["prefill_ms"]:
+                        costs.append(r["prefill_ms"])
                 arms[arm] = {"seq": seq, "real": real, "padded": padded,
                              "cost": statistics.median(costs) if costs else float("nan"),
                              "splits": splits, "n": len(costs)}
