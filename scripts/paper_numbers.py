@@ -295,24 +295,6 @@ CLAIMS: list[Claim] = [
     ("H1.mean", "5", "mean per-dispatch padding ratio %", 56.8, 1.0, lambda: (h1()[0]["mean"], h1()[1])),
     ("H1.p95", "5", "p95 per-dispatch padding ratio %", 99.6, 1.0, lambda: (h1()[0]["p95"], h1()[1])),
 
-    # The paper's headline actionable number, registered as a CLAIM rather than
-    # left in prose. Review finding M2/Q5: "~4-9% recoverable" multiplies a
-    # padding SHARE measured under one workload by a PAID share measured under a
-    # different one, which is the exact form SS6 names as this project's root
-    # cause -- and the guardrail could not see it, because a number that lives
-    # only in a sentence has no source_run to diff. That is the real defect: the
-    # guardrail's coverage was the set of registered claims, not the set of
-    # claims made. Registering it here puts it inside the check; whether it then
-    # passes is a separate question, and it does not.
-    ("DERIVED.recoverable.lo", "7", "recoverable share of execution, low %", 3.4, 0.3,
-     lambda: (h1()[0]["pct_padding"] * m1_share("512/1024"),
-              "e05_step_shape__20260810T051309Z__f7f642b502fb;"
-              "m1_boundary__20260810T182212Z__0c4087987fd2"), ()),
-    ("DERIVED.recoverable.hi", "7", "recoverable share of execution, high %", 9.0, 0.5,
-     lambda: (h1()[0]["pct_padding"] * m1_share("4096/8192"),
-              "e05_step_shape__20260810T051309Z__f7f642b502fb;"
-              "m1_boundary__20260810T182212Z__0c4087987fd2"), ()),
-
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),
     ("M1.e2.cost", "5", "edge 1024/2048 cost ratio", 1.070, 0.01, lambda: m1_edge("1024/2048", "cost_ratio")),
@@ -415,6 +397,34 @@ def check_invariance(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # fraction measured at n=4; both authors of this project built that equation,
 # and both noticed one turn too late.
 RETIRED = [
+    # WITHDRAWN 2026-08-11 on review finding M2/Q5. "~4-9% of execution is
+    # recoverable" was the paper's headline actionable number and appeared in the
+    # abstract, §4.4, §7 and §9. It multiplies a padding SHARE measured under a
+    # fixed-256 workload by a PAID share measured at n=4 under boundary-straddling
+    # near-fixed lengths. Registering it as a claim -- which it never was, because
+    # it lived only in prose -- made the guardrail evaluate it, and it flagged
+    # `concurrency` and `prompt_len`: the two axes the reviewer named independently.
+    #
+    # Invariance over `concurrency` cannot be asserted, because §4.3's own finding
+    # is that the paid share MOVES with it: ~85% at n=1-2, 10-25% at n=4-8. The
+    # derivation therefore commits the exact error §6 names as this project's root
+    # cause, in the paper that names it.
+    #
+    # It is withdrawn rather than corrected. A defensible replacement needs the
+    # padding share and the paid share measured under ONE workload at ONE batch
+    # size, which is what m10_trace_workload.py and the m8 barrier re-runs are for.
+    # Until then the paper states the two measured quantities separately and does
+    # not multiply them.
+    {"claim_id": "S7.recoverable.lo(RETIRED)", "section": "7",
+     "claim": "~4% of execution recoverable (low end) -- WITHDRAWN, cross-configuration",
+     "source_run": "e05_step_shape__20260810T051309Z__f7f642b502fb;"
+                   "m1_boundary__20260810T182212Z__0c4087987fd2",
+     "invariant_over": ()},
+    {"claim_id": "S7.recoverable.hi(RETIRED)", "section": "7",
+     "claim": "~9% of execution recoverable (high end) -- WITHDRAWN, cross-configuration",
+     "source_run": "e05_step_shape__20260810T051309Z__f7f642b502fb;"
+                   "m1_boundary__20260810T182212Z__0c4087987fd2",
+     "invariant_over": ()},
     {"claim_id": "S5.crossover(RETIRED)", "section": "5",
      "claim": "step-for-alignment crosses at ~2048 tokens",
      "source_run": "m3_small_steps__20260810T182131Z__9b0dc2baf9ad;m1_boundary__20260810T182212Z__0c4087987fd2",
