@@ -3,7 +3,7 @@
 **What compiled-shape padding actually costs in production TPU serving.**
 
 A measurement study of vLLM 0.25.0 + `tpu-inference` 0.25.0 on `v5litepod-4`.
-Twelve hardware sessions, **[redacted]**, 42 verified claims, 184 tests.
+Thirteen hardware sessions, **[redacted]**, 58 verified claims, 184 tests.
 
 TPU executables are compiled for fixed tensor shapes, so a serving stack rounds
 every workload up to a precompiled ladder. The obvious inference — that rounding
@@ -30,24 +30,34 @@ to 16, n=9 would cost what n=16 costs (91.8 ms); it costs what n=8 costs (51.4).
 Enabling the flag changes decode by **0.0%**. Absent from the RPA paper, from
 LENS, and from vLLM's TPU documentation.
 
-**A published latency predictor doesn't transfer.** LENS reports 2.15% on NPUs
-using a per-bucket linear model. Reproduced on TPU with a withheld point:
-**5.23% MAPE, worst 22.4%** — near-perfect at batch sizes 1–2, failing at 4.
+**A published latency predictor's length term never earns its place.** LENS
+reports 2.15% on NPUs using a per-bucket linear model. Reproduced on TPU with a
+withheld point: **5.23% MAPE, worst 22.4%**. A constant-only predictor with no
+length term matches it at batch sizes 1–2 (0.96% vs 0.38%) and **beats** it at 4
+(14.80% vs 19.77%) — so the near-perfect accuracy at low batch size is evidence
+about the fit protocol, not the model form.
 
 **Step cost is not a property of the step.** It depends on batch size: ~85% of
-nominal padding is paid at n=1–2, 10–25% at n=4–8. Above n=8 it cannot be
-isolated at all — the scheduler splits every dispatch, which is *the regime
-production runs in*.
+nominal padding is paid at n=1–2, 10–25% at n=4–8. How far up this is measurable
+was partly our own limitation — splitting tracks request count, not tokens, and
+releasing requests from a thread barrier cut arrival spread 7.6× and made **n=16
+measurable for the first time**. The real barrier sits between 16 and 32.
 
-**Padding is abundant and mostly free.** 36% of executed tokens are padding;
-only 10–25% of it is paid, so the recoverable share is ~4–9% of execution.
-Per-request length padding doesn't exist at all — a mixed-length batch costs its
-packed tokens (batch-padding model rejected by 44–618%), and not because of
-chunked prefill: disabling it changes nothing.
+**Padding is abundant, and how abundant is a property of the workload.** Across
+four prompt-length distributions at one arrival rate the padded share of executed
+tokens spans **27.3% to 51.0%** — and the *most uniform* workload pads most,
+because a fixed length just above a boundary pads every step identically. Only
+10–25% of it is paid. Per-request length padding doesn't exist at all — a
+mixed-length batch costs its packed tokens (batch-padding model rejected by
+44–618%), and not because of chunked prefill: disabling it changes nothing.
 
-**Decode is well-behaved.** Per-step cost rises 2.4× while batch size rises 32×;
-per-sequence cost falls 13× monotonically with no discontinuity. The pathology is
-real and lives in the phase that matters least.
+**Decode is well-behaved, and bandwidth is why.** Per-step cost rises 2.4× while
+batch size rises 32×; per-sequence cost falls 13× monotonically. A roofline gives
+the mechanism: **2.01 GB of weights crosses HBM every decode step regardless of
+batch size** — 99% of all bytes moved at n≤2 — and MFU never exceeds 3.65%. Every
+cell is memory-bound, so extra sequences, real or padded, are nearly free until
+that floor is left. The pathology is real and lives in the phase that matters
+least.
 
 Full detail: [`notes/research_summary.md`](notes/research_summary.md).
 
@@ -72,16 +82,19 @@ ordinary dynamic batching rather than a shape effect, because that is what it is
 and appends to a manifest. Runs are never overwritten. A config that can't prove
 prefix caching is off refuses to run — this has fired twice on real mistakes.
 
-**`scripts/paper_numbers.py`** ties all 42 claims to `run_id`s and recomputes
+**`scripts/paper_numbers.py`** ties all 58 claims to `run_id`s and recomputes
 them from captured data. On first run it found two real defects: a cost
 transcribed from an exploratory dump rather than the fitted curve, and a table
 presented as precise that came from one of two replicates differing by 14%.
 
-**An invariance guardrail.** Six of this project's errors share one cause — a
+**An invariance guardrail.** Most of this project's errors share one cause — a
 quantity measured under one configuration used under another. The check diffs
 every config key across a claim's source runs and requires each difference to be
 explicitly asserted. *It needed three versions before it caught the error it was
-built for*, and it flagged five claims already believed correct.
+built for*, it flagged five claims already believed correct, and it has since
+killed two of our own headline numbers: a crossover point and a
+recoverable-headroom figure. Its coverage is the set of **registered** claims, so
+the headroom figure evaded it for three drafts by living in prose.
 
 **`scripts/check_model.py`** preflights a model in seconds against four failure
 modes that each cost a server boot to discover — a registered-but-broken
@@ -109,7 +122,7 @@ optimisation rejected by judgement overriding a pre-committed decision rule.
 
 ```bash
 python -m pytest tests/ -q                 # 184 tests, no hardware needed
-python scripts/paper_numbers.py            # recompute all 42 claims from captured/
+python scripts/paper_numbers.py            # recompute all 58 claims from captured/
 python scripts/check_model.py <hf-model>   # preflight before provisioning
 python scripts/refit_cost_model.py         # refit + both holdouts, offline
 ```
