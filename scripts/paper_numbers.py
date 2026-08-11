@@ -150,6 +150,51 @@ def m1_edge(name: str, field: str) -> tuple[float, str]:
     return float("nan"), ""
 
 
+def s13(exp: str, table: str):
+    """Rows from a session-13 experiment, by name."""
+    for _rid, _cfg, rows in runs(f"session13-review/results/{exp}/*", table):
+        return rows
+    return []
+
+
+def m10_pad(arm: str) -> tuple[float, str]:
+    """Padded share of executed tokens for one length-distribution arm."""
+    for r in s13("m10_trace_workload", "arms"):
+        if r["arm"] == arm:
+            return r["padding_pct_of_executed"], "m10"
+    return float("nan"), ""
+
+
+def m8_split(launcher: str, n: int) -> tuple[float, str]:
+    """% of dispatches whose PREFILL split, from raw step counts.
+
+    Recomputed from n_steps rather than read from the stored `single_step`
+    column, because that column was written by the criterion §6 reports as the
+    eighth failure. Reading it back would launder the error into the paper.
+    """
+    rows = [r for r in s13("m8_split_barrier", "dispatches")
+            if r["launcher"] == launcher and r["n"] == n]
+    if not rows:
+        return float("nan"), ""
+    clean = 1 + 1                      # output_len=1: one prefill step + one decode
+    return 100 * sum(r["n_steps"] > clean for r in rows) / len(rows), "m8"
+
+
+def m9_roof(n: int, field: str) -> tuple[float, str]:
+    for _rid, _cfg, rows in runs("../results/review/m9_roofline/*", "roofline"):
+        for r in rows:
+            if r["n"] == n:
+                return r[field], "m9"
+    return float("nan"), ""
+
+
+def m6_ab(n: int, field: str) -> tuple[float, str]:
+    for _rid, _cfg, rows in runs("../results/review/m6_lens_ablation/*", "summary_by_n"):
+        for r in rows:
+            if r["n"] == n:
+                return r[field], "m6"
+    return float("nan"), ""
+
 def m1_share(edge: str) -> float:
     """Paid share of nominal padding at a boundary, as a FRACTION, at n=4.
 
@@ -294,6 +339,25 @@ CLAIMS: list[Claim] = [
     ("H1.pct", "5", "% of executed tokens that are padding", 35.9, 0.5, lambda: (h1()[0]["pct_padding"], h1()[1])),
     ("H1.mean", "5", "mean per-dispatch padding ratio %", 56.8, 1.0, lambda: (h1()[0]["mean"], h1()[1])),
     ("H1.p95", "5", "p95 per-dispatch padding ratio %", 99.6, 1.0, lambda: (h1()[0]["p95"], h1()[1])),
+
+    # --- session 13: the review response ------------------------------------
+    ("M10.pad.fixed", "4.4", "padded share, fixed-256 workload %", 51.0, 0.5, lambda: m10_pad("fixed")),
+    ("M10.pad.uniform", "4.4", "padded share, uniform workload %", 27.3, 0.5, lambda: m10_pad("uniform")),
+    ("M10.pad.lognormal", "4.4", "padded share, lognormal workload %", 38.4, 0.5, lambda: m10_pad("lognormal")),
+    ("M10.pad.bimodal", "4.4", "padded share, bimodal workload %", 32.7, 0.5, lambda: m10_pad("bimodal")),
+    ("M8.tp.n8", "4.3", "prefill split %, old launcher n=8", 20.0, 0.1, lambda: m8_split("threadpool", 8)),
+    ("M8.bar.n8", "4.3", "prefill split %, barrier n=8", 0.0, 0.1, lambda: m8_split("barrier", 8)),
+    ("M8.tp.n16", "4.3", "prefill split %, old launcher n=16", 100.0, 0.1, lambda: m8_split("threadpool", 16)),
+    ("M8.bar.n16", "4.3", "prefill split %, barrier n=16", 60.0, 0.1, lambda: m8_split("barrier", 16)),
+    ("M8.bar.n32", "4.3", "prefill split %, barrier n=32", 100.0, 0.1, lambda: m8_split("barrier", 32)),
+    ("M9.bw.n1", "4.5", "HBM bandwidth utilisation at n=1 %", 64.9, 0.3, lambda: m9_roof(1, "bw_utilisation_pct")),
+    ("M9.bw.n32", "4.5", "HBM bandwidth utilisation at n=32 %", 31.4, 0.3, lambda: m9_roof(32, "bw_utilisation_pct")),
+    ("M9.mfu.n32", "4.5", "MFU at n=32 %", 3.65, 0.05, lambda: m9_roof(32, "mfu_pct")),
+    ("M9.wfrac.n1", "4.5", "weight share of bytes moved at n=1 %", 99.0, 1.0,
+     lambda: (lambda v, s: (v * 100, s))(*m9_roof(1, "weight_bytes_frac"))),
+    ("M6.const.n1", "4.2", "constant-only MAPE at n=1 %", 0.96, 0.05, lambda: m6_ab(1, "const_mape_pct")),
+    ("M6.const.n4", "4.2", "constant-only MAPE at n=4 %", 14.80, 0.1, lambda: m6_ab(4, "const_mape_pct")),
+    ("M6.lens.n4", "4.2", "LENS MAPE at n=4 %", 19.77, 0.1, lambda: m6_ab(4, "lens_mape_pct")),
 
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),

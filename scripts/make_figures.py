@@ -8,14 +8,14 @@ the reason `reproduce_all.sh --figures` runs this.
 
 Three figures, chosen because each carries a claim that a table states less well:
 
-  fig1  decode cost vs batch size      §4.5 — the cleanest data in the project,
+  fig3  decode cost vs batch size      §4.5 — the cleanest data in the project,
                                        and the one place a *shape* is the point:
                                        smooth, monotone, no discontinuity.
   fig2  paid padding by boundary       §4.4 — magnitude comparison across four
                                        boundaries against the 100% the premise
                                        predicts. Grouped bars, not a line: the
                                        boundaries are categories, not a scale.
-  fig3  LENS holdout error vs n        §4.2 — the money figure. A published
+  fig1  LENS holdout error vs n        §4.2 — the money figure. A published
                                        predictor's error is not spread across
                                        the range; it is LOCALISED at n=4, which
                                        is exactly the claim.
@@ -108,7 +108,7 @@ def fig_decode(out: pathlib.Path) -> str:
                  color=INK, fontsize=11, loc="left", pad=12)
     fig.text(0.01, 0.01, "per-step cost rises only 2.4× over the same 32× range",
              color=MUTED, fontsize=8)
-    fig.tight_layout(); f = out / "fig1_decode.png"; fig.savefig(f); plt.close(fig)
+    fig.tight_layout(); f = out / "fig3_decode.png"; fig.savefig(f); plt.close(fig)
     return f.name
 
 
@@ -181,7 +181,7 @@ def fig_lens(out: pathlib.Path) -> str:
         t.set_color(INK)
     fig.text(0.01, 0.01, "LENS protocol reproduced on TPU; mid-bucket point withheld from each fit",
              color=MUTED, fontsize=8)
-    fig.tight_layout(); f = out / "fig3_lens.png"; fig.savefig(f); plt.close(fig)
+    fig.tight_layout(); f = out / "fig1_lens.png"; fig.savefig(f); plt.close(fig)
     return f.name
 
 
@@ -191,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
     made = []
-    for fn in (fig_decode, fig_padding, fig_lens):
+    # Emitted in READING order, so the figure numbers a reader meets in the
+    # paper match the order the sections introduce them (review, minor items).
+    for fn in (fig_lens, fig_padding, fig_decode):
         try:
             made.append(fn(args.out))
         except Exception as exc:  # noqa: BLE001

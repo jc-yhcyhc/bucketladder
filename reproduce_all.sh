@@ -47,20 +47,32 @@ step() {
 #    first thing to break when one is wrong.
 step "unit tests (184)" "$PY" -m pytest tests/ -q
 
-# 2. Every claim in the paper, recomputed from captured/ and diffed against the
+# 2. Offline re-analyses that the paper's claims are computed FROM. These must
+#    run before paper_numbers.py, because several §4.2 and §4.5 claims read the
+#    tables they emit -- and `results/` is gitignored, so on a fresh clone those
+#    claims would silently go UNVERIFIED rather than fail. Regenerating them here
+#    keeps the check honest for someone who has only the repo and captured/.
+step "LENS ablations (M6)" "$PY" scripts/m6_lens_ablation.py \
+    --results-root "$HERE/results/review"
+step "confidence intervals (M7)" "$PY" scripts/m7_intervals.py \
+    --results-root "$HERE/results/review"
+step "decode roofline (M9)" "$PY" scripts/m9_roofline.py \
+    --config configs/m9_roofline.json --results-root "$HERE/results/review"
+
+# 3. Every claim in the paper, recomputed from captured/ and diffed against the
 #    stated value, plus the invariance guardrail over derived claims.
 step "paper claims + invariance guardrail" "$PY" scripts/paper_numbers.py
 
-# 3. The cost model refit and both holdouts -- seeds the fit never saw, and
+# 4. The cost model refit and both holdouts -- seeds the fit never saw, and
 #    rates the fit never saw. Regenerates sim/measured_cost_curve.json.
 step "cost model refit + 2 holdouts" "$PY" scripts/refit_cost_model.py
 
-# 4. The padding headroom, recomputed from per-step histograms rather than read
+# 5. The padding headroom, recomputed from per-step histograms rather than read
 #    from a stored table.
 step "padding headroom (H1)" "$PY" scripts/h1_headroom.py \
     --results-root "$HERE/results/repro"
 
-# 5. Offline analyses that depend on the refitted curve. These are simulation,
+# 6. Offline analyses that depend on the refitted curve. These are simulation,
 #    not measurement, and are included so a curve change cannot silently
 #    invalidate a downstream conclusion.
 step "offline optimum (e21)" "$PY" scripts/e21_offline_optimum.py \
