@@ -1,0 +1,2 @@
+INFO 08-11 18:31:56 [__init__.py:76] TPU info: node_name=bucketladder-tpu | tpu_type=v5litepod-4 | worker_id=0 | num_chips=4 | num_cores_per_chip=1
+WARNING 08-11 18:31:56 [tpu_platform.py:408] Pin memory is not supported on TPU.
