@@ -1,0 +1,101 @@
+INFO 08-11 22:05:58 [__init__.py:76] TPU info: node_name=bucketladder-tpu | tpu_type=v5litepod-4 | worker_id=0 | num_chips=4 | num_cores_per_chip=1
+WARNING 08-11 22:05:59 [tpu_platform.py:408] Pin memory is not supported on TPU.
+INFO 08-11 22:06:11 [importing.py:53] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 08-11 22:06:11 [importing.py:88] Triton not installed or not compatible; certain GPU-related functions will not be available.
+INFO 08-11 22:06:16 [attention_interface.py:56] Using default RPA kernel
+WARNING 08-11 22:06:16 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 08-11 22:06:17 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 08-11 22:06:17 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+WARNING 08-11 22:06:17 [interface.py:358] Failed to import from vllm._C: ModuleNotFoundError("No module named 'vllm._C'")
+INFO 08-11 22:06:17 [__init__.py:112] Registered model loader `<class 'tpu_inference.models.jax.utils.weight_utils.JaxDummyModelLoader'>` with load format `jax_dummy`
+INFO 08-11 22:06:17 [__init__.py:112] Registered model loader `<class 'tpu_inference.models.common.pathways_dummy_loader.PathwaysDummyModelLoader'>` with load format `pathways_dummy`
+INFO 08-11 22:06:18 [__init__.py:112] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.IncrementalModelLoader'>` with load format `tpu_streaming_loader`
+WARNING 08-11 22:06:18 [__init__.py:101] Load format `runai_streamer` is already registered, and will be overwritten by the new loader class `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>`.
+INFO 08-11 22:06:18 [__init__.py:112] Registered model loader `<class 'tpu_inference.models.vllm.vllm_model_loader.RunaiIncrementalModelLoader'>` with load format `runai_streamer`
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339] 
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339]        █     █     █▄   ▄█
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.25.0
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339]   █▄█▀ █     █     █     █  model   meta-llama/Llama-3.1-8B-Instruct
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:339] 
+(APIServer pid=10320) INFO 08-11 22:06:19 [api_utils.py:273] non-default args: {'model_tag': 'meta-llama/Llama-3.1-8B-Instruct', 'model': 'meta-llama/Llama-3.1-8B-Instruct', 'max_model_len': 8192, 'tensor_parallel_size': 4, 'enable_prefix_caching': False, 'max_num_batched_tokens': 8192}
+(APIServer pid=10320) httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/config.json'
+(APIServer pid=10320) For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+(APIServer pid=10320) 
+(APIServer pid=10320) The above exception was the direct cause of the following exception:
+(APIServer pid=10320) 
+(APIServer pid=10320) Traceback (most recent call last):
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/transformers/utils/hub.py", line 438, in cached_files
+(APIServer pid=10320)     hf_hub_download(
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+(APIServer pid=10320)     return fn(*args, **kwargs)
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1019, in hf_hub_download
+(APIServer pid=10320)     return _hf_hub_download_to_cache_dir(
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1166, in _hf_hub_download_to_cache_dir
+(APIServer pid=10320)     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/huggingface_hub/file_download.py", line 1904, in _raise_on_head_call_error
+(APIServer pid=10320)     raise head_call_error
+(APIServer pid=10320) huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6a7b9cdb-183983401f9c8e8478b93d56;20dc0a1b-e501-4980-b4e6-9277b9e6c525)
+(APIServer pid=10320) 
+(APIServer pid=10320) Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/config.json.
+(APIServer pid=10320) Access to model meta-llama/Llama-3.1-8B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.
+(APIServer pid=10320) 
+(APIServer pid=10320) The above exception was the direct cause of the following exception:
+(APIServer pid=10320) 
+(APIServer pid=10320) Traceback (most recent call last):
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/bin/vllm", line 6, in <module>
+(APIServer pid=10320)     sys.exit(main())
+(APIServer pid=10320)              ^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/cli/main.py", line 95, in main
+(APIServer pid=10320)     args.dispatch_function(args)
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/cli/serve.py", line 148, in cmd
+(APIServer pid=10320)     uvloop.run(run_server(args))
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/uvloop/__init__.py", line 92, in run
+(APIServer pid=10320)     return runner.run(wrapper())
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/usr/lib/python3.11/asyncio/runners.py", line 118, in run
+(APIServer pid=10320)     return self._loop.run_until_complete(task)
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/uvloop/__init__.py", line 48, in wrapper
+(APIServer pid=10320)     return await main
+(APIServer pid=10320)            ^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/openai/api_server.py", line 698, in run_server
+(APIServer pid=10320)     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/openai/api_server.py", line 712, in run_server_worker
+(APIServer pid=10320)     async with build_async_engine_client(
+(APIServer pid=10320)   File "/usr/lib/python3.11/contextlib.py", line 210, in __aenter__
+(APIServer pid=10320)     return await anext(self.gen)
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/openai/api_server.py", line 100, in build_async_engine_client
+(APIServer pid=10320)     async with build_async_engine_client_from_engine_args(
+(APIServer pid=10320)   File "/usr/lib/python3.11/contextlib.py", line 210, in __aenter__
+(APIServer pid=10320)     return await anext(self.gen)
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/entrypoints/openai/api_server.py", line 124, in build_async_engine_client_from_engine_args
+(APIServer pid=10320)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=10320)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/engine/arg_utils.py", line 1841, in create_engine_config
+(APIServer pid=10320)     maybe_override_with_speculators(
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/vllm/transformers_utils/config.py", line 625, in maybe_override_with_speculators
+(APIServer pid=10320)     config_dict, _ = PretrainedConfig.get_config_dict(
+(APIServer pid=10320)                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/transformers/configuration_utils.py", line 745, in get_config_dict
+(APIServer pid=10320)     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+(APIServer pid=10320)                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/transformers/configuration_utils.py", line 800, in _get_config_dict
+(APIServer pid=10320)     resolved_config_file = cached_file(
+(APIServer pid=10320)                            ^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/transformers/utils/hub.py", line 294, in cached_file
+(APIServer pid=10320)     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+(APIServer pid=10320)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=10320)   File "/home/yhcyhc1991/venv/lib/python3.11/site-packages/transformers/utils/hub.py", line 511, in cached_files
+(APIServer pid=10320)     raise OSError(
+(APIServer pid=10320) OSError: You are trying to access a gated repo.
+(APIServer pid=10320) Make sure to have access to it at https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct.
+(APIServer pid=10320) 401 Client Error. (Request ID: Root=1-6a7b9cdb-183983401f9c8e8478b93d56;20dc0a1b-e501-4980-b4e6-9277b9e6c525)
+(APIServer pid=10320) 
+(APIServer pid=10320) Cannot access gated repo for url https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct/resolve/main/config.json.
+(APIServer pid=10320) Access to model meta-llama/Llama-3.1-8B-Instruct is restricted. You must have access to it and be authenticated to access it. Please log in.

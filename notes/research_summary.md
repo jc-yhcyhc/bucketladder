@@ -244,7 +244,14 @@ The design could also not have discriminated. For that shape the memory floor
 predicts a flat curve across the whole sweep; tile padding predicts flat only to
 M≈8. Tiling's prediction is a subset of bandwidth's over M∈[1,256], so no outcome
 in that range separates them. The tiling hypothesis is therefore **untested**,
-not rejected.
+not rejected — and two further attempts did not settle it. An amortised version
+reported 1250% of peak utilisation, because XLA hoisted the loop-invariant matmul
+out of the loop; a third, with each iteration consuming the previous result, is
+physically valid at 79% of peak bandwidth and shows the curve flat from M=1 to
+M=16 and rising slowly after, with no knee at 4 or 8. But that arm streams its
+weights from HBM every iteration, so it is bandwidth-bound and still does not
+isolate tile structure. Settling the question needs weights genuinely resident in
+VMEM, which on this stack means an explicit Pallas kernel. **We leave it open.**
 
 **Where does free padding end?** Decode is measured to n=32 and the compiled
 request ladder runs to 256, so the claim needs a bound rather than an
