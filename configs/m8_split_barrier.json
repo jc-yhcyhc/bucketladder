@@ -1,0 +1,30 @@
+{
+  "experiment": "m8_split_barrier",
+  "description": "Is the n>8 measurement barrier the scheduler's or the harness's? Paired A/B between the ThreadPoolExecutor launcher every prior experiment used and a barrier-synchronised launcher that pays connection cost before the timed send. Cells hold total tokens far below max_num_batched_tokens so that any splitting cannot be a token-capacity effect.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 15,
+  "warmup_discard": 3,
+  "note_cells": "seq_len is held at 128 so total tokens stay at 512-4096, i.e. well under max_num_batched_tokens=8192 at every n. If splitting were a token-capacity effect none of these would split; the captured data says n=8 splits about half the time at ~1024 tokens.",
+  "note_repeats": "15 rather than 9: the quantity is a FRACTION of dispatches that split, and the prior cells sat near 50%, where a 9-sample estimate has a wide interval.",
+  "cells": [
+    {"n": 4,  "seq_len": 128},
+    {"n": 8,  "seq_len": 128},
+    {"n": 16, "seq_len": 128},
+    {"n": 32, "seq_len": 128}
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "experiment": "m9_roofline",
+  "description": "Offline roofline for decode: achieved HBM bandwidth, MFU and arithmetic intensity vs batch size, from captured step times and published model dimensions. Answers the computable part of review finding M1 without hardware.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "mode": "offline",
+  "source_glob": "session12-regime/results/e02_stock_baseline/*",
+  "source_output_len": 64,
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "note_arch": "Qwen3-4B dimensions as published in the model's HF config. Stated here rather than hardcoded in the script so the parameter count the roofline rests on is auditable against the source, and so a second model can be added by adding a config.",
+  "arch": {
+    "num_hidden_layers": 36,
+    "hidden_size": 2560,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8,
+    "head_dim": 128,
+    "intermediate_size": 9728,
+    "vocab_size": 151936,
+    "dtype_bytes": 2,
+    "kv_dtype_bytes": 2
+  },
+  "note_hardware": "v5e per-chip peak: 197 TFLOP/s bf16 and 819 GB/s HBM, per Google's published TPU v5e specifications. These are peaks, so every utilisation figure derived from them is a lower bound on true utilisation of an achievable roof.",
+  "hardware": {
+    "peak_bf16_flops_per_chip": 1.97e14,
+    "hbm_bw_bytes_per_s_per_chip": 8.19e11
+  }
+}
