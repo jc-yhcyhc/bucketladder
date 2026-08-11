@@ -83,10 +83,21 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
+    # Inherit the analysed runs' controlled block, then state any variable the
+    # contract has gained since the data was taken. The captured e05 runs predate
+    # ATTN_BUCKETIZED_NUM_REQS joining CONTROLLED_VARS, so their configs cannot
+    # name it -- and the contract correctly refuses to run rather than assume.
+    # Every run before session 7 used the shipped default, which is False; that
+    # is asserted here rather than defaulted silently, because the whole point of
+    # the contract is that provenance is stated.
+    controlled = dict(runs[0][0].get("controlled", {}))
+    controlled.setdefault("ATTN_BUCKETIZED_NUM_REQS", False)
     cfg = {"experiment": "h1_headroom", "source_glob": args.capture_glob,
-           "n_runs": len(runs), "mode": "offline",
-           "controlled": runs[0][0].get("controlled", {}),
-           "model": runs[0][0].get("model")}
+           "n_runs": len(runs), "mode": "offline", "controlled": controlled,
+           "model": runs[0][0].get("model"),
+           "note_controlled": ("ATTN_BUCKETIZED_NUM_REQS is not in the source runs' "
+                               "configs because it predates them; False is the shipped "
+                               "default and is what those runs used.")}
     run = start_run("h1_headroom", cfg, results_root=args.results_root)
     status, err = "ok", None
     try:
