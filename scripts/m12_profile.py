@@ -66,8 +66,14 @@ from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 # Operator categories, matched against the emitted kernel names in order. The
 # names XLA emits are fusion labels, not framework ops, so these are patterns
 # over what actually appears in a TPU trace rather than a tidy taxonomy.
+# The decode attention kernel is emitted as `RPAd-p_256-bq_1_1-bkv_8192_8192`.
+# That name is itself a result: `p_256` is the request padding §4.1 reads from
+# source and measures indirectly -- the compiler writes the 256-request shape
+# into the kernel's own name. The first pattern here missed it entirely
+# ("RPAd" is neither "ragged" nor "paged" nor "attn"), which reported attention
+# as 0.0% of device time.
 CATEGORIES = [
-    ("attention", re.compile(r"ragged|paged|attention|flash|attn", re.I)),
+    ("attention", re.compile(r"\bRPA|ragged|paged|attention|flash|attn", re.I)),
     ("collective", re.compile(r"all-reduce|all_reduce|reduce-scatter|all-gather|"
                               r"collective|ici|cross-replica", re.I)),
     ("matmul", re.compile(r"fusion|dot|matmul|conv|gemm|einsum", re.I)),
@@ -115,7 +121,17 @@ def parse_trace(path: pathlib.Path) -> list[dict[str, Any]]:
             continue
         lane = names.get((e.get("pid"), e.get("tid")), "") + " " + \
             names.get((e.get("pid"), None), "")
-        if not re.search(r"tpu|device|xla|core", lane, re.I):
+        # Two filters, both load-bearing.
+        #
+        # "XLA Ops" only: the trace also carries an "XLA Modules" lane whose
+        # events (`jit_run_model`) SPAN the ops in this lane. Pooling both
+        # double-counts every op inside its module and made `jit_run_model`
+        # alone 65% of "other", which is what a first pass reported.
+        #
+        # One device only: four chips emit near-identical lanes under TP=4, so
+        # keeping all of them multiplies every total by four without changing a
+        # single share.
+        if "XLA Ops" not in lane or "TPU:0" not in lane:
             continue
         out.append({"name": str(e.get("name", "")), "dur_us": float(e["dur"]), "lane": lane})
     return out

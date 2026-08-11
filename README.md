@@ -3,7 +3,7 @@
 **What compiled-shape padding actually costs in production TPU serving.**
 
 A measurement study of vLLM 0.25.0 + `tpu-inference` 0.25.0 on `v5litepod-4`.
-Fourteen hardware sessions, **[redacted]**, 61 verified claims, 184 tests.
+Fifteen hardware sessions, **[redacted]**, 66 verified claims, 184 tests.
 
 TPU executables are compiled for fixed tensor shapes, so a serving stack rounds
 every workload up to a precompiled ladder. The obvious inference — that rounding
@@ -25,7 +25,8 @@ Prepared attn request paddings: [256]        <- one bucket
 ```
 
 `ATTN_BUCKETIZED_NUM_REQS` defaults off, so attention always executes at 256
-requests whatever the batch size. Hardware agrees — if decode padded 9 sequences
+requests whatever the batch size — the profiler shows the compiler emitting the
+kernel as `RPAd-p_256-…`, with the padding in its name. Hardware agrees — if decode padded 9 sequences
 to 16, n=9 would cost what n=16 costs (91.8 ms); it costs what n=8 costs (51.4).
 Enabling the flag changes decode by **0.0%**. Absent from the RPA paper, from
 LENS, and from vLLM's TPU documentation.
@@ -85,7 +86,7 @@ ordinary dynamic batching rather than a shape effect, because that is what it is
 and appends to a manifest. Runs are never overwritten. A config that can't prove
 prefix caching is off refuses to run — this has fired twice on real mistakes.
 
-**`scripts/paper_numbers.py`** ties all 61 claims to `run_id`s and recomputes
+**`scripts/paper_numbers.py`** ties all 66 claims to `run_id`s and recomputes
 them from captured data. On first run it found two real defects: a cost
 transcribed from an exploratory dump rather than the fitted curve, and a table
 presented as precise that came from one of two replicates differing by 14%.
@@ -125,7 +126,7 @@ optimisation rejected by judgement overriding a pre-committed decision rule.
 
 ```bash
 python -m pytest tests/ -q                 # 184 tests, no hardware needed
-python scripts/paper_numbers.py            # recompute all 61 claims from captured/
+python scripts/paper_numbers.py            # recompute all 66 claims from captured/
 python scripts/check_model.py <hf-model>   # preflight before provisioning
 python scripts/refit_cost_model.py         # refit + both holdouts, offline
 ```

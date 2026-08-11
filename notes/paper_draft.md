@@ -1,7 +1,7 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
-`v5litepod-4` (4 chips, TP=4). Fourteen hardware sessions, **[redacted]**.
+`v5litepod-4` (4 chips, TP=4). Fifteen hardware sessions, **[redacted]**.
 
 ---
 
@@ -125,7 +125,7 @@ others.
 
 **Traceability.** Every run writes `meta.json` before doing work, records config
 hash, git SHA and dirty flag, appends to a manifest, and is never overwritten.
-All 61 numerical claims in this paper are tied to `run_id`s and recomputed from
+All 66 numerical claims in this paper are tied to `run_id`s and recomputed from
 captured data by `scripts/paper_numbers.py`; `./reproduce_all.sh` regenerates
 every number and figure from `captured/` and exits non-zero if any disagrees.
 
@@ -178,6 +178,10 @@ meaning padded to 16 — three independent runs give −5%, −3% and −3%, but
 100% the premise predicts and cannot pin the value further.** We report this as
 corroboration of the paired experiment and the source reading, not as
 independent confirmation.
+
+An operator profile taken later closes this independently: the decode attention
+kernel is emitted as `RPAd-p_256-bq_1_1-bkv_8192_8192`. **The compiler writes the
+256-request padding into the kernel's own name**, whatever the batch size.
 
 Two sessions were spent searching for a promotion cost at the 8→16 edge that the
 default configuration had already excluded.
@@ -341,6 +345,30 @@ nothing, and it is the same memory-bound regime Pope et al. characterise
 analytically for TPU inference; our contribution here is the measurement landing
 in it and the consequence for compiled-shape ladders, not the regime itself.
 
+An operator-level profile confirms the mechanism independently, and settles what
+kind of answer §4.3's convergence can have. Share of TPU device time by category:
+
+| n | attention | collective | matmul/fusion |
+|---|---|---|---|
+| 1 | 6.8% | 13.5% | **78.5%** |
+| 2 | 10.0% | 13.3% | 75.6% |
+| 4 | 15.4% | 13.9% | 69.6% |
+| 8 | 24.0% | 13.4% | 61.6% |
+| 16 | 34.2% | 13.4% | **51.4%** |
+
+The projection and MLP matmuls — which are where the weights are read — dominate
+at low batch size and give way to attention as the KV cache grows with n, while
+the inter-chip collectives hold a flat ~13.4%. That is the roofline's story in
+kernels rather than in bytes, measured independently of it.
+
+Two further observations. The decode attention kernel is emitted as
+`RPAd-p_256-bq_1_1-bkv_8192_8192`: **the compiler writes the 256-request padding
+of §4.1 into the kernel's own name**, which is the most direct confirmation of
+that finding we have. And nothing here moves discontinuously at n=4 — every
+category's share changes by less into n=4 than it does across some other
+adjacent pair. **The n=4 convergence is not visible at operator granularity.**
+We now say that rather than implying an unfound mechanism is waiting there.
+
 **The pathology is real and lives in the phase that matters least.**
 
 ### 4.6 Per-dispatch variance is a prefill phenomenon
@@ -474,9 +502,11 @@ not a corrected point estimate.
 n=8 to somewhere between 16 and 32 (§4.3); it did not disappear. At n=16 itself
 the clean sample is 7–11 dispatches per arm.
 
-**The n=4 convergence is unexplained.** Three independent observations break
-there; we searched the stack and did not find what changes. Resolving it needs an
-operator-level profile, which we did not run.
+**The n=4 convergence is unexplained, and is not an operator effect.** Three
+independent observations break there. An operator-level profile (§4.5) shows
+every category of device time moving smoothly through n=4, so whatever changes is
+not a shift between kernels. We do not know what it is, and we no longer expect a
+profiler to show it.
 
 **Co-located prefill and decode only.** On a disaggregated deployment the padding
 question splits into two independent questions, and §4.6's finding that variance

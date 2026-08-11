@@ -236,6 +236,19 @@ def m14_share(edge: str) -> tuple[float, str]:
         return 100 * ((a[0] / b[0]) - rr) / (pr - rr), rid
     return float("nan"), ""
 
+def m12_cat(n: int, cat: str) -> tuple[float, str]:
+    """Share of TPU:0 XLA-Ops device time in one operator category."""
+    import sys as _s
+    _s.path.insert(0, str(HERE))
+    from m12_profile import parse_trace, summarise  # noqa: PLC0415
+    f = ROOT / "captured" / "session15-profile" / "traces" / "prof" / f"n{n}" \
+        / "t1v-n-736b28ee-w-0.trace.json.gz"
+    if not f.exists():
+        return float("nan"), ""
+    cats = summarise(parse_trace(f))
+    tot = sum(cats.values())
+    return (100 * cats.get(cat, 0.0) / tot if tot else float("nan")), "m12"
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -392,6 +405,18 @@ CLAIMS: list[Claim] = [
      lambda: m14_share("n16:1024/2048")),
     ("M14.share.e3", "4.3", "paid padding share at n=16, 2048/4096 %", 0.5, 2.0,
      lambda: m14_share("n16:2048/4096")),
+
+    # --- session 15: the operator breakdown (review Q2) ---------------------
+    ("M12.attn.n1", "4.5", "attention share of device time at n=1 %", 6.8, 0.3,
+     lambda: m12_cat(1, "attention")),
+    ("M12.attn.n16", "4.5", "attention share of device time at n=16 %", 34.2, 0.3,
+     lambda: m12_cat(16, "attention")),
+    ("M12.matmul.n1", "4.5", "matmul share of device time at n=1 %", 78.5, 0.3,
+     lambda: m12_cat(1, "matmul")),
+    ("M12.matmul.n16", "4.5", "matmul share of device time at n=16 %", 51.4, 0.3,
+     lambda: m12_cat(16, "matmul")),
+    ("M12.coll.n4", "4.5", "collective share of device time at n=4 %", 13.9, 0.3,
+     lambda: m12_cat(4, "collective")),
 
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),
