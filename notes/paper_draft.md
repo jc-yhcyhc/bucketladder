@@ -31,12 +31,13 @@ Most of it is not paid.
 Per-request *length* padding does not exist, and not because of chunked prefill —
 disabling it changes nothing. Decode, which dominates production serving, is
 well-behaved: per-step cost rises 2.4× while batch size rises 32×, with no
-discontinuity to n=32. Request-dimension padding is free because Ragged Paged
-Attention does no work for padded request slots — a data-structure property we
-arrived at only after measuring to n=256 and refuting our own bandwidth
-explanation, which predicted 49% model-FLOPs utilisation there and met 5.1%.
+discontinuity to n=32. Request-dimension padding is free for a data-structure
+reason rather than a bandwidth one: with per-sequence KV held constant, absolute
+attention time rises 9.72× as real requests rise 16×, where a kernel doing work
+for its 256 padded slots would be flat. §4.5 reports the memory-bandwidth account
+we held earlier and the measurement that withdrew it.
 
-We report four optimisations we designed, measured and rejected, and ten
+We report four optimisations we designed, measured and rejected, and eleven
 invalid inferences we made and caught — most sharing one cause, and now blocked
 by a mechanical check rather than by intent.
 
@@ -67,10 +68,10 @@ reports what is true instead.
    and vendor documentation.
 2. **LENS's model form does not transfer to TPU** (§4.2), and the length term it
    turns on never earns its place at any batch size we measured.
-3. **Shape-quantization cost is batch-size-dependent** (§4.3), and
-   request-dimension padding is free because the ragged attention kernel does no
-   work for padded slots (§4.5) — a data-structure property, not a bandwidth
-   one, established by refuting our own bandwidth account at n=256.
+3. **Shape-quantization cost is batch-size-dependent** (§4.3), and our own
+   memory-bandwidth explanation for it is withdrawn on the measurement that
+   contradicts it (§4.5). We name the surviving hypothesis and state what would
+   discriminate it, rather than claiming it is established.
 4. **Four optimisations measured and rejected** (§5), with the measurement that
    killed each.
 5. **A methodological rule with a mechanical guardrail** (§6), including two
@@ -244,17 +245,25 @@ padding is paid there and not in decode.
 Measured as the share of nominal padding paid, straddling a compiled boundary at
 fixed batch size and near-fixed sequence length:
 
-| batch size | median share paid | range across boundaries | clean cells |
-|---|---|---|---|
-| 1–2 | **~85%** | — | — |
-| 4 | 23.1% | [10.0%, 24.8%] | 4 |
-| 8 | 14.3% | [0.2%, 21.0%] | 3 |
-| 16 | **−2.7%** | [−15.4%, +0.5%] | 3 |
+| batch size | median | mean | 95% CI over boundaries | boundaries | clean dispatches/arm |
+|---|---|---|---|---|---|
+| 1–2 | **~85%** | — | *not computed* | 1 | see below |
+| 4 | 23.1% | 20.2% | [13.5%, 24.4%] | 4 | 9–15 |
+| 8 | 14.3% | 11.8% | [0.2%, 21.0%] | 3 | 3–5 |
+| 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] | 3 | 7–11 |
 
-**We no longer describe this as monotone.** The n=4 and n=8 ranges overlap
-substantially, so those two levels are not separable with the data we have; only
-the n≤2 and n=16 ends are. The defensible statement is **high at n≤2,
-intermediate and not separable at n=4–8, indistinguishable from zero at n=16**.
+The intervals are bootstrapped over *boundaries*, not repeats, because with three
+or four boundaries per row that is the dominant source of spread — and they are
+correspondingly weak. Tested pairwise, **only n=4 and n=16 separate.** n=8
+separates from neither neighbour. The n≤2 row rests on a single boundary and we
+do not quote an interval for it at all; it is the least well supported number in
+the paper and also the largest, which is the wrong way round.
+
+**We no longer describe this as monotone, and the intervals are stricter than
+the earlier prose.** The defensible statement is ordinal: **substantially paid at
+n≤2, intermediate at n=4–8, indistinguishable from zero at n=16, with only the
+n=4/n=16 contrast surviving at interval level.** Anyone wanting a per-level
+number needs more boundaries per row than we ran.
 The n=8 row is also a correction: it was previously 16%, computed with split
 dispatches pooled into the median. Recomputed with them excluded it is 14.3% —
 the conclusion survives, the number moved.
@@ -379,28 +388,61 @@ grows past the ridge near 240 — and we published a frontier table predicting
 | MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
 | HBM BW utilisation | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
 
-MFU never exceeds 5.1%, an order of magnitude below the prediction, and bandwidth
-utilisation *falls* rather than rising. **At n=256 the step sits at 5% of the
-compute roof and 11% of the memory roof — bound by neither.** The frontier table
-and the claim that every cell is memory-bound are both **withdrawn**. The
+**The refutation rests on n≤64, where the queue is 0.1 ms and the columns are
+clean.** A memory-bound step is one whose achieved bandwidth sits near the roof.
+Ours falls monotonically — 61.4% → 52.1% → 31.2% → **21.4% by n=64** — which the
+account cannot accommodate at any batch size, let alone at the ridge. The claim
+that every cell is memory-bound is **withdrawn on that evidence alone**.
+
+The n=256 column corroborates and is not required: MFU 5.1% against a predicted
+49%, bandwidth 11.1%. We attach the caveat rather than burying it — 298 ms of
+queue time means the running batch was smaller than 256 for part of the window,
+so if the effective batch never reached the ridge, that column is consistent with
+the bandwidth account rather than fatal to it. **The frontier table is withdrawn
+regardless**, because it was a prediction about a regime we cannot currently
+measure cleanly. The
 roofline retains one honest use, byte accounting: 2.01 GB of weights crosses HBM
 every decode step regardless of batch, which is 99% of bytes moved at n≤2 and
 falls below half by n=64 as KV traffic overtakes it. That is arithmetic about
 bytes, not an explanation of time — achieved bandwidth is `bytes / measured
 time`, so it restates the step time it is computed from.
 
-**What the mechanism is.** It was in §4.1 the whole time. `ATTN_BUCKETIZED_NUM_REQS`
-is off, so attention executes at 256 request slots always — and **RPA's padded
-slots hold no KV blocks, so they do no work.** Request-dimension padding is free
-because the ragged kernel skips it, as a property of the data structure, at any
-batch size. This needs no ridge, predicts no crossover, and is consistent with
-every measurement above including the ones that refuted the bandwidth account. It
-also explains why the free-padding result survived the sharding ablation (§4.7):
-ragged tiling does not care how the weights are split.
+**One mechanism per dimension, stated once.** The paper measures two different
+padding dimensions and they do not share an explanation, which earlier drafts
+conflated:
 
-The two accounts were distinguishable, and only above n=32. Bandwidth predicted a
-bend toward the compute roof near the ridge; ragged tiling predicted none. There
-is none.
+| dimension | is padding paid? | mechanism |
+|---|---|---|
+| **D3, requests/step** | no, at every batch size measured | RPA does no work for padded request slots — a data-structure property |
+| **D2, tokens/step** | yes in prefill, falling with batch | arithmetic intensity: padded tokens are real FLOPs once the step is past the ridge |
+
+§4.3's paid-share table is the **token** dimension in prefill. §4.8's dtype
+prediction applies to the **token** dimension only, because quantization moves the
+ridge and the ridge is not in the request-dimension story at all. Where §4.7
+concludes "the result is about the weight floor," it is describing the level of
+decode step cost, not why request padding is free.
+
+**What the request-dimension mechanism is, measured directly.**
+`ATTN_BUCKETIZED_NUM_REQS` is off, so attention executes at 256 request slots
+whatever the batch — and the operator profile says what that costs. With prompt
+and output length fixed, so per-sequence KV is constant, absolute attention
+device time is:
+
+| n | 1 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| attention (µs) | 16 830 | 26 011 | 45 919 | 85 103 | **163 535** |
+| per real request | 16 830 | 13 005 | 11 480 | 10 638 | 10 221 |
+
+**If the kernel did work for its 256 padded slots, this column would be flat in
+n.** It is not: attention time rises **9.72×** for a 16× rise in real request
+count, dominated by a term proportional to real requests plus a fixed component.
+That is a direct positive observation that Ragged Paged Attention skips padded
+slots, and it is the load-bearing evidence for the request-dimension row of the
+table above. It needs no ridge, no crossover, and no high-batch column — it is
+visible at n≤16 where every measurement is clean.
+
+It also explains why free padding survived the sharding ablation (§4.7): ragged
+tiling does not care how the weights are split.
 
 **An operator profile**, which unlike the roofline is a direct observation of
 where time went. Share of TPU device time:
@@ -485,15 +527,31 @@ with a total absolute error of 0.01 across three points and one free parameter.
 The prediction failed because it omitted `F`, not because the weight-floor idea
 was wrong: **fixed, non-sharding cost is 38% of the TP=4 step** — roughly 1.5 ms
 at n=1 — and that single term explains both the sub-proportional level and the
-flattening of the curve. What was reported as a failed prediction is better read
+flattening of the curve.
+
+**`F` is not the collectives, and an earlier version of this section said it
+was.** A constant term cannot represent inter-chip communication: collectives are
+zero at TP=1 and largest at TP=4, so they scale *with* TP while `F` by
+construction does not. That a TP-invariant constant fits to 0.01 is evidence the
+term is dispatch and host overhead rather than communication — which connects
+directly to the per-dispatch floor §4.5 retracts, and is the more interesting
+reading. We have not partitioned `F` into device and host time; an operator
+profile at TP=1 and TP=2 would do it, and if the ~13.4% collective share does not
+fall toward zero at TP=1 then one of the two measurements is wrong. Note also
+that with `T(4)=1` by normalisation this is one free parameter against two
+informative points, so the fit quality is weaker evidence than "0.01 across three
+points" suggests. What was reported as a failed prediction is better read
 as a calibrated two-term cost model, and it independently bounds the per-step
 fixed overhead that §4.5's retracted microbenchmark was groping for.
 
 Both misses point the same way, and together they answer the objection. If
 request-dimension padding were cheap only because that dimension is not the
 bottleneck at TP=4, reducing TP would expose it. Instead padding is cheapest at
-TP=1, where the floor is largest. The result is about the weight floor, not about
-this layout — for this model on this chip.
+TP=1, where the floor is largest. Whatever makes request-dimension padding free
+is not a property of this sharding — which is what the section set out to test.
+It does not follow that the weight floor is the cause; §4.5 withdraws that, and
+this ablation is equally consistent with the ragged-tiling account, since ragged
+tiling does not care how the weights are split.
 
 
 ### 4.8 Model scale does not move the regime map; dtype does
@@ -521,6 +579,19 @@ for dense weight-stationary decode. It breaks for mixture-of-experts, where byte
 read scale with the distinct experts touched so intensity falls below the batch
 size, and at long context, where KV bytes rather than weights set the floor. It
 does not extend to prefill.
+
+**A scope error we made in this very section, and the eleventh instance of the
+class §6 catalogs.** The paid-share numbers above are §4.3's quantity, and §4.3
+is emphatic that those are *prefill* steps. The intensity identity used to
+explain them is derived for dense weight-stationary *decode* and this section
+closes by saying it does not extend to prefill. Applying it here is exactly the
+lever/target mismatch that registration was added to catch — and registration did
+not catch it, because the check we added tests whether the lever moves the
+target, not whether the argument's domain matches the data's. The comparison
+needs redoing on decode steps, or replacing with a prefill argument in which
+FLOPs scale with padded tokens and the identity does not hold. Until then the
+n=4/n=8 numbers below stand as measurements and the explanation attached to them
+does not.
 
 **Why the paid share moved *down* rather than staying flat** is a separate
 question the intensity argument does not answer. The likely reason is that
@@ -562,7 +633,7 @@ less work.
 
 ---
 
-## 6. Ten failures, one dominant cause
+## 6. Eleven failures, one dominant cause
 
 | looked like | was |
 |---|---|
@@ -576,6 +647,7 @@ less work.
 | "no single-step dispatch above n=8" | a step-count test that could never pass |
 | paid padding at n=16 | split dispatches pooled into the median, not excluded |
 | a smaller model standing in for a quantized one | a lever that cannot move the target quantity |
+| a decode identity explaining prefill data (§4.8) | an argument applied outside its stated domain |
 
 The dominant cause: **a quantity measured under one configuration, used under
 another.**
@@ -625,7 +697,7 @@ instance and we do not oversell it, but the class is no longer entirely open.
 
 ### The pattern the failure list does not show
 
-Ten entries above are inferences from numbers. Counting them alone hides
+Eleven entries above are inferences from numbers. Counting them alone hides
 something the project's history makes obvious: **the measurements have survived
 three rounds of external review largely intact, and the explanations have not.**
 
@@ -663,8 +735,8 @@ than §4's explanations, and we would rather say so than have it discovered.
 **One accelerator, one primary model.** v5e with a 4B model places per-chip
 weights in the low hundreds of megabytes. Decode is bandwidth-bound only at
 n≤8; by n=64 it is bound by neither roof (§4.5). The sharding objection, at least, we can answer: a TP=1/2/4
-ablation (§4.7) finds the weight floor dominates at every sharding and dominates
-*more* with less of it. The remaining exposure is model scale and multi-host
+ablation (§4.7) finds request-dimension padding cheap at every sharding, so
+whatever causes it is not a property of this layout. The remaining exposure is model scale and multi-host
 topology, where weight streaming and inter-chip collectives change what padding
 hides under, and we measured neither.
 
@@ -697,8 +769,9 @@ is a prefill phenomenon is precisely the asymmetry disaggregation exploits.
 **Pope et al.** derive the memory-bound/compute-bound transition for transformer
 inference on TPU analytically. §4.5's roofline is a measured instance of that
 regime, not a discovery; what we add is the consequence for compiled-shape
-ladders — that the weight-load floor is what makes request-dimension padding
-free.
+ladders. We do **not** claim the weight-load floor is what makes
+request-dimension padding free; §4.5 withdraws that and replaces it with a
+measured data-structure account.
 
 **RPA** is the technique this work validates: our finding that per-request
 padding costs nothing is what its ragged-tiling design predicts. It does not
@@ -743,13 +816,24 @@ of work; our holdout discipline follows it.
 A production TPU serving stack quantizes shapes in three dimensions. One does not
 exist, one is disabled by a default flag, and the third is paid in a proportion
 that depends on batch size — heavily at 1–2, lightly at 4–8, and not at all by
-16. How much padding is executed is a property of the workload, spanning 27.3%
-to 51.0% of executed tokens across plausible length distributions.
+16. How much padding is executed is a property of the workload rather than of
+the stack; we withdraw our earlier range as confounded by offered token load and
+do not replace it with another.
 
-The practical advice is negative, and it is bounded by what we measured: on this
-stack, at batch sizes up to 16, with a 4B model at any sharding of four v5e
-chips, do not build
-length bucketing, shape-aware admission control, or ladder design. The phase that
+The practical advice is negative **for batched, throughput-oriented serving**:
+on this stack, at batch sizes from roughly 4 up to 16, with a 4B model at any
+sharding of four v5e chips, do not build length bucketing, shape-aware admission
+control, or ladder design.
+
+**It does not extend to the low-batch regime, and we say so rather than let the
+scope be assumed.** At n≤2 we measure ~85% of nominal padding paid on the token
+dimension, and a fixed-length workload executes roughly half its tokens as
+padding. That is interactive single-stream serving, tight-TTFT deployments, and
+the prefill half of any disaggregated system — regimes where the headroom our
+advice dismisses may well be real. We did not measure whether a finer token
+ladder recovers it, and the staircase at buckets ≤1024 is a reason to think the
+question is live. Turning this prohibition into a regime map is the obvious next
+piece of work and we have not done it. The phase that
 dominates production serving is smooth to n=32 and close to linear above it, and
 request-dimension padding is free for a reason that has nothing to do with
 compiled shapes: the ragged attention kernel does no work for padded slots.

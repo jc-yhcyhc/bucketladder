@@ -1,0 +1,34 @@
+{
+  "experiment": "m19_resident",
+  "description": "Measures the ACTUAL running batch via vllm:num_requests_running, to test whether session 18's n=128/256 columns ever ran the batch they were labelled with (review 4.1).",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "concurrency": [
+    8,
+    32,
+    64,
+    128,
+    256
+  ],
+  "prompt_len": 256,
+  "output_len": 64,
+  "repeats": 9,
+  "warmup_discard": 2,
+  "note_prediction": "REGISTERED. If the gauge peaks well below n at 128/256, session 18's refutation of the bandwidth account is unsupported and must be withdrawn.",
+  "prediction_mechanism": "Target: effective running batch. Lever: requested concurrency n. The gauge reads the scheduler's own running set, so d(running)/d(n) is nonzero up to whatever cap max_num_seqs or KV capacity imposes \u2014 and locating that cap is the point.",
+  "poll_interval_s": 0.05,
+  "reached_frac": 0.95
+}
