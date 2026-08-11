@@ -1,0 +1,38 @@
+{
+  "experiment": "m10_trace_workload",
+  "description": "Padding share, TTFT and ITL under four prompt-length distributions at a common Poisson arrival rate. Tests whether 35.9% is a stack property or a workload property (review M5/Q5), and supplies the TTFT/ITL a serving paper is expected to report.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "seed": 20260811,
+  "output_len": 64,
+  "requests_per_arm": 120,
+  "arrival_rate_rps": 8.0,
+  "max_inflight": 64,
+  "note_output_len": "64, not 1. Review M5(ii): output_len=1 leaves no decode steady state, so decode results were measured under a workload that barely decodes. 64 gives every request a decode phase long enough for an inter-token latency to mean something.",
+  "note_rate": "8 rps is below the saturation point measured in earlier sessions, so the arms compare packing rather than compare queueing collapse. Poisson, not closed-loop: a closed loop cannot produce the queueing that decides how steps pack.",
+  "distributions": ["fixed", "lognormal", "uniform", "bimodal"],
+  "lengths": {
+    "min_len": 16,
+    "max_len": 4096,
+    "fixed_len": 256,
+    "median_len": 256,
+    "sigma": 0.9,
+    "short_len": 128,
+    "long_len": 2048,
+    "short_frac": 0.7
+  },
+  "note_lengths": "Parametric families spanning the plausible range, NOT a production trace -- we have none and the paper says so. sigma=0.9 is the order of magnitude reported for chat prompt-length spread; the bimodal arm is the agentic shape (short turns plus long context). The result is a sensitivity range, not a corrected point estimate."
+}

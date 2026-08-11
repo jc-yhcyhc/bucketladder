@@ -1,0 +1,42 @@
+{
+  "experiment": "e02_stock_baseline",
+  "description": "TP=4 arm of the tensor-parallel ablation (review M4/Q6). Same model, same chips, same workload; only the sharding changes. Q6 asks whether padding on the request dimension is free because that dimension is genuinely cheap, or because it is not the bottleneck dimension in the TP=4 layout.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "request_ladder": [
+    8,
+    16,
+    32,
+    64,
+    128,
+    256
+  ],
+  "edge": 8,
+  "prompt_len": 256,
+  "output_len": 64,
+  "repeats": 21,
+  "warmup_discard": 3,
+  "concurrency": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32
+  ],
+  "note_prediction": "PRE-REGISTERED, from m9_roofline: decode reads the whole weight set every step, so per-chip weight bytes scale as 1/TP. At TP=4 that is 1.00B params = 2.01 GB per step against 819 GB/s, i.e. a floor of 2.45 ms before any batch-dependent work. Prediction: the step-cost curve keeps its SHAPE (near-flat in n at low n) while its LEVEL scales roughly with 1/TP. If instead the curve flattens or steepens differently across TP, the 'padding on the request dimension is free' claim is a statement about the TP=4 sharding rather than about the stack, and \u00a79's advice must be narrowed.",
+  "note_memory": "TP=1 puts ~8.0 GB of bf16 weights on ONE v5e chip with 16 GB HBM. It fits, but KV cache space is much reduced, so max_model_len is lowered to keep the server bootable; the workload uses 256+64 tokens and is unaffected."
+}
