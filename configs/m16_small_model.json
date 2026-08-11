@@ -7,12 +7,12 @@
   "controlled": {
     "enable_prefix_caching": false,
     "enable_chunked_prefill": true,
-    "max_num_batched_tokens": 8192,
+    "max_num_batched_tokens": 4096,
     "tensor_parallel_size": 4,
     "speculative_model": null,
     "kv_cache_dtype": "auto",
     "VLLM_TPU_BUCKET_PADDING_GAP": "",
-    "max_model_len": 8192,
+    "max_model_len": 2048,
     "XLA_FLAGS": "",
     "ATTN_BUCKETIZED_NUM_REQS": false
   },
@@ -48,5 +48,6 @@
   "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
   "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
   "note_prediction": "REGISTERED BEFORE MEASUREMENT. TinyLlama-1.1B at TP=4 puts ~0.55 GB of bf16 weights per chip against Qwen3-4B's 2.01 GB \u2014 a 3.6x smaller floor. If the mechanism is the weight floor, the paid share at n=4 and n=8 must be HIGHER than Qwen3-4B's 23.1% and 14.3%. If it is unchanged, the mechanism is not the floor and \u00a74.5 is wrong.",
-  "synchronised_launch": true
+  "synchronised_launch": true,
+  "note_limits": "max_model_len is 2048 because TinyLlama's max_position_embeddings is; check_model.py caught this before the boot rather than after. max_num_batched_tokens stays above it so an n=8 dispatch of ~2064 tokens is not split by the token limit, which would reintroduce exactly the smearing this experiment excludes."
 }

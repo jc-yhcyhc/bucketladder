@@ -225,6 +225,22 @@ attention as KV grows; collectives are flat. **Nothing moves discontinuously at
 n=4**: every category's share changes less into n=4 than across some other
 adjacent pair. The convergence is not visible at operator granularity.
 
+**The mechanism, isolated.** A matmul microbenchmark with the model's real
+sharded weight shapes, no server and no scheduler, times the same matmul at
+M = 1 … 256 rows:
+
+| M | 1 | 8 | 64 | 256 |
+|---|---|---|---|---|
+| qkv_proj | 142.9 µs | 142.5 | 140.7 | 143.6 |
+| per row | 142.9 | 17.8 | 2.20 | **0.56** |
+
+**Total time is flat across the whole range** — 1.04× from M=1 to M=256 — so
+per-row cost falls as 1/M with no knee anywhere. This is the weight-load floor
+with every confound removed, and it is the cleanest statement of the mechanism in
+this paper. It also rejects the tiling hypothesis for §4.3's n=4 convergence: an
+MXU tile boundary would produce a knee, and there is none at 4 or anywhere else
+below 256.
+
 **Where does free padding end?** Decode is measured to n=32 and the compiled
 request ladder runs to 256, so the claim needs a bound rather than an
 extrapolation. From the same byte accounting: as batch grows the weight term is

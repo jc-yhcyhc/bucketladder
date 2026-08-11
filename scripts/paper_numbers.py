@@ -274,6 +274,23 @@ def m8_clean(edge: str) -> tuple[float, str]:
         return 100 * ((a[0] / b[0]) - rr) / (pr - rr), rid
     return float("nan"), ""
 
+def m15_flat(matmul: str) -> tuple[float, str]:
+    """Total matmul time at M=256 relative to M=1. 1.0 means M is free."""
+    for rid, _cfg, rows in runs("session16-mechanism/results/m15_mxu_tile/*", "matmuls"):
+        g = {r["M"]: r["us_median"] for r in rows if r["matmul"] == matmul}
+        if 1 in g and 256 in g:
+            return g[256] / g[1], rid
+    return float("nan"), ""
+
+
+def m16_share(edge: str) -> tuple[float, str]:
+    for rid, _cfg, rows in runs("session16-mechanism/results/m1_boundary/*", "edges"):
+        for r in rows:
+            if r["edge"] == edge:
+                return (100 * (r["cost_ratio"] - r["real_ratio"])
+                        / (r["padded_ratio"] - r["real_ratio"])), rid
+    return float("nan"), ""
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -450,6 +467,16 @@ CLAIMS: list[Claim] = [
      lambda: m8_clean("n8:2048/4096")),
     ("M14.share.n8.e3", "4.3", "paid share n=8, 4096/8192, clean only %", 14.3, 2.0,
      lambda: m8_clean("n8:4096/8192")),
+
+    # --- session 16: the mechanism at its purest, and a failed prediction ---
+    ("M15.flat.qkv", "4.5", "qkv matmul time M=256 / M=1", 1.00, 0.10,
+     lambda: m15_flat("qkv_proj")),
+    ("M15.flat.mlp", "4.5", "mlp_up matmul time M=256 / M=1", 1.08, 0.10,
+     lambda: m15_flat("mlp_up")),
+    ("M16.tiny.n4", "4.5", "TinyLlama paid share n=4, 1024/2048 %", 13.4, 1.5,
+     lambda: m16_share("n4:1024/2048")),
+    ("M16.tiny.n8", "4.5", "TinyLlama paid share n=8, 1024/2048 %", 5.9, 1.5,
+     lambda: m16_share("n8:1024/2048")),
 
     # --- the analytic frontier (review M1/Q3) -------------------------------
     ("M13.margin.256", "4.5", "margin to ridge at 256-token context %", 10.0, 1.0,
