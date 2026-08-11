@@ -345,8 +345,13 @@ nothing, and it is the same memory-bound regime Pope et al. characterise
 analytically for TPU inference; our contribution here is the measurement landing
 in it and the consequence for compiled-shape ladders, not the regime itself.
 
-An operator-level profile confirms the mechanism independently, and settles what
-kind of answer §4.3's convergence can have. Share of TPU device time by category:
+**The roofline is not independent evidence about step time**, and an earlier
+draft implied it was. Achieved bandwidth is `bytes / measured time`, so it
+restates the step time it is computed from; what it independently establishes is
+the byte accounting — that the weight term dominates and that the compute roof is
+far away (MFU ≤3.65%). An operator-level profile *is* independent evidence, and
+settles what kind of answer §4.3's convergence can have. Share of TPU device time
+by category:
 
 | n | attention | collective | matmul/fusion |
 |---|---|---|---|
@@ -359,7 +364,29 @@ kind of answer §4.3's convergence can have. Share of TPU device time by categor
 The projection and MLP matmuls — which are where the weights are read — dominate
 at low batch size and give way to attention as the KV cache grows with n, while
 the inter-chip collectives hold a flat ~13.4%. That is the roofline's story in
-kernels rather than in bytes, measured independently of it.
+kernels rather than in bytes, and unlike the roofline it is a direct observation
+of where the time went.
+
+**Where does free padding end?** Decode is measured to n=32 while the compiled
+request ladder runs to 256, so the claim needs a bound rather than an
+extrapolation. As batch grows the weight term is amortised away and arithmetic
+intensity rises toward a limit set by the per-sequence terms, against a ridge
+point of 241 FLOP/byte:
+
+| context | limit (FLOP/byte) | margin to ridge | MFU at n=256 |
+|---|---|---|---|
+| 256 | 217 | **10%** | **49%** |
+| 1024 | 57 | 76% | 20% |
+| 4096 | 17 | 93% | 7% |
+| 8192 | 11 | 96% | 4% |
+
+There is no formal crossover within n≤4096 — KV bytes grow with batch alongside
+the flops — so the whole ladder stays nominally memory-bound. **The margin is not
+uniform.** At 256-token context it is 10%, and MFU at the top of the ladder
+reaches 49%. Free padding is comfortable at long context and marginal at short
+context with high batch. This is a bound, not a measurement, and it is
+falsifiable: a nonzero paid share measured at n=64 or n=128, well inside the
+frontier, would show the mechanism is incomplete.
 
 Two further observations. The decode attention kernel is emitted as
 `RPAd-p_256-bq_1_1-bkv_8192_8192`: **the compiler writes the 256-request padding

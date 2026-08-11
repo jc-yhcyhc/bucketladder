@@ -249,6 +249,13 @@ def m12_cat(n: int, cat: str) -> tuple[float, str]:
     tot = sum(cats.values())
     return (100 * cats.get(cat, 0.0) / tot if tot else float("nan")), "m12"
 
+def m13_front(ctx: int, field: str) -> tuple[float, str]:
+    for _rid, _cfg, rows in runs("../results/review/m13_frontier/*", "frontier"):
+        for r in rows:
+            if r["context_tokens"] == ctx:
+                return r[field], "m13"
+    return float("nan"), ""
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -417,6 +424,14 @@ CLAIMS: list[Claim] = [
      lambda: m12_cat(16, "matmul")),
     ("M12.coll.n4", "4.5", "collective share of device time at n=4 %", 13.9, 0.3,
      lambda: m12_cat(4, "collective")),
+
+    # --- the analytic frontier (review M1/Q3) -------------------------------
+    ("M13.margin.256", "4.5", "margin to ridge at 256-token context %", 10.0, 1.0,
+     lambda: m13_front(256, "margin_pct")),
+    ("M13.margin.8192", "4.5", "margin to ridge at 8192-token context %", 96.0, 1.0,
+     lambda: m13_front(8192, "margin_pct")),
+    ("M13.mfu256.top", "4.5", "MFU at ladder top, 256-token context %", 49.0, 1.0,
+     lambda: m13_front(256, "mfu_at_ladder_top_pct")),
 
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),

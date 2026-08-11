@@ -58,6 +58,8 @@ step "confidence intervals (M7)" "$PY" scripts/m7_intervals.py \
     --results-root "$HERE/results/review"
 step "decode roofline (M9)" "$PY" scripts/m9_roofline.py \
     --config configs/m9_roofline.json --results-root "$HERE/results/review"
+step "memory-bound frontier (M13)" "$PY" scripts/m13_frontier.py \
+    --config configs/m9_roofline.json --results-root "$HERE/results/review"
 
 # 3. Every claim in the paper, recomputed from captured/ and diffed against the
 #    stated value, plus the invariance guardrail over derived claims.

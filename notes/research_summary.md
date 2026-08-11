@@ -107,7 +107,9 @@ At n=1–2 the within-bucket curve is nearly flat (flatness 0.97), so *any*
 two-point fit is near-perfect — a constant lands within 0.6 pp. **The reported
 accuracy at low batch size is evidence about the fit protocol, not the model
 form.** At n=4 the length term is actively harmful. It earns its place at no
-batch size measured.
+batch size measured. The n=4 comparison is paired across the three buckets and
+excludes zero: LENS minus constant-only is **+4.97 pp, 95% CI [+4.28, +5.61]**.
+Three buckets is a small sample, but the direction is consistent in every one.
 
 The failure is not a sampling artifact: over all three choices of which two
 points calibrate, the n=4 error swings up to 44.8 pp but its **minimum is still
@@ -198,8 +200,13 @@ floor is left. This is the memory-bound regime **Pope et al.** characterise
 analytically; the measurement lands in it, and the contribution is the
 consequence for compiled-shape ladders, not the regime.
 
-**An operator profile confirms it independently** and settles what kind of answer
-the n=4 convergence can have:
+**The roofline is not independent evidence about step time, and we should not
+have implied it was.** Achieved bandwidth is `bytes / measured time`, so it is an
+algebraic restatement of the step time it is computed from; what it independently
+establishes is the *byte accounting* — that the weight term dominates, and that
+the compute roof is far away (MFU ≤3.65%). The operator profile below is genuine
+independent evidence, and settles what kind of answer the n=4 convergence can
+have:
 
 | n | attention | collective | matmul/fusion |
 |---|---|---|---|
@@ -211,6 +218,27 @@ Matmuls — where weights are read — dominate at low batch and give way to
 attention as KV grows; collectives are flat. **Nothing moves discontinuously at
 n=4**: every category's share changes less into n=4 than across some other
 adjacent pair. The convergence is not visible at operator granularity.
+
+**Where does free padding end?** Decode is measured to n=32 and the compiled
+request ladder runs to 256, so the claim needs a bound rather than an
+extrapolation. From the same byte accounting: as batch grows the weight term is
+amortised away and arithmetic intensity rises toward a limit set by the
+per-sequence terms, against a ridge point of 241 FLOP/byte.
+
+| context | limit (FLOP/byte) | margin to ridge | MFU at n=256 |
+|---|---|---|---|
+| 256 | 217 | **10%** | **49%** |
+| 1024 | 57 | 76% | 20% |
+| 4096 | 17 | 93% | 7% |
+| 8192 | 11 | 96% | 4% |
+
+There is no formal crossover within n≤4096 — KV bytes grow with batch alongside
+the flops — so the whole ladder stays nominally memory-bound. **But the margin is
+not uniform.** At 256-token context it is 10%, and MFU at the top of the ladder
+reaches 49%. Free padding is comfortable at long context and marginal at short
+context and high batch. This is a bound, not a measurement, and it is
+falsifiable: measuring a nonzero paid share at n=64 or n=128 well inside the
+frontier would show the mechanism is incomplete.
 
 ### 3.6 The cheapness of padding is not an artifact of the sharding
 
