@@ -1,0 +1,47 @@
+{
+  "experiment": "m1_boundary",
+  "description": "Paid padding share at n=16, the regime the paper previously reported as unmeasurable. Uses the barrier launcher M8 validated: under the old thread pool 100% of n=16 dispatches split and every cell was discarded.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 25,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "n16:512/1024",
+      "n": 16,
+      "seq_len_below": 30,
+      "seq_len_above": 34
+    },
+    {
+      "name": "n16:1024/2048",
+      "n": 16,
+      "seq_len_below": 62,
+      "seq_len_above": 66
+    },
+    {
+      "name": "n16:2048/4096",
+      "n": 16,
+      "seq_len_below": 126,
+      "seq_len_above": 130
+    }
+  ],
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+  "synchronised_launch": true,
+  "note_repeats": "25, not 9. Only ~40% of n=16 dispatches keep their prefill in one step even under the barrier, so the usable sample is a fraction of the repeats and the analysis discards the rest. 25 targets ~10 clean dispatches per arm."
+}

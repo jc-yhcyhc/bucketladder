@@ -50,7 +50,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "sim"))
 
-from _client import complete, complete_mock  # noqa: E402
+from _client import complete, complete_mock  # noqa: F401
+from m8_split_barrier import launch_barrier  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from _metrics import MockMetrics, delta, metrics_available, scrape  # noqa: E402
 from ladder import bucket_for, build_ladder  # noqa: E402
@@ -61,7 +62,18 @@ ITER = "vllm:iteration_tokens_total"
 
 def one_dispatch(base_url: str, model: str, n: int, seq_len: int, output_len: int,
                  seed: int, mock_metrics=None, mock_pays_padding: bool = False,
-                 ladder: list[int] | None = None) -> dict[str, Any]:
+                 ladder: list[int] | None = None,
+                 synchronised: bool = False) -> dict[str, Any]:
+    """One dispatch of n identical requests.
+
+    `synchronised` selects the barrier launcher from M8 instead of the plain
+    thread pool. M8 measured why this matters: with the pool, arrivals smear over
+    milliseconds and the scheduler splits 100% of dispatches at n=16, so every
+    n>8 cell here was discarded as split and the paper reported the quantity as
+    unmeasurable. Under a barrier, 40% of n=16 dispatches keep their prefill in
+    one step. The launcher is a control, not a detail -- it decides whether this
+    experiment has any usable samples in the regime production runs at.
+    """
     before = mock_metrics.snapshot() if mock_metrics else scrape(base_url)
 
     def fn(i: int):
@@ -70,8 +82,11 @@ def one_dispatch(base_url: str, model: str, n: int, seq_len: int, output_len: in
                                  seed=seed * 100 + i)
         return complete(base_url, model, seq_len, output_len, seed=seed * 100 + i)
 
-    with ThreadPoolExecutor(max_workers=n) as pool:
-        list(pool.map(fn, range(n)))
+    if synchronised and mock_metrics is None:
+        launch_barrier(base_url, model, n, seq_len, output_len, seed)
+    else:
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            list(pool.map(fn, range(n)))
 
     if mock_metrics is not None:
         real = n * seq_len
@@ -132,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
                 costs, splits = [], 0
                 for rep in range(-discard, repeats):
                     r = one_dispatch(args.base_url, cfg["model"], n, seq, olen, rep,
-                                     mock_metrics, args.mock_pays_padding, ladder)
+                                     mock_metrics, args.mock_pays_padding, ladder,
+                                     synchronised=cfg.get("synchronised_launch", False))
                     if rep < 0:
                         continue
                     rows.append({"edge": edge["name"], "arm": arm, "n": n,
