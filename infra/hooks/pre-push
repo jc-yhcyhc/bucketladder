@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push — the paper must reproduce before anything leaves this machine.
+# =============================================================================
+# Three verification layers were each written after the work they check, and
+# each found a real defect on its FIRST run: a transcribed number that did not
+# match its source, five claims combining runs without an asserted invariance,
+# and an analysis whose config could not name a controlled variable.
+#
+# That pattern is not evidence of a broken project -- it is what retrofitting a
+# check onto unchecked work looks like. What WOULD be evidence is a check
+# finding new defects on its tenth run, and none of them has run ten times,
+# because running them was something to remember rather than something enforced.
+#
+# "Remember to run the check" is the same class of control as "resolve to be
+# careful", which this project has already shown does not hold. So the check
+# runs here.
+#
+# Install:  git config core.hooksPath infra/hooks
+# Bypass:   git push --no-verify   (and say why in the commit message)
+# =============================================================================
+
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Only gate pushes that could change a claim. Docs and infra edits push freely;
+# a gate that fires on everything gets bypassed reflexively, and a bypassed gate
+# is worse than none because it looks like coverage.
+if ! git diff --name-only "@{push}..HEAD" 2>/dev/null | grep -qE '^(scripts/|sim/|captured/|configs/)'; then
+  echo "[pre-push] no claim-bearing files changed; skipping reproduction"
+  exit 0
+fi
+
+echo "[pre-push] claim-bearing files changed — reproducing the paper…"
+if "$ROOT/reproduce_all.sh" >/tmp/bl_repro.log 2>&1; then
+  echo "[pre-push] ALL REPRODUCED"
+  exit 0
+fi
+echo "[pre-push] REPRODUCTION FAILED — push blocked. Tail of /tmp/bl_repro.log:"
+tail -25 /tmp/bl_repro.log
+echo "[pre-push] fix it, or push with --no-verify and say why in the commit message."
+exit 1
