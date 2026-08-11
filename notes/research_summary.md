@@ -1,7 +1,7 @@
 # Research summary — what was done, and what it showed
 
-**Sixteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
-verified numerical claims, 190 tests.** Every number regenerates from
+**Seventeen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
+verified numerical claims, 192 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, TP=4.
