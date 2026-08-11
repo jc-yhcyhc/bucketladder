@@ -3,7 +3,7 @@
 **What compiled-shape padding actually costs in production TPU serving.**
 
 A measurement study of vLLM 0.25.0 + `tpu-inference` 0.25.0 on `v5litepod-4`.
-Thirteen hardware sessions, **[redacted]**, 58 verified claims, 184 tests.
+Fourteen hardware sessions, **[redacted]**, 61 verified claims, 184 tests.
 
 TPU executables are compiled for fixed tensor shapes, so a serving stack rounds
 every workload up to a precompiled ladder. The obvious inference — that rounding
@@ -38,10 +38,13 @@ length term matches it at batch sizes 1–2 (0.96% vs 0.38%) and **beats** it at
 about the fit protocol, not the model form.
 
 **Step cost is not a property of the step.** It depends on batch size: ~85% of
-nominal padding is paid at n=1–2, 10–25% at n=4–8. How far up this is measurable
-was partly our own limitation — splitting tracks request count, not tokens, and
-releasing requests from a thread barrier cut arrival spread 7.6× and made **n=16
-measurable for the first time**. The real barrier sits between 16 and 32.
+nominal padding is paid at n=1–2, 10–25% at n=4–8, and **approximately none at
+n=16**. How far up this is measurable was partly our own limitation — splitting tracks request count, not tokens, and
+releasing requests from a thread barrier cut arrival spread 7.6× and made n=16
+measurable for the first time — where the paid share is indistinguishable from
+zero across three boundaries. A TP=1/2/4 ablation shows this is not an artifact
+of the sharding: padding is cheapest at TP=1, where the per-chip weight floor is
+largest.
 
 **Padding is abundant, and how abundant is a property of the workload.** Across
 four prompt-length distributions at one arrival rate the padded share of executed
@@ -82,7 +85,7 @@ ordinary dynamic batching rather than a shape effect, because that is what it is
 and appends to a manifest. Runs are never overwritten. A config that can't prove
 prefix caching is off refuses to run — this has fired twice on real mistakes.
 
-**`scripts/paper_numbers.py`** ties all 58 claims to `run_id`s and recomputes
+**`scripts/paper_numbers.py`** ties all 61 claims to `run_id`s and recomputes
 them from captured data. On first run it found two real defects: a cost
 transcribed from an exploratory dump rather than the fitted curve, and a table
 presented as precise that came from one of two replicates differing by 14%.
@@ -122,7 +125,7 @@ optimisation rejected by judgement overriding a pre-committed decision rule.
 
 ```bash
 python -m pytest tests/ -q                 # 184 tests, no hardware needed
-python scripts/paper_numbers.py            # recompute all 58 claims from captured/
+python scripts/paper_numbers.py            # recompute all 61 claims from captured/
 python scripts/check_model.py <hf-model>   # preflight before provisioning
 python scripts/refit_cost_model.py         # refit + both holdouts, offline
 ```
