@@ -1,263 +1,383 @@
 # Research summary — what was done, and what it showed
 
-**Closed 2026-08-10.** 12 hardware sessions, **[redacted]** of a $1,000 ceiling.
-42 verified claims, 184 tests, 69 commits. Stack: vLLM 0.25.0 + `tpu-inference`
-0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on `v5litepod-4` (4 chips, TP=4).
+**Fifteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 66
+verified numerical claims, 190 tests.** Every number regenerates from
+`captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
+
+Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, TP=4.
 
 ---
 
 ## 0. The claim, in one sentence
 
 **The cost of a compiled step in a production TPU serving stack is not a property
-of the step — it depends on batch size, and treating it as a constant produces a
-series of plausible-looking wrong conclusions, several of which we made and
+of the step. It depends on batch size, and treating it as a constant produces a
+series of plausible-looking wrong conclusions — including several we made and
 caught.**
-
-Everything below either supports that, bounds it, or records what we withdrew on
-the way to it.
 
 ---
 
 ## 1. What we set out to do, and what happened instead
 
-**The plan:** on compiled-shape accelerators every request is padded up to one of
-N precompiled bucket shapes. When a request's bucket is saturated the scheduler
-must either promote it into a larger warm bucket and pay the padding, or queue it
-and pay the delay. Build the admission policy that decides, and design the ladder
-it runs against.
+The plan was bucket-aware admission control: when a request arrives and its
+compiled shape is saturated, promote it into a larger warm bucket and pay the
+padding, or queue it and pay the wait. The premise — that rounding up to a
+compiled shape means paying for the shape you rounded up to — is what
+**BucketServe** and **LAPS** assume on GPU, and it is what motivates the whole
+family.
 
-**What happened:** the premise is false. Per-request length padding does not
-exist on this stack, and the padding that does exist is mostly not paid at the
-batch sizes serving actually uses. Six sessions in, a control experiment that
-should have run in week 0 rejected the founding assumption by 44–618%.
+Six sessions in, a $3 control experiment rejected it. Per-request length padding
+does not exist on this stack: a mixed-length batch costs its packed tokens, and
+the batch-padding model is rejected by 44–618%. The paper became a measurement
+study of what is actually paid.
 
-The project became a characterisation of what compiled-shape quantization
-actually costs — which is the paper that exists now.
+A second phase began after peer review of draft 2 raised seven major findings and
+six questions. Answering them consumed three more sessions, **withdrew two
+headline numbers**, overturned one stated limitation, and added the mechanism the
+work had been missing for three drafts.
 
 ---
 
 ## 2. What was measured
 
-| | question | answer |
+Three quantized dimensions, read from `tpu_inference/runner/tpu_runner.py:2133`:
+
+| | quantizes | ladder |
 |---|---|---|
-| **e00** | is the ladder enumerable and are controls asserting? | yes; gate has passed every session |
-| **e01** | does a single request pay its full sequence bucket? | **yes** — flatness 0.97 at ≤1024 |
-| **e02** | does stock vLLM queue, or promote? | **never queues** — 0.0 ms at every level |
-| **e04** | does batch splitting explain the cost bimodality? | **no** — controls vary too |
-| **e05** | does the per-step token histogram explain it? | **no** — top-bucket occupancy uncorrelated at n=9–10 |
-| **e07** | does a mixed-length batch pay per-request padding? | **no** — rejected by 44–618% |
-| **e08** | is that because of chunked prefill? | **no** — same result with it disabled |
-| **e21** | how far from optimal are the policies? | DP + Lagrangian bound, brute-force verified |
-| **e30/e40/e41** | does the cost model predict held-out hardware? | 3.6% (seeds), 2.9% (rates) |
-| **H1/M1** | how much padding is executed, and paid? | **36% executed**; 10% paid at 512→1024 |
-| **M2** | what does `ATTN_BUCKETIZED_NUM_REQS=1` buy? | **0.0%** on decode |
-| **M3** | what does the curve do below 512 tokens? | it was extrapolating 15× low |
-| **M4** | does the paid share depend on the boundary? | **yes** — 10% → 25% |
-| **M5** | is the step cost a constant? | **no** — varies ×7.7 with n |
-| **M6** | map step cost across n and phase | prefill unmeasurable at n≥8; decode smooth |
+| **D1** | prompt length → prefill shape | *does not exist* |
+| **D2** | scheduled tokens / step | `[16, 32, …, 8192]` |
+| **D3** | requests / step | `[8, …, 256]` non-attention; **`[256]` attention** |
+
+Everything is server-side, from Prometheus histogram *deltas* — never client
+wall-clock. Single-step execution is verified per dispatch from
+`iteration_tokens_total`; split dispatches are excluded rather than averaged.
+Where a measurement needs *n* requests inside one scheduler step, they are
+released from a thread barrier after every connection is established.
 
 ---
 
 ## 3. Results that stand
 
-### 3.1 The attention ladder is not what the system reports
+### 3.1 The attention ladder is not the one the system reports
 
-`envs.ATTN_BUCKETIZED_NUM_REQS` defaults to `False`, and when it is off
-`get_attn_req_paddings` returns `[max_req_size]` — **one bucket**. Attention
-always executes at 256 requests regardless of batch size, while every boot prints
-a six-entry request ladder:
+`ATTN_BUCKETIZED_NUM_REQS` defaults to `False`, and when off
+`get_attn_req_paddings` returns `[max_req_size]` — one bucket. Every boot prints
+two ladders that disagree:
 
 ```
 Prepared request paddings:      [8, 16, 32, 64, 128, 256]
 Prepared attn request paddings: [256]
 ```
 
-Hardware agrees: if decode padded 9 sequences to 16, decode at n=9 would cost
-what n=16 costs. It costs what n=8 costs — **51.4 ms against 91.8**. And enabling
-the flag changes decode latency by **0.0%** (identical to 0.1 ms at n=8 and n=9),
-because RPA's padded request slots hold no KV blocks. **The default is correct**,
-now with a number rather than an inference from a code comment.
+Three independent confirmations:
 
-Absent from RPA, absent from LENS, absent from vLLM's TPU documentation.
+1. **Source.** The flag's default and the one-bucket return path.
+2. **A paired hardware experiment.** Enabling the flag compiles the full ladder
+   and changes decode by **0.0%** — because RPA's padded request slots hold no KV
+   blocks.
+3. **The compiler's own naming.** The decode attention kernel is emitted as
+   `RPAd-p_256-bq_1_1-bkv_8192_8192`. **The 256-request padding is in the kernel
+   name.** This came free from the operator profile in session 15.
 
-### 3.2 LENS's protocol does not transfer
+A weaker fourth line — that decode at n=9 costs what n=8 costs (51.4 vs 53.3 ms)
+rather than what n=16 costs (91.8 ms) — is reported as corroboration only. Its
+bootstrap intervals exclude the 100% the premise predicts but cannot pin the
+value: [−43%, 19%], [−66%, 49%], [−67%, 59%] across three runs.
 
-LENS predicts NPU latency to 2.15% with a per-bucket `intercept + slope × length`
-fitted from two measurements per bucket. Run on TPU with a withheld mid-bucket
-point: **MAPE 5.23%, worst 22.41%** — near-perfect at n=1–2 (0.0–0.6%) and failing
-at n=4 (17–24%). Its single-regime form does not survive the batch sizes
-production uses. Validation of a published technique on hardware its authors never
-ran.
+This finding is absent from the RPA paper, from LENS, and from vendor
+documentation. **Two sessions were spent hunting a promotion cost at the 8→16
+edge that the default configuration had already excluded.**
 
-### 3.3 Shape-quantization cost is not a property of the step
+### 3.2 LENS's model form does not earn its place
 
-It depends on batch size, and the dependence is large:
+LENS predicts NPU latency to 2.15% MAPE with a per-bucket
+`intercept + slope × length` fitted from two measurements per bucket. Reproduced
+on TPU across 5 buckets × 3 batch sizes, 7 repeats per point, withholding a
+mid-bucket point: **5.23% MAPE, worst 22.4%.**
 
-| | prefill slope | reading |
+A MAPE shift across hardware is weak evidence by itself, so two ablations:
+
+| batch size | LENS | constant-only (no length term) |
 |---|---|---|
-| n=1 | 1.61 µs/token | flat within a bucket — a staircase |
-| n=2 | 0.75 µs/token | flat |
-| n=4 | 17.18 µs/token | **not flat — but see below** |
+| 1 | 0.38% | 0.96% |
+| 2 | 0.39% | 0.86% |
+| 4 | 19.77% | **14.80%** |
 
-**The n=4 slope is fragile and we say so rather than let a reviewer find it.**
-The sequence is non-monotonic — 1.61 → 0.75 → 17.18 — which reads as a
-measurement artifact before it reads as a finding. Inspecting the underlying
-points at bucket 512 shows why:
+At n=1–2 the within-bucket curve is nearly flat (flatness 0.97), so *any*
+two-point fit is near-perfect — a constant lands within 0.6 pp. **The reported
+accuracy at low batch size is evidence about the fit protocol, not the model
+form.** At n=4 the length term is actively harmful. It earns its place at no
+batch size measured.
 
-```
-n=1   seq 320/384/512   cost 13.36 / 13.37 / 13.33   flat
-n=2   seq 160/192/256   cost 10.57 / 10.51 / 10.62   flat
-n=4   seq  80/ 96/128   cost  9.78 / 13.13 / 13.15   two flat, one low
-```
+The failure is not a sampling artifact: over all three choices of which two
+points calibrate, the n=4 error swings up to 44.8 pp but its **minimum is still
+16.97%**, far above 2.15%.
 
-Two of the three n=4 points are flat like n=1 and n=2; the 23× slope is
-`(13.15 − 9.78)/192`, carried entirely by the 320-token measurement. And all
-three sequence lengths pad to the same sequence bucket *and* the same token
-bucket, so **neither padding model predicts any difference between them**.
+### 3.3 Shape-quantization cost depends on batch size
 
-We therefore claim only that step cost is batch-size-dependent — supported
-independently by the paid-padding fractions (~85% at n=1–2, 10–25% at n=4–8,
-measured in a separate experiment) and by LENS failing at exactly n=4. **The
-shape of that dependence, and the mechanism behind it, are unexplained.** Three
-things break at n=4 — our slope, our paid fraction, and a published predictor —
-and we could not identify what changes there.
+Share of nominal padding actually paid, straddling a compiled boundary at fixed
+batch size and near-fixed sequence length:
 
-Equivalently, as the share of nominal padding actually paid: **~85% at n=1–2,
-10–25% at n=4–8**. Above n=8 the quantity **cannot be isolated** — zero of
-fourteen cells produced a single-step dispatch, because the scheduler splits every
-one. Whether the transition is a step or a smooth decay is **unknown**, and not
-obtainable with a `/metrics`-delta instrument.
+| batch size | share paid |
+|---|---|
+| 1–2 | **~85%** |
+| 4 | 24% |
+| 8 | 16% |
+| 16 | **≈0%** (−15.4%, −2.7%, +0.5% at three boundaries) |
 
-### 3.4 Padding is abundant and mostly free
+Monotone: padding stops being paid as batch size rises, and by n=16 it is free.
 
-**35.9% of executed tokens are padding** (p95 per-dispatch ratio 99.6%), and the
-share actually paid rises with the boundary — 10.0% at 512→1024, 22.1% at
-1024→2048, 24.0% at 2048→4096, 24.8% at 4096→8192.
+**How far up this could be measured was partly our own limitation.** Three drafts
+said the quantity was unmeasurable above n=8 because the scheduler split every
+dispatch. Splitting turned out to track *request count*, not token count — 8192
+tokens at `max_num_batched_tokens=8192` never splits, ~1024 tokens at n=8 splits
+half the time — which is an arrival race, not a capacity limit:
 
-Per-request *length* padding does not exist at all: a mixed-length batch costs its
-packed tokens, rejecting the batch-padding model by 44–618%, and **not because of
-chunked prefill** — disabling it leaves the result unchanged.
+| n | split, old launcher | split, synchronised launch |
+|---|---|---|
+| 4 | 0% | 0% |
+| 8 | 20% | **0%** |
+| 16 | 100% | **60%** |
+| 32 | 100% | 100% |
 
-### 3.5 Decode is smooth, and decode is what production runs
+A thread barrier cut arrival spread 7.6× at n=32 (15.4 ms → 1.7 ms). **The real
+barrier is between 16 and 32.** The peer review proposed sweeping
+`max_num_batched_tokens` to fix this; that experiment would have measured nothing.
+
+**No shape is claimed for the dependence.** A within-bucket slope sweep gave
+1.61 / 0.75 / 17.18 µs/token at n=1/2/4, but the third rests on a single
+measurement, and all three sequence lengths there pad to the same sequence *and*
+token bucket, so no padding model predicts a difference.
+
+### 3.4 Padding is abundant, workload-dependent, and mostly free
+
+Across four prompt-length distributions at one Poisson arrival rate (8 req/s,
+`output_len=64`, 120 requests each):
+
+| distribution | CV | padded share of executed tokens | TTFT p50/p95 | ITL p50/p95 |
+|---|---|---|---|---|
+| fixed-256 | 0.00 | **51.0%** | 19 / 27 ms | 4.4 / 5.1 ms |
+| lognormal | 1.20 | 38.4% | 19 / 100 ms | 4.4 / 7.5 ms |
+| bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
+| uniform | 0.60 | **27.3%** | 89 / 261 ms | 6.4 / 14.9 ms |
+
+**27.3% to 51.0%** — and the ordering is counter-intuitive: the *most uniform*
+workload pads *most*, because a fixed length just above a boundary pads every
+step by the same large amount, while a spread distribution lands across buckets
+and averages out. Any single figure characterises a workload, not the stack.
+
+Per-request *length* padding does not exist: cost tracks packed tokens, the
+batch-padding model is rejected by 44–618%, and uniform controls where all
+candidate models agree match to 1.9%. **Not chunked prefill** — with
+`--no-enable-chunked-prefill`, packed still wins 8/10 ragged cells and batch
+padding is rejected by 75–579%.
+
+### 3.5 Decode is smooth, and bandwidth is why
 
 | n | 1 | 2 | 4 | 8 | 16 | 32 |
 |---|---|---|---|---|---|---|
 | ms/step | 3.80 | 4.25 | 4.30 | 4.98 | 6.52 | 9.13 |
-| µs/step/seq | 3802 | 2127 | 1075 | 622 | 407 | **285** |
+| µs/step/sequence | 3802 | 2127 | 1075 | 622 | 407 | **285** |
 
-Per-step cost rises **2.4×** while n rises **32×**; per-sequence cost falls **13×**
-monotonically, no discontinuity anywhere — across exactly the range prefill could
-not reach. **The pathology is real and lives in the phase that matters least.**
+Per-step cost rises **2.4×** while batch size rises **32×**; per-sequence cost
+falls **13×** monotonically, no discontinuity.
 
-### 3.6 The bimodality, localised
+**A roofline from measured step times and published dimensions gives the
+mechanism**, computed offline for $0:
 
-Per-cell spread over 9 repeats: **decode 1.00–1.04× at every n; prefill 1.00–1.03×
-at n≤4 and 1.18–1.26× at n≥8.** Variance switches on exactly where the scheduler
-begins splitting dispatches, and decode — which has no chunking decision — never
-shows it. Localisation, not mechanism: e04 showed step *count* does not correlate
-with cost, so the variance is in *how* a dispatch splits, not into how many pieces.
+| n | achieved HBM BW | BW utilisation | MFU | bound by |
+|---|---|---|---|---|
+| 1 | 532 GB/s | 64.9% | 0.27% | memory |
+| 8 | 421 GB/s | 51.4% | 1.68% | memory |
+| 32 | 258 GB/s | 31.4% | 3.65% | memory |
 
-### 3.7 Supporting
+**2.01 GB of weights crosses HBM every decode step regardless of batch size** —
+99% of all bytes at n≤2, 89% at n≥16. Every cell is memory-bound; MFU never
+exceeds 3.65%. Additional sequences, real or padded, are nearly free until that
+floor is left. This is the memory-bound regime **Pope et al.** characterise
+analytically; the measurement lands in it, and the contribution is the
+consequence for compiled-shape ladders, not the regime.
 
-A cost model passing two independent holdouts (3.6% on unseen seeds, 2.9% on
-unseen rates); a provable optimality bound by DP with Lagrangian dual, verified
-against brute force; and R3 decomposed — the staircase is architecture-dependent,
-with the GQA ratio accounting for about half the gradient (Qwen3-4B 0.91,
-TinyLlama 0.82, SmolLM2 0.73 at bucket 2048).
+**An operator profile confirms it independently** and settles what kind of answer
+the n=4 convergence can have:
+
+| n | attention | collective | matmul/fusion |
+|---|---|---|---|
+| 1 | 6.8% | 13.5% | **78.5%** |
+| 4 | 15.4% | 13.9% | 69.6% |
+| 16 | 34.2% | 13.4% | **51.4%** |
+
+Matmuls — where weights are read — dominate at low batch and give way to
+attention as KV grows; collectives are flat. **Nothing moves discontinuously at
+n=4**: every category's share changes less into n=4 than across some other
+adjacent pair. The convergence is not visible at operator granularity.
+
+### 3.6 The cheapness of padding is not an artifact of the sharding
+
+Holding model, chips and workload fixed and varying only TP. The prediction was
+registered in the configs *before* measurement: level scales 1/TP, shape
+preserved.
+
+| TP | level vs TP=4 | predicted | cost rise n=1→32 |
+|---|---|---|---|
+| 4 | 1.00× | 1.00× | 2.33× |
+| 2 | 1.63× | 2.00× | 2.41× |
+| 1 | 2.86× | **4.00×** | **1.83×** |
+
+**Both halves missed.** Level scales sub-proportionally — the roofline does not
+model the inter-chip collectives the higher-TP arms pay. And shape is not
+preserved: the curve gets *flatter* with less sharding, which a larger per-chip
+weight floor implies.
+
+Both misses point the same way and answer the objection. If request-dimension
+padding were cheap only because that dimension is not the bottleneck at TP=4,
+reducing TP would expose it. Instead padding is cheapest at **TP=1**, where the
+floor is largest.
+
+### 3.7 Per-dispatch variance is a prefill phenomenon
+
+Decode **1.00–1.04×** over 9 repeats at most batch sizes; prefill **1.00–1.03×**
+at n≤4 and **1.18–1.26×** at n≥8. Variance appears exactly where the scheduler
+begins splitting, and decode — which has no chunking decision — never shows it.
+Localisation, not mechanism: step *count* does not correlate with cost within a
+cell.
+
+That aggregate hides real spread. Bootstrapping the decode cells §3.1 depends on
+gives 95% interval widths of **38.7% at n=8** and 28.2% at n=9 over 21 repeats.
 
 ---
 
 ## 4. What was withdrawn
 
-| claim | why |
-|---|---|
-| bucket-aware admission control | premise false (§1) |
-| ladder redesign as a cost lever | D1 does not exist, D3 inert |
-| the crossover rule (~2048 tokens) | combined an n=1 constant with an n=4 fraction |
-| a 6.11 ms fixed per-step cost | `C(16) ≈ C(32)` read out of the n=1 staircase |
-| "two regimes" | two points; consistent with a smooth decay |
-| any throughput improvement | I1 failed twice — inert, then corrupting |
-| bucket-aligned step packing | ceiling computed, then the ceiling's basis withdrawn |
+Five claims that were written down and are no longer made.
 
-The 26% policy saving measured on hardware **stands as a measurement** but is
-reframed: the mechanism is per-step overhead amortisation — dynamic batching —
-not shape.
+| withdrawn | why |
+|---|---|
+| **"Step-for-alignment crosses at ~2048 tokens"** | Combined a step cost measured at n=1 with a padding fraction measured at n=4. Killed by the invariance guardrail. |
+| **"~4–9% of execution is recoverable"** | Multiplied a padded share from one workload by a paid share at one batch size. Appeared in the abstract, §4.4, §7 and §9 across three drafts. Killed by the same guardrail once registered as a claim. |
+| **"36% of executed tokens are padding"** (as a stack property) | It is a workload property; the range is 27.3–51.0%. |
+| **"Unmeasurable above n=8, the regime production runs in"** | Partly our own launcher. n=16 is measurable and the paid share there is ≈0%. |
+| **"LENS does not transfer"** (on the MAPE shift) | Narrowed to the *localisation* of the error, plus the stronger claim that the length term never earns its place. |
 
 ---
 
 ## 5. Methodological findings
 
-**Six failures, one cause.** A quantity measured under one configuration, used
-under another:
+Nine invalid inferences, in two classes.
 
-| looked like | was |
+**Class one — provenance (six).** A quantity measured under one configuration,
+used under another: a cost model fitted at `output_len=8` and run at 1; "padding
+is free" from two experiments both right at different n; a curve extrapolating
+small steps 15× low; a decomposition winning in model and losing measured; a
+scheduler patch inert because its prompts were in the losing regime; and a "fixed
+cost" that was not constant.
+
+The guardrail took **three versions**. *"No derivation may combine quantities
+measured at different batch sizes"* would not have caught the `output_len`
+failure. A whitelist of config keys missed the largest error, because batch size
+is not a top-level field — it lives inside experiment-specific structures. The
+working form diffs **every** config key across a claim's source runs, exempts
+only free text, and requires each difference to be named. It flagged five claims
+already believed correct and has since killed two headline numbers.
+
+**Its coverage is the set of *registered* claims, not the set of claims made.**
+The recoverable-headroom figure evaded it for three drafts by living in prose.
+
+**Class two — instrument definition (three), which the guardrail does not see.**
+A request-scoped metric contaminated by prefill/decode interleaving; a step-count
+test that could never pass (asking whether a *whole dispatch* ran in one step,
+which is never true, instead of whether its *prefill* split); and a boundary
+experiment that counted split dispatches but pooled their cost into the median
+anyway, contradicting the rule the method section states.
+
+The last one mattered: harmless while splits were zero at n≤8, wrong the moment
+n=16 became reachable. Excluding them moved the result under a percentage point —
+**luck, not method**, since pooling biases the paid share *upward*, the direction
+that manufactures a positive result.
+
+Two parser defects in session 15 belong here too: pooling the "XLA Modules" lane
+with "XLA Ops" double-counted every op inside its module, and the attention
+pattern could not match `RPAd`. Both surfaced as an impossible 0.0% attention
+share.
+
+**Every class-two error was caught by a measurement disagreeing with an
+independent one. That is not a mechanism, and it is the open methodological
+problem.**
+
+### Other machinery that paid for itself
+
+- **The traceability contract aborts, it does not warn.** `meta.json` first,
+  config hash, git SHA, dirty flag, never overwritten. It has fired three times
+  on real mistakes — and once on a legitimate experiment, blocking the TP
+  ablation for a session because it could not distinguish declared variation from
+  drift. Fixed by letting an experiment *declare* a control as its independent
+  variable, with a mandatory reason that lands in `meta.json`.
+- **`check_model.py`** preflights four failure modes that each cost a server boot
+  to discover. It retrodicts all four.
+- **A correctness gate.** Bucket-aligned packing measured **−29% TPU time and
+  −49% p99**; the gate then showed 4 of 48 greedy completions differed, every one
+  at a prompt length just above a bucket boundary. The patch was silently
+  dropping prompt tokens. Without the gate it ships as a 29% throughput win.
+- **`--parse-only`.** Trace parsing was wrong twice; both fixes cost $0 against
+  bytes already pulled.
+
+---
+
+## 6. Four optimisations, measured and rejected
+
+| | outcome |
 |---|---|
-| cost model fails holdout at 105.7% | fitted at `output_len=8`, run at 1 |
-| "the premise is wrong, padding is free" | e01 and e07 both right, different n |
-| curve extrapolates small steps 15× low | reading the n=1 staircase as a floor |
-| decomposition wins in model, loses measured | same |
-| I1 patch inert | 512-token prompts sit in the losing regime |
-| the fixed cost is not constant | all of the above, named |
+| bucket-aware admission control | premise false |
+| ladder redesign | D1 does not exist; D3 inert by default |
+| last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
+| bucket-aligned step packing | implemented twice: inert, then output-corrupting |
 
-**The guardrail took three versions.** "Different batch sizes" would not have
-caught the `output_len` failure. A whitelist of config keys missed the crossover,
-because batch size is not a top-level field — it lives inside `edges` and is
-implicit in `token_sizes`. Final form: **diff every config key**, exempt only free
-text, require each differing field to be named in the claim's `invariant_over`. It
-flags the retired crossover, and it flagged five live claims until an invariance
-we had assumed was stated explicitly.
-
-**Two invalid inferences, both self-caught**, both measuring a step-scoped
-property with a coarser instrument: a request-scoped metric (the `output_len=8`
-anomaly, contaminated by prefill/decode interleaving) and a dispatch-scoped curve
-(2–4 engine iterations summed, smearing any staircase).
-
-**The correctness gate paid for the whole project.** I1's second attempt showed
-−29% TPU and −49% p99 — and 4 of 48 greedy completions differed, every one at a
-prompt length just above a bucket boundary. Without that gate, a patch that
-silently drops prompt tokens ships as a 29% throughput win.
+The one positive measurement — release timing saving 26% of TPU time at 25 req/s
+(p=0.001, six paired seeds) — is **dynamic batching**, not a shape effect, and is
+a single load point with no saturation curve.
 
 ---
 
-## 6. Limitations
+## 7. Limitations
 
-**Prefill step cost is unmeasurable above n=4.** Zero of fourteen cells at n≥8
-produced a single-step dispatch; the scheduler splits every one, so a
-`/metrics`-delta instrument cannot isolate a step there. **That is the regime
-production runs in.** Resolving it needs profiler traces, not more of this.
-
-**What is actually recoverable is ~4–9%, not 36%.** 35.9% of executed tokens are
-padding, but only 10–25% of nominal padding is paid, so the recoverable share of
-execution is **roughly 4–9%** — and that assumes alignment at constant step count,
-which no mechanism we tested achieves. Stated explicitly because a reader will do
-this subtraction, and should not have to.
-
-**The n=4 anomaly is unexplained** (§3.3), and three independent observations
-converge on it.
-
-**One accelerator, one primary model, synthetic uniform workloads.**
+- **One accelerator, one primary model.** The sharding objection is answered
+  (§3.6); model scale and multi-host topology are not, and both change what
+  padding hides under.
+- **No production trace.** The four length distributions span a plausible range;
+  the result is a sensitivity, not a corrected point estimate.
+- **Prefill step cost above n=16 is still not isolable.** At n=16 the clean
+  sample is 7–11 dispatches per arm.
+- **The n=4 convergence is unexplained, and is not an operator effect.** We no
+  longer expect a profiler to show it.
+- **Co-located prefill and decode only.** Disaggregation splits the question in
+  two.
 
 ---
 
-## 7. Scope
+## 8. Cost
 
-Measured: one accelerator (v5e-4, TP=4), one primary model (Qwen3-4B) with two
-others for the architecture contrast, uniform 512-token prompts with Poisson
-arrivals, `output_len=1` for most cost work and 16–64 for the decode and policy
-work, batch sizes 1–32.
+| phase | sessions | spend |
+|---|---|---|
+| Bring-up through the premise falsification | 1–6 | ~$21 |
+| Mechanism, LENS, regime map | 7–12 | ~$20 |
+| Review response: workload, launcher | 13 | [redacted] |
+| Review response: TP ablation, n=16 | 14 | [redacted] |
+| Review response: operator profile | 15 | [redacted] |
+| **Total** | **15** | **[redacted]** of $1,000 |
 
-Not measured, and stated as such: prefill step cost above n=4; production traces;
-the mechanism behind non-deterministic splitting; any hardware other than v5e.
+A separate GCE instance unrelated to this project, running since 2026-07-31,
+has cost roughly **four times** the entire research programme. The per-session
+teardown discipline here was built for $4.80/hr TPUs and would never have caught
+it — a resource that never had a session has no session boundary to be torn down
+at.
 
 ---
 
-## 8. Artifacts
+## 9. Artifacts
 
-`scripts/check_model.py` preflights a model in seconds and retrodicts all four
-load failures; `scripts/paper_numbers.py` ties 42 claims to `run_id`s, recomputes
-them from captured data, and enforces the invariance guardrail; the traceability
-contract aborts rather than warns and has done so twice on real mistakes;
-`captured/` holds every run from twelve sessions.
-
-**Still owed:** one deliberate rewrite of the paper draft, a README that stands
-alone, `reproduce_all.sh`, and figures.
+- `notes/paper_draft.md` — the paper, draft 3
+- `scripts/paper_numbers.py` — 66 claims tied to `run_id`s, recomputed
+- `reproduce_all.sh` — regenerates every number and figure; non-zero on any
+  disagreement
+- `captured/` — raw output of all fifteen sessions
+- `DECISIONS.md` — per-session log: cost, findings, and what each invalidated
