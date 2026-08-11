@@ -230,12 +230,20 @@ on this hardware, and the regime where it breaks is the one serving uses.
 Measured as the share of nominal padding paid, straddling a compiled boundary at
 fixed batch size and near-fixed sequence length:
 
-| batch size | share of padding paid |
-|---|---|
-| 1–2 | **~85%** |
-| 4 | 24% |
-| 8 | 16% |
-| 16 | **≈0%** (−15.4%, −2.7%, +0.5% at three boundaries) |
+| batch size | median share paid | range across boundaries | clean cells |
+|---|---|---|---|
+| 1–2 | **~85%** | — | — |
+| 4 | 23.1% | [10.0%, 24.8%] | 4 |
+| 8 | 14.3% | [0.2%, 21.0%] | 3 |
+| 16 | **−2.7%** | [−15.4%, +0.5%] | 3 |
+
+**We no longer describe this as monotone.** The n=4 and n=8 ranges overlap
+substantially, so those two levels are not separable with the data we have; only
+the n≤2 and n=16 ends are. The defensible statement is **high at n≤2,
+intermediate and not separable at n=4–8, indistinguishable from zero at n=16**.
+The n=8 row is also a correction: it was previously 16%, computed with split
+dispatches pooled into the median. Recomputed with them excluded it is 14.3% —
+the conclusion survives, the number moved.
 
 At n=1 a single request pays its full sequence bucket (flatness 0.97 at buckets
 ≤1024). At n=4 it pays a fraction.

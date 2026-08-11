@@ -256,6 +256,24 @@ def m13_front(ctx: int, field: str) -> tuple[float, str]:
                 return r[field], "m13"
     return float("nan"), ""
 
+def m8_clean(edge: str) -> tuple[float, str]:
+    """Paid share at n=8 from CLEAN dispatches only (session 8 raw rows)."""
+    for rid, cfg, rows in runs("session8-m3m4/results/m1_boundary/*", "dispatches"):
+        olen = cfg["output_len"]
+        arms = {}
+        for arm in ("below", "above"):
+            g = [r for r in rows if r["edge"] == edge and r["arm"] == arm
+                 and r["n_steps"] == r["n_steps"] and r["n_steps"] <= 1 + olen
+                 and r["step_latency_ms"] == r["step_latency_ms"]]
+            if not g:
+                return float("nan"), ""
+            arms[arm] = (statistics.median([r["step_latency_ms"] for r in g]),
+                         g[0]["tokens_real"], g[0]["tokens_padded"])
+        b, a = arms["below"], arms["above"]
+        rr, pr = a[1] / b[1], a[2] / b[2]
+        return 100 * ((a[0] / b[0]) - rr) / (pr - rr), rid
+    return float("nan"), ""
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -424,6 +442,14 @@ CLAIMS: list[Claim] = [
      lambda: m12_cat(16, "matmul")),
     ("M12.coll.n4", "4.5", "collective share of device time at n=4 %", 13.9, 0.3,
      lambda: m12_cat(4, "collective")),
+
+    # --- paid share at n=8, recomputed with splits EXCLUDED -----------------
+    # The 16% previously reported pooled split dispatches, which the ninth
+    # failure showed biases the share upward. These are the clean-only values.
+    ("M14.share.n8.e2", "4.3", "paid share n=8, 2048/4096, clean only %", 21.0, 2.0,
+     lambda: m8_clean("n8:2048/4096")),
+    ("M14.share.n8.e3", "4.3", "paid share n=8, 4096/8192, clean only %", 14.3, 2.0,
+     lambda: m8_clean("n8:4096/8192")),
 
     # --- the analytic frontier (review M1/Q3) -------------------------------
     ("M13.margin.256", "4.5", "margin to ridge at 256-token context %", 10.0, 1.0,

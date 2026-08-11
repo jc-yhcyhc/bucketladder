@@ -120,14 +120,20 @@ points calibrate, the n=4 error swings up to 44.8 pp but its **minimum is still
 Share of nominal padding actually paid, straddling a compiled boundary at fixed
 batch size and near-fixed sequence length:
 
-| batch size | share paid |
-|---|---|
-| 1–2 | **~85%** |
-| 4 | 24% |
-| 8 | 16% |
-| 16 | **≈0%** (−15.4%, −2.7%, +0.5% at three boundaries) |
+| batch size | median share paid | range across boundaries | clean cells |
+|---|---|---|---|
+| 1–2 | **~85%** | — | — |
+| 4 | 23.1% | [10.0%, 24.8%] | 4 |
+| 8 | 14.3% | [0.2%, 21.0%] | 3 |
+| 16 | **−2.7%** | [−15.4%, +0.5%] | 3 |
 
-Monotone: padding stops being paid as batch size rises, and by n=16 it is free.
+**We no longer describe this as monotone.** The n=4 and n=8 ranges overlap
+substantially, so those two levels are not separable with the data we have; only
+the n≤2 and n=16 ends are. The defensible statement is **high at n≤2,
+intermediate and not separable at n=4–8, indistinguishable from zero at n=16**.
+The n=8 row is also a correction: it was previously 16%, computed with split
+dispatches pooled into the median. Recomputed with them excluded it is 14.3% —
+the conclusion survives, the number moved.
 
 **How far up this could be measured was partly our own limitation.** Three drafts
 said the quantity was unmeasurable above n=8 because the scheduler split every
