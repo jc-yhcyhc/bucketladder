@@ -1,0 +1,52 @@
+{
+  "experiment": "m1_boundary",
+  "description": "Paid padding share on a SMALLER model, testing the direction review M2 identifies as the first-order threat. Quantization halves the per-chip weight floor; so does a smaller model, and we already have one qualified. The TP ablation established that a LARGER floor makes padding cheaper, so a smaller floor must make it more expensive.",
+  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 15,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "n4:512/1024",
+      "n": 4,
+      "seq_len_below": 126,
+      "seq_len_above": 130
+    },
+    {
+      "name": "n4:1024/2048",
+      "n": 4,
+      "seq_len_below": 254,
+      "seq_len_above": 258
+    },
+    {
+      "name": "n8:512/1024",
+      "n": 8,
+      "seq_len_below": 126,
+      "seq_len_above": 130
+    },
+    {
+      "name": "n8:1024/2048",
+      "n": 8,
+      "seq_len_below": 254,
+      "seq_len_above": 258
+    }
+  ],
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "REGISTERED BEFORE MEASUREMENT. TinyLlama-1.1B at TP=4 puts ~0.55 GB of bf16 weights per chip against Qwen3-4B's 2.01 GB \u2014 a 3.6x smaller floor. If the mechanism is the weight floor, the paid share at n=4 and n=8 must be HIGHER than Qwen3-4B's 23.1% and 14.3%. If it is unchanged, the mechanism is not the floor and \u00a74.5 is wrong.",
+  "synchronised_launch": true
+}

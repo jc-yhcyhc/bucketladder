@@ -1,0 +1,46 @@
+{
+  "experiment": "m15_mxu_tile",
+  "description": "Isolated matmul microbenchmark at M=1..64 with the model's real sharded weight shapes, to test review Q1's tile-padding hypothesis for the n=4 convergence. No server, no scheduler.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "mode": "microbenchmark",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "arch": {
+    "num_hidden_layers": 36,
+    "hidden_size": 2560,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8,
+    "head_dim": 128,
+    "intermediate_size": 9728,
+    "vocab_size": 151936,
+    "dtype_bytes": 2,
+    "kv_dtype_bytes": 2
+  },
+  "m_values": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256
+  ],
+  "repeats": 50,
+  "warmup": 10,
+  "rise_threshold": 1.15,
+  "note_threshold": "A knee is the first M where TOTAL matmul time rises >15% over the previous point. Inside an MXU tile the M dimension is padded, so total time is flat and per-row cost halves per doubling; outside it, total time tracks M.",
+  "note_prediction": "REGISTERED BEFORE MEASUREMENT. For tiling to explain the n=4 convergence the knee must land at M=4. A knee at 8/16/128 means tile padding is real but lands elsewhere and does not explain it. No knee means these shapes are latency-bound across the range."
+}
