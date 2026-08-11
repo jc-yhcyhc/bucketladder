@@ -150,6 +150,21 @@ def m1_edge(name: str, field: str) -> tuple[float, str]:
     return float("nan"), ""
 
 
+def m1_share(edge: str) -> float:
+    """Paid share of nominal padding at a boundary, as a FRACTION, at n=4.
+
+    Defined once here because the review found it used inline three times and
+    defined nowhere: (measured - real) / (padded - real), i.e. where the measured
+    cost ratio falls between the ratio real work predicts and the ratio the
+    compiled-shape premise predicts. 0 = padding free, 1 = padding fully paid.
+    """
+    for _rid, _cfg, rows in runs("session8-m3m4/results/m1_boundary/*", "edges"):
+        for r in rows:
+            if r["edge"] == f"n4:{edge}" and r["splits_below"] == 0 and r["splits_above"] == 0:
+                return (r["cost_ratio"] - r["real_ratio"]) / (r["padded_ratio"] - r["real_ratio"])
+    return float("nan")
+
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -279,6 +294,24 @@ CLAIMS: list[Claim] = [
     ("H1.pct", "5", "% of executed tokens that are padding", 35.9, 0.5, lambda: (h1()[0]["pct_padding"], h1()[1])),
     ("H1.mean", "5", "mean per-dispatch padding ratio %", 56.8, 1.0, lambda: (h1()[0]["mean"], h1()[1])),
     ("H1.p95", "5", "p95 per-dispatch padding ratio %", 99.6, 1.0, lambda: (h1()[0]["p95"], h1()[1])),
+
+    # The paper's headline actionable number, registered as a CLAIM rather than
+    # left in prose. Review finding M2/Q5: "~4-9% recoverable" multiplies a
+    # padding SHARE measured under one workload by a PAID share measured under a
+    # different one, which is the exact form SS6 names as this project's root
+    # cause -- and the guardrail could not see it, because a number that lives
+    # only in a sentence has no source_run to diff. That is the real defect: the
+    # guardrail's coverage was the set of registered claims, not the set of
+    # claims made. Registering it here puts it inside the check; whether it then
+    # passes is a separate question, and it does not.
+    ("DERIVED.recoverable.lo", "7", "recoverable share of execution, low %", 3.4, 0.3,
+     lambda: (h1()[0]["pct_padding"] * m1_share("512/1024"),
+              "e05_step_shape__20260810T051309Z__f7f642b502fb;"
+              "m1_boundary__20260810T182212Z__0c4087987fd2"), ()),
+    ("DERIVED.recoverable.hi", "7", "recoverable share of execution, high %", 9.0, 0.5,
+     lambda: (h1()[0]["pct_padding"] * m1_share("4096/8192"),
+              "e05_step_shape__20260810T051309Z__f7f642b502fb;"
+              "m1_boundary__20260810T182212Z__0c4087987fd2"), ()),
 
     # --- M1, the randomised straddle ---------------------------------------
     ("M1.e1.cost", "5", "edge 512/1024 cost ratio", 1.110, 0.01, lambda: m1_edge("512/1024", "cost_ratio")),
