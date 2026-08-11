@@ -127,6 +127,7 @@ def launch_barrier(base_url: str, model: str, n: int, seq_len: int,
 
 def one_dispatch(launcher, base_url: str, model: str, n: int, seq_len: int,
                  output_len: int, seed: int, mock_metrics=None) -> dict[str, Any]:
+    """One dispatch of n requests; reports whether its PREFILL was a single step."""
     before = mock_metrics.snapshot() if mock_metrics else scrape(base_url)
     if mock_metrics is not None:
         for i in range(n):
@@ -135,6 +136,8 @@ def one_dispatch(launcher, base_url: str, model: str, n: int, seq_len: int,
         # n=8, the barrier does not. This is what the assertions below detect,
         # so the mock must be able to produce BOTH verdicts.
         splits = 2 if (launcher is launch_threadpool and n > 8) else 1
+        for _ in range(output_len):
+            mock_metrics.record_iteration(n)
         for _ in range(splits):
             mock_metrics.record_iteration(n * seq_len // splits)
         for _ in range(n):
@@ -149,7 +152,17 @@ def one_dispatch(launcher, base_url: str, model: str, n: int, seq_len: int,
     d = delta(before, after)
     pf, it = d.get(PREFILL), d.get(ITER)
     steps = it["count"] if it else float("nan")
-    return {"n_steps": steps, "single_step": bool(steps == 1),
+    # A CLEAN dispatch is one whose PREFILL ran in a single scheduler step. That
+    # is not `steps == 1`: with output_len=1 every request still needs a decode
+    # step, so a clean dispatch shows 2. The first hardware run made this obvious
+    # -- n=4 reported 0% "single step" at a cell m1_boundary independently
+    # measured as never splitting, and `scheduled_tokens` came back as real + n,
+    # which is the decode step counted once per request. Comparing a step COUNT
+    # against 1 measured the wrong thing; the quantity the paper cares about is
+    # whether the prefill was split.
+    clean = 1 + output_len
+    return {"n_steps": steps, "prefill_steps": steps - output_len,
+            "single_step": bool(steps <= clean),
             "prefill_ms": pf["mean_ms"] if pf else float("nan"),
             "n_requests_seen": pf["count"] if pf else 0,
             "scheduled_tokens": it["sum_s"] if it else float("nan"),
