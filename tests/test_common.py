@@ -143,6 +143,22 @@ def test_declaring_one_var_does_not_excuse_another():
                                          enable_prefix_caching=True))
 
 
+def test_prediction_requires_a_mechanism_statement():
+    """The tenth failure: a lever was substituted without checking it moves the
+    target. Provenance cannot see that, so registration has to demand it."""
+    cfg = good_config()
+    cfg["note_prediction"] = "smaller model has a smaller weight floor, so padding costs more"
+    with pytest.raises(ControlledVarError, match="prediction_mechanism"):
+        assert_controlled_vars(cfg)
+    cfg["prediction_mechanism"] = ("intensity = FLOPs/bytes = 2P/2P = 1, derivative "
+                                   "with respect to P is zero — this lever cannot move it")
+    assert_controlled_vars(cfg)
+
+
+def test_config_without_a_prediction_needs_no_mechanism():
+    assert_controlled_vars(good_config())
+
+
 def test_explicit_vars_accept_any_value_but_must_exist():
     assert_controlled_vars(good_config(enable_chunked_prefill=False))
     assert_controlled_vars(good_config(VLLM_TPU_BUCKET_PADDING_GAP=512))

@@ -227,6 +227,13 @@ on this hardware, and the regime where it breaks is the one serving uses.
 
 ### 4.3 The cost of a step is not a property of the step
 
+**These are PREFILL steps.** The distinction is load-bearing rather than
+expository: decode stays memory-bound to a batch of roughly 240 (§4.5), so if
+these were decode steps, 85% of padding being paid at n=1–2 would contradict the
+mechanism. A prefill step carries hundreds to thousands of tokens, is past the
+ridge, and both FLOPs and attention scale with padded tokens — which is why
+padding is paid there and not in decode.
+
 Measured as the share of nominal padding paid, straddling a compiled boundary at
 fixed batch size and near-fixed sequence length:
 
@@ -460,6 +467,47 @@ bottleneck at TP=4, reducing TP would expose it. Instead padding is cheapest at
 TP=1, where the floor is largest. The result is about the weight floor, not about
 this layout — for this model on this chip.
 
+
+### 4.8 Model scale does not move the regime map; dtype does
+
+A registered prediction failed here, and the failure is the result. TinyLlama-1.1B
+has a 3.6× smaller per-chip weight floor than Qwen3-4B, so if the mechanism is
+that floor, its paid share should be higher. It is lower — −1.2% and 13.4% at
+n=4, −1.1% and 5.9% at n=8.
+
+The prediction was wrong because model size is the wrong lever. For dense,
+weight-stationary decode, bytes ≈ 2·params and FLOPs per token ≈ 2·params, so
+
+| | weights/chip | FLOPs/token/chip | intensity |
+|---|---|---|---|
+| Qwen3-4B | 2.01 GB | 2.01 GF | 1.00 FLOP/byte/token |
+| TinyLlama-1.1B | 0.55 GB | 0.55 GF | 1.00 FLOP/byte/token |
+
+**Arithmetic intensity is the batch size, independent of parameter count.** The
+ridge is a property of the chip (v5e: 197 TFLOP/s ÷ 819 GB/s ≈ 240 FLOP/byte),
+and shrinking the model shrinks the floor and the work in the same proportion.
+
+This partly answers the "one primary model" limitation analytically: the regime
+map is a function of batch size and dtype, not of model scale. **Scope:** it holds
+for dense weight-stationary decode. It breaks for mixture-of-experts, where bytes
+read scale with the distinct experts touched so intensity falls below the batch
+size, and at long context, where KV bytes rather than weights set the floor. It
+does not extend to prefill.
+
+**Why the paid share moved *down* rather than staying flat** is a separate
+question the intensity argument does not answer. The likely reason is that
+non-weight fixed costs — collectives, which our operator profile puts at a flat
+~13.4%, plus dispatch and attention — are a larger fraction of a 0.55 GB model's
+step, leaving *more* slack for padding to hide in, not less.
+
+**Quantization is the lever that does move it**, and we can now predict
+quantitatively rather than directionally. W8 weights halve bytes and leave FLOPs
+alone, doubling intensity per token, so the crossing moves from batch ≈ 240 to
+batch ≈ 120. Both sit above our measured ceiling of 32 and near the ladder top of
+256. **Registered prediction: for this model on this chip, request-dimension
+padding is free across the entire compiled ladder in bf16, and int8 halves the
+batch size at which that stops.** We have not run it.
+
 ---
 
 ## 5. Four optimisations, measured and rejected
@@ -591,7 +639,17 @@ architectural response to §4.6's finding — and which bounds our advice to
 co-located deployments.
 
 **BucketServe** and **LAPS** manage length-bucketing overhead on GPU. We do not
-refute them; we bound their transferability. On this stack the padding they
+refute them, and we can now say precisely why not. The regime argument is not
+TPU-specific: intensity ≈ batch size on any weight-stationary accelerator, and
+the ridge differs only modestly (v5e ≈240 FLOP/byte, H100 ≈295). What differs is
+architectural — **CUDA-graph capture makes the batch dimension a paid quantity on
+GPU in a way it is not here**, because a graph is captured per shape and replayed,
+so an unseen batch size costs a capture rather than riding inside a compiled
+step. That is the real distinction between this stack and theirs, and stating it
+as architecture is more useful than leaving it as an unmeasured caveat. We have
+not run a GPU control; this is an analytic comparison, not a measurement.
+
+We bound their transferability. On this stack the padding they
 target is largely not paid, and the batch dimension they would bucket over is
 pinned to a single shape by default.
 

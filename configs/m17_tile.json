@@ -46,9 +46,9 @@
     },
     {
       "name": "tile_probe",
-      "K": 512,
-      "N": 512,
-      "iters": 2000,
+      "K": 2048,
+      "N": 2048,
+      "iters": 1000,
       "m_values": [
         1,
         2,
@@ -59,7 +59,8 @@
         64,
         128
       ],
-      "note": "Small resident weights so bandwidth is NOT the binding constraint and MXU tile width is the only structure left. This is the only arm in which a knee at M=4 is identifiable."
+      "note": "2048x2048 = 8.4 MB, small enough to plausibly stay VMEM-resident across the 1000 loop iterations. That is the ONLY way to get compute-bound below M=241: for a weight-stationary matmul the arithmetic intensity IS M, so a per-iteration HBM reload makes every M<241 bandwidth-bound no matter how the matrix is sized. If the weights are not hoisted, this arm stays under the utilisation floor and is refused rather than misread -- which is the correct outcome, not a failure."
     }
-  ]
+  ],
+  "note_intensity": "Recorded because it invalidated the first design of this experiment: a weight-stationary matmul with M rows has arithmetic intensity exactly M, so no choice of matrix size makes M<241 compute-bound on this chip. Only amortising the weight load across iterations can."
 }

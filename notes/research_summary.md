@@ -117,8 +117,14 @@ points calibrate, the n=4 error swings up to 44.8 pp but its **minimum is still
 
 ### 3.3 Shape-quantization cost depends on batch size
 
-Share of nominal padding actually paid, straddling a compiled boundary at fixed
-batch size and near-fixed sequence length:
+**These are PREFILL steps.** The distinction is load-bearing rather than
+expository: decode stays memory-bound to a batch of roughly 240 (below), so if
+these were decode steps, 85% of padding being paid at n=1–2 would contradict the
+mechanism. In prefill the step carries hundreds to thousands of tokens, is past
+the ridge, and both FLOPs and attention scale with padded tokens — which is why
+padding is paid there and not in decode. Share of nominal padding paid,
+straddling a compiled boundary at fixed batch size and near-fixed sequence
+length:
 
 | batch size | median share paid | range across boundaries | clean cells |
 |---|---|---|---|

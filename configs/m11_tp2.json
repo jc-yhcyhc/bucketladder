@@ -41,5 +41,6 @@
   "note_memory": "TP=1 puts ~8.0 GB of bf16 weights on ONE v5e chip with 16 GB HBM. It fits, but KV cache space is much reduced, so max_model_len is lowered to keep the server bootable; the workload uses 256+64 tokens and is unaffected.",
   "independent_vars": {
     "tensor_parallel_size": "The TP ablation varies sharding deliberately to answer review finding M4/Q6: whether request-dimension padding is free because that dimension is cheap, or because it is not the bottleneck in the TP=4 layout. Every other control is held."
-  }
+  },
+  "prediction_mechanism": "Target: per-step decode cost. Lever: TP. Per-chip weight bytes = 2P/TP, so d(bytes)/d(TP) != 0 and the floor genuinely moves."
 }

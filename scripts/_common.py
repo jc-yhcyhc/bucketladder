@@ -155,6 +155,20 @@ def assert_controlled_vars(config: Mapping[str, Any]) -> None:
             "so they are checked, or remove them"
         )
 
+    # A registered prediction must say WHY the lever moves the target. Provenance
+    # checks whether two quantities came from the same configuration; they say
+    # nothing about whether the lever you turned acts on the quantity you are
+    # claiming about. The tenth failure was exactly that: a smaller model was
+    # substituted for a quantized one, but weight bytes and per-token flops both
+    # scale with parameter count, so intensity = 2P/2P = 1 and the derivative
+    # with respect to the lever is zero. Two lines of algebra, available before
+    # the session, and not written down because nothing required it.
+    if "note_prediction" in config and not config.get("prediction_mechanism"):
+        problems.append(
+            "note_prediction is present without 'prediction_mechanism': state the target "
+            "as a formula in the lever and say why the derivative is nonzero"
+        )
+
     if problems:
         raise ControlledVarError(
             "controlled-variable contract violated; refusing to run:\n  - "

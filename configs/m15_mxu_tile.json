@@ -42,5 +42,6 @@
   "warmup": 10,
   "rise_threshold": 1.15,
   "note_threshold": "A knee is the first M where TOTAL matmul time rises >15% over the previous point. Inside an MXU tile the M dimension is padded, so total time is flat and per-row cost halves per doubling; outside it, total time tracks M.",
-  "note_prediction": "REGISTERED BEFORE MEASUREMENT. For tiling to explain the n=4 convergence the knee must land at M=4. A knee at 8/16/128 means tile padding is real but lands elsewhere and does not explain it. No knee means these shapes are latency-bound across the range."
+  "note_prediction": "REGISTERED BEFORE MEASUREMENT. For tiling to explain the n=4 convergence the knee must land at M=4. A knee at 8/16/128 means tile padding is real but lands elsewhere and does not explain it. No knee means these shapes are latency-bound across the range.",
+  "prediction_mechanism": "RETRACTED. Target: matmul time vs M. The lever was M, but the measurement was dispatch-bound at 7% of peak, so the target was never observed."
 }
