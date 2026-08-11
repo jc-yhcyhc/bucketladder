@@ -1,7 +1,7 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
-`v5litepod-4` (4 chips, TP=4). Fifteen hardware sessions, **[redacted]**.
+`v5litepod-4` (4 chips, TP=4). Sixteen hardware sessions, **[redacted]**.
 
 ---
 
@@ -34,7 +34,7 @@ discontinuity, and a roofline analysis shows why — the step reads the entire
 weight set regardless of batch size, so padding on the request dimension falls
 inside a floor that batch size does not move.
 
-We report four optimisations we designed, measured and rejected, and nine
+We report four optimisations we designed, measured and rejected, and ten
 invalid inferences we made and caught — most sharing one cause, and now blocked
 by a mechanical check rather than by intent.
 
@@ -125,7 +125,7 @@ others.
 
 **Traceability.** Every run writes `meta.json` before doing work, records config
 hash, git SHA and dirty flag, appends to a manifest, and is never overwritten.
-All 66 numerical claims in this paper are tied to `run_id`s and recomputed from
+All 73 numerical claims in this paper are tied to `run_id`s and recomputed from
 captured data by `scripts/paper_numbers.py`; `./reproduce_all.sh` regenerates
 every number and figure from `captured/` and exits non-zero if any disagrees.
 
@@ -534,7 +534,7 @@ less work.
 
 ---
 
-## 6. Nine failures, one dominant cause
+## 6. Ten failures, one dominant cause
 
 | looked like | was |
 |---|---|
@@ -547,6 +547,7 @@ less work.
 | a headline "~4–9% recoverable" | padded share and paid share from different runs |
 | "no single-step dispatch above n=8" | a step-count test that could never pass |
 | paid padding at n=16 | split dispatches pooled into the median, not excluded |
+| a smaller model standing in for a quantized one | a lever that cannot move the target quantity |
 
 The dominant cause: **a quantity measured under one configuration, used under
 another.**
@@ -576,9 +577,23 @@ the dispatches split. Recomputing with splits excluded moved the n=16 result by
 under one percentage point, so the conclusion stands — but the bias runs upward,
 which is the direction that would have manufactured a positive result.
 
-**The guardrail checks claim provenance, not analysis definitions**, and we do
-not have a mechanical check for the latter. Both of these were caught by a
-measurement disagreeing with an independent one, which is not a method.
+The tenth is a third variety again, and the most useful. Testing whether a
+smaller per-chip weight floor raises the paid share, we substituted a smaller
+*model* for a quantized one. But bytes ≈ 2·params and FLOPs/token ≈ 2·params, so
+arithmetic intensity is 1 FLOP/byte/token for any dense model and the derivative
+with respect to parameter count is **zero**. The lever could not move the target.
+Two lines of algebra, available before the session, and unwritten because nothing
+required them.
+
+**The guardrail checks claim provenance, not analysis definitions or lever
+validity.** Errors eight and nine were caught only by a measurement disagreeing
+with an independent one, which is not a method. The tenth was different: it was
+caught by its own **registered prediction** failing in the wrong direction, which
+is a mechanism, and the first one this project has had for the non-provenance
+class. Registration now requires a `prediction_mechanism` field stating the
+target as a formula in the lever and why the derivative is nonzero — the check
+that would have caught it before any hardware was provisioned. That is one
+instance and we do not oversell it, but the class is no longer entirely open.
 
 ---
 

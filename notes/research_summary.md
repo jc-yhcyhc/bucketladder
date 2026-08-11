@@ -1,6 +1,6 @@
 # Research summary — what was done, and what it showed
 
-**Fifteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 66
+**Sixteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
 verified numerical claims, 190 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
@@ -318,7 +318,7 @@ Five claims that were written down and are no longer made.
 
 ## 5. Methodological findings
 
-Nine invalid inferences, in two classes.
+Ten invalid inferences, in two classes.
 
 **Class one — provenance (six).** A quantity measured under one configuration,
 used under another: a cost model fitted at `output_len=8` and run at 1; "padding
