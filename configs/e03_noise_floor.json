@@ -20,5 +20,6 @@
   "output_len": 1,
   "repeats": 30,
   "restarts": 3,
-  "warmup_discard": 5
+  "warmup_discard": 5,
+  "dimension": "none"
 }

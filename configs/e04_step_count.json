@@ -32,5 +32,6 @@
   "control_levels": [
     8,
     16
-  ]
+  ],
+  "dimension": "none"
 }

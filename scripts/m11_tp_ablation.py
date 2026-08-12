@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     base = arms[max(arms)]["conf"]
-    cfg = {"experiment": "m11_tp_ablation", "mode": "offline",
+    cfg = {"experiment": "m11_tp_ablation", "dimension": "D3", "mode": "offline",
            "model": base.get("model"), "controlled": dict(base["controlled"]),
            "tp_arms": sorted(arms), "source_runs": {str(t): a["run_id"] for t, a in arms.items()},
            "independent_vars": {"tensor_parallel_size":

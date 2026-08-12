@@ -31,5 +31,6 @@
   ],
   "latency_weight": 1.0,
   "max_wait_s": 0.5,
-  "note_holdout": "seed 99 and these rates were NOT used to fit the cost model \u2014 the fit came from e02's concurrency sweep at fixed n. plan_v4 requires MAPE<15% per cell on data the fit never saw."
+  "note_holdout": "seed 99 and these rates were NOT used to fit the cost model \u2014 the fit came from e02's concurrency sweep at fixed n. plan_v4 requires MAPE<15% per cell on data the fit never saw.",
+  "dimension": "none"
 }

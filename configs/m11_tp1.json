@@ -42,5 +42,6 @@
   "independent_vars": {
     "tensor_parallel_size": "The TP ablation varies sharding deliberately to answer review finding M4/Q6: whether request-dimension padding is free because that dimension is cheap, or because it is not the bottleneck in the TP=4 layout. Every other control is held."
   },
-  "prediction_mechanism": "Target: per-step decode cost. Lever: TP. Per-chip weight bytes = 2P/TP, so d(bytes)/d(TP) != 0 and the floor genuinely moves. (The prediction still missed on magnitude; the lever was right.)"
+  "prediction_mechanism": "Target: per-step decode cost. Lever: TP. Per-chip weight bytes = 2P/TP, so d(bytes)/d(TP) != 0 and the floor genuinely moves. (The prediction still missed on magnitude; the lever was right.)",
+  "dimension": "D3"
 }

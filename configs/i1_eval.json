@@ -47,5 +47,6 @@
   "correctness_out": 24,
   "note_prompt_lens": "520, 1032 and 2056 sit just above 512, 1024 and 2048 -- exactly the steps the patch trims. 128 is a control that never triggers it. If the patch corrupts anything it will be at these lengths.",
   "note_output_len": "16, not 1. The patch defers PREFILL chunks, so a workload with real decode is the one where deferral could plausibly disturb output, and decode is also where production serving spends its time.",
-  "note_both_sides": "Throughput and p99 are both recorded. The optimisation defers work, so a throughput number without the tail-latency cost would be exactly the one-sided report the plan warned about."
+  "note_both_sides": "Throughput and p99 are both recorded. The optimisation defers work, so a throughput number without the tail-latency cost would be exactly the one-sided report the plan warned about.",
+  "dimension": "none"
 }

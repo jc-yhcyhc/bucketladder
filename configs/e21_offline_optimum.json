@@ -47,5 +47,6 @@
   "max_wait_s": 0.5,
   "note_n": "60 requests matches e40's trace length, so the frontier is computed on the same workload the hardware measured. The DP is exact but its state is a Pareto set per prefix, so cost grows faster than linearly in n; 60 keeps a full sweep to seconds.",
   "note_lambda": "lambda is ms of TPU cost traded per ms of summed request latency. 0 is pure cost -- maximal batching, unbounded wait -- and large lambda approaches dispatch-on-arrival. The values are geometric so the frontier is sampled evenly in the region where the curve actually bends.",
-  "note_oracle": "`oracle` is included as a POLICY here, not as a bound, precisely because e30 showed it is not one."
+  "note_oracle": "`oracle` is included as a POLICY here, not as a bound, precisely because e30 showed it is not one.",
+  "dimension": "none"
 }

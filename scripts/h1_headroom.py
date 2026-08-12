@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     # the contract is that provenance is stated.
     controlled = dict(runs[0][0].get("controlled", {}))
     controlled.setdefault("ATTN_BUCKETIZED_NUM_REQS", False)
-    cfg = {"experiment": "h1_headroom", "source_glob": args.capture_glob,
+    cfg = {"experiment": "h1_headroom", "dimension": "D2", "source_glob": args.capture_glob,
            "n_runs": len(runs), "mode": "offline", "controlled": controlled,
            "model": runs[0][0].get("model"),
            "note_controlled": ("ATTN_BUCKETIZED_NUM_REQS is not in the source runs' "

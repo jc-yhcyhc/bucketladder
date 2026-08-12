@@ -62,5 +62,6 @@
       "note": "2048x2048 = 8.4 MB, small enough to plausibly stay VMEM-resident across the 1000 loop iterations. That is the ONLY way to get compute-bound below M=241: for a weight-stationary matmul the arithmetic intensity IS M, so a per-iteration HBM reload makes every M<241 bandwidth-bound no matter how the matrix is sized. If the weights are not hoisted, this arm stays under the utilisation floor and is refused rather than misread -- which is the correct outcome, not a failure."
     }
   ],
-  "note_intensity": "Recorded because it invalidated the first design of this experiment: a weight-stationary matmul with M rows has arithmetic intensity exactly M, so no choice of matrix size makes M<241 compute-bound on this chip. Only amortising the weight load across iterations can."
+  "note_intensity": "Recorded because it invalidated the first design of this experiment: a weight-stationary matmul with M rows has arithmetic intensity exactly M, so no choice of matrix size makes M<241 compute-bound on this chip. Only amortising the weight load across iterations can.",
+  "dimension": "none"
 }

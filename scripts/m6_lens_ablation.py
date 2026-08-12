@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     conf = meta["config"]
     rows = pq.read_table(src / "points.parquet").to_pylist()
 
-    cfg = {"experiment": "m6_lens_ablation", "mode": "offline",
+    cfg = {"experiment": "m6_lens_ablation", "dimension": "D2", "mode": "offline",
            "source_run": src.name, "source_glob": args.capture_glob,
            "model": conf.get("model"), "controlled": conf.get("controlled", {}),
            "note_source": ("Re-analysis of one captured m5 run; no new measurement, so "

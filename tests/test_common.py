@@ -49,7 +49,8 @@ def good_controlled(**overrides):
 
 
 def good_config(**overrides):
-    return {"model": "test", "controlled": good_controlled(**overrides)}
+    return {"model": "test", "dimension": "none",
+            "controlled": good_controlled(**overrides)}
 
 
 # --- controlled-variable contract: abort, never warn ----------------------
@@ -157,6 +158,21 @@ def test_prediction_requires_a_mechanism_statement():
 
 def test_config_without_a_prediction_needs_no_mechanism():
     assert_controlled_vars(good_config())
+
+
+def test_dimension_is_required():
+    """The twelfth failure: a D3 ablation licensed a D2 recommendation, and a D3
+    prediction outlived the account that made it formulable. Provenance and the
+    lever check both see two real quantities; what is wrong is the dimension."""
+    cfg = good_config(); cfg.pop("dimension", None)
+    with pytest.raises(ControlledVarError, match="dimension"):
+        assert_controlled_vars(cfg)
+
+
+def test_dimension_must_be_a_known_one():
+    cfg = good_config(); cfg["dimension"] = "D7"
+    with pytest.raises(ControlledVarError, match="not one of"):
+        assert_controlled_vars(cfg)
 
 
 def test_explicit_vars_accept_any_value_but_must_exist():

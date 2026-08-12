@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     a, hw = src["arch"], src["hardware"]
     tp = src["controlled"]["tensor_parallel_size"]
 
-    cfg = {"experiment": "m13_frontier", "mode": "offline", "model": src.get("model"),
+    cfg = {"experiment": "m13_frontier", "dimension": "none", "mode": "offline", "model": src.get("model"),
            "controlled": src["controlled"], "arch": a, "hardware": hw,
            "note_derivation": ("Analytic frontier from the same byte and flop accounting as "
                                "m9_roofline; no new measurement. Answers review Q3, which asked "

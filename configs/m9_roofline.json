@@ -32,7 +32,8 @@
   },
   "note_hardware": "v5e per-chip peak: 197 TFLOP/s bf16 and 819 GB/s HBM, per Google's published TPU v5e specifications. These are peaks, so every utilisation figure derived from them is a lower bound on true utilisation of an achievable roof.",
   "hardware": {
-    "peak_bf16_flops_per_chip": 1.97e14,
-    "hbm_bw_bytes_per_s_per_chip": 8.19e11
-  }
+    "peak_bf16_flops_per_chip": 197000000000000.0,
+    "hbm_bw_bytes_per_s_per_chip": 819000000000.0
+  },
+  "dimension": "none"
 }

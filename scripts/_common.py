@@ -169,6 +169,26 @@ def assert_controlled_vars(config: Mapping[str, Any]) -> None:
             "as a formula in the lever and say why the derivative is nonzero"
         )
 
+    # The twelfth failure: a D3 (request-dimension) ablation was used to license a
+    # D2 (token-dimension) recommendation, and a D3 prediction survived the
+    # retraction of the account that made it formulable. Provenance cannot see
+    # that, and neither can the lever check -- both quantities are real and both
+    # levers move something. What is wrong is that they live in different
+    # dimensions of the ladder.
+    #
+    # Every experiment must name which dimension it measures, so a claim
+    # combining two can be rejected mechanically rather than by noticing.
+    DIMS = {"D1", "D2", "D3", "none"}
+    dim = config.get("dimension")
+    if dim is None:
+        problems.append(
+            "config has no 'dimension': name which quantized dimension this measures "
+            f"— one of {sorted(DIMS)} (D1 prompt length, D2 tokens/step, D3 requests/step, "
+            "'none' for infrastructure and offline re-analysis)"
+        )
+    elif dim not in DIMS:
+        problems.append(f"dimension {dim!r} is not one of {sorted(DIMS)}")
+
     if problems:
         raise ControlledVarError(
             "controlled-variable contract violated; refusing to run:\n  - "

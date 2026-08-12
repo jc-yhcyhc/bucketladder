@@ -85,5 +85,6 @@
   "note_budget": "Batch-padded totals are allowed to exceed max_num_batched_tokens here, unlike the gate run: that constraint existed only to keep the batch-padding PREDICTION in-budget for a clean three-way test, and batch padding is now rejected. Under packed behaviour the step holds total_tokens regardless of spread, so nothing splits.",
   "note_separation": "Predicted costs at n=4, total=2048, max=1536 are 39.2 / 56.6 / 144.8 ms for packed / per-request-padded / batch-padded -- a 3.7x spread, far outside the measurement noise, so the cell decides rather than hints.",
   "note_spread": "max_len is the only variable; n and total tokens are held exactly. The uniform cells (max_len=512) remain controls.",
-  "note_controlled": "enable_chunked_prefill is deliberately FALSE here and True everywhere else. This is the one place a controlled variable is intentionally flipped, it is recorded in the config so the audit sees it, and no result from this run may be pooled with the chunked-prefill-on runs."
+  "note_controlled": "enable_chunked_prefill is deliberately FALSE here and True everywhere else. This is the one place a controlled variable is intentionally flipped, it is recorded in the config so the audit sees it, and no result from this run may be pooled with the chunked-prefill-on runs.",
+  "dimension": "D2"
 }

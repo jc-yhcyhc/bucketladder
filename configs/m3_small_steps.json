@@ -41,5 +41,7 @@
     ]
   },
   "note_sizes": "Every size is exactly a compiled bucket edge, so these measure REAL cost with zero padding. 512 and 1024 overlap existing knots (13.15 and 17.23 ms) and act as a consistency check on the whole exercise.",
-  "note_decomposition": "1808 = 1024+512+256+16 exactly, and 1808 pads to 2048. On the extrapolated curve decomposition wins by 1.85 ms; that depends entirely on C(16)=0.41 ms, which is an assumption. Measured directly here."
+  "note_decomposition": "1808 = 1024+512+256+16 exactly, and 1808 pads to 2048. On the extrapolated curve decomposition wins by 1.85 ms; that depends entirely on C(16)=0.41 ms, which is an assumption. Measured directly here.",
+  "dimension": "D2",
+  "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction."
 }

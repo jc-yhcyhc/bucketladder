@@ -15,5 +15,6 @@
     "max_model_len": 8192,
     "XLA_FLAGS": "",
     "ATTN_BUCKETIZED_NUM_REQS": false
-  }
+  },
+  "dimension": "none"
 }

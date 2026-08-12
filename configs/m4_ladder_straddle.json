@@ -66,5 +66,7 @@
   "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
   "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
   "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
-  "note_budget": "Every 'above' arm stays under max_num_batched_tokens=8192 so the dispatch is one step: the largest is 8x513=4104. Splits are counted per arm and warned about."
+  "note_budget": "Every 'above' arm stays under max_num_batched_tokens=8192 so the dispatch is one step: the largest is 8x513=4104. Splits are counted per arm and warned about.",
+  "dimension": "none",
+  "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction."
 }

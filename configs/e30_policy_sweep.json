@@ -41,5 +41,6 @@
   "max_wait_s": 0.5,
   "note_rates": "Regridded 2026-08-10. The old grid topped out at 90 req/s because the old cost model put stock capacity near 49 req/s. The refitted curve gives a best 7.14 ms/request, so saturation is near 140 req/s and the old grid sat ENTIRELY below the knee -- it could not have observed the effect vanishing under load, which was one of that sweep's headline claims. Extended to 180 to span it.",
   "note_model": "Was Llama-3.1-8B-Instruct, which no run ever used. Every measurement behind this sweep is Qwen3-4B on v5litepod-4; the config now says so.",
-  "note_overhead": "Simulated with client_overhead_s=0, i.e. what the policy costs intrinsically. e40's hardware numbers carry ~24 ms/dispatch of harness overhead, which enlarges batches for every policy and helps stock most, so the measured saving is a lower bound on this."
+  "note_overhead": "Simulated with client_overhead_s=0, i.e. what the policy costs intrinsically. e40's hardware numbers carry ~24 ms/dispatch of harness overhead, which enlarges batches for every policy and helps stock most, so the measured saving is a lower bound on this.",
+  "dimension": "none"
 }

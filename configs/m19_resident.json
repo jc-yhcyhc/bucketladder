@@ -30,5 +30,6 @@
   "note_prediction": "REGISTERED. If the gauge peaks well below n at 128/256, session 18's refutation of the bandwidth account is unsupported and must be withdrawn.",
   "prediction_mechanism": "Target: effective running batch. Lever: requested concurrency n. The gauge reads the scheduler's own running set, so d(running)/d(n) is nonzero up to whatever cap max_num_seqs or KV capacity imposes \u2014 and locating that cap is the point.",
   "poll_interval_s": 0.05,
-  "reached_frac": 0.95
+  "reached_frac": 0.95,
+  "dimension": "D3"
 }

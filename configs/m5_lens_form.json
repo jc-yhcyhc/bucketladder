@@ -156,5 +156,6 @@
   ],
   "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
   "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
-  "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len."
+  "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len.",
+  "dimension": "D2"
 }

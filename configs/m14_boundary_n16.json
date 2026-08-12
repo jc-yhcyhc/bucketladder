@@ -43,5 +43,7 @@
   "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
   "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
   "synchronised_launch": true,
-  "note_repeats": "25, not 9. Only ~40% of n=16 dispatches keep their prefill in one step even under the barrier, so the usable sample is a fraction of the repeats and the analysis discards the rest. 25 targets ~10 clean dispatches per arm."
+  "note_repeats": "25, not 9. Only ~40% of n=16 dispatches keep their prefill in one step even under the barrier, so the usable sample is a fraction of the repeats and the analysis discards the rest. 25 targets ~10 clean dispatches per arm.",
+  "dimension": "D2",
+  "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction."
 }

@@ -30,5 +30,6 @@
   "warmup_discard": 2,
   "note_levels": "8 and 16 are unimodal in e02 and act as CONTROLS: the mechanism is only confirmed if cost separates by step count on 9/10/12/14 and does NOT separate on these. Listing them in control_levels is what makes the verdict falsifiable rather than a restatement of 'the metric varies'.",
   "control_levels": [],
-  "note_matching": "Token counts hit: 512, 1024, 1536, 2048, 3072, 4096 -- every one of them a knot in the fitted curve, so the comparison is direct rather than interpolated."
+  "note_matching": "Token counts hit: 512, 1024, 1536, 2048, 3072, 4096 -- every one of them a knot in the fitted curve, so the comparison is direct rather than interpolated.",
+  "dimension": "none"
 }

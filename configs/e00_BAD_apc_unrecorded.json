@@ -12,5 +12,6 @@
     "VLLM_TPU_BUCKET_PADDING_GAP": "",
     "ATTN_BUCKETIZED_NUM_REQS": false
   },
-  "tpu_type": "v5litepod-4"
+  "tpu_type": "v5litepod-4",
+  "dimension": "none"
 }

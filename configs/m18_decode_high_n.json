@@ -29,5 +29,6 @@
   "repeats": 9,
   "warmup_discard": 2,
   "note_prediction": "REGISTERED. Bandwidth: ms/step should bend upward approaching n~240 as the step leaves the memory-bound regime, and MFU should approach the ~49% the frontier table predicts at 256-token context. Ragged tiling: no bend, per-step cost continues its gentle rise and MFU stays low. A bend near 240 favours bandwidth; its absence favours ragged tiling and means the frontier bound in \u00a74.5 measures the wrong thing.",
-  "prediction_mechanism": "Target: per-step decode cost and its curvature vs n. Lever: n. Under the bandwidth model, time = max(bytes/BW, flops/peak) and bytes = W + n*ctx*kv while flops = 2Pn, so d(time)/dn changes sign of curvature at the ridge \u2014 nonzero derivative, and the two models disagree about WHERE. Under ragged tiling the padded slots contribute no work at any n, so no bend is predicted."
+  "prediction_mechanism": "Target: per-step decode cost and its curvature vs n. Lever: n. Under the bandwidth model, time = max(bytes/BW, flops/peak) and bytes = W + n*ctx*kv while flops = 2Pn, so d(time)/dn changes sign of curvature at the ridge \u2014 nonzero derivative, and the two models disagree about WHERE. Under ragged tiling the padded slots contribute no work at any n, so no bend is predicted.",
+  "dimension": "D3"
 }

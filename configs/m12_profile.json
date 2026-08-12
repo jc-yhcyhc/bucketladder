@@ -27,5 +27,6 @@
   "output_len": 64,
   "flush_seconds": 8,
   "note_workload": "Matches m9_roofline's source workload (256/64) so the operator breakdown and the roofline describe the same steps.",
-  "note_warmup": "Each cell is run once untraced before tracing, so XLA compilation for that shape is not inside the trace."
+  "note_warmup": "Each cell is run once untraced before tracing, so XLA compilation for that shape is not inside the trace.",
+  "dimension": "none"
 }

@@ -29,5 +29,6 @@
   "repeats": 25,
   "warmup_discard": 2,
   "note_levels": "8 and 16 are near-unimodal in e02 and act as controls: if the expensive mode uses a higher token bucket at 9-14 but not at 8/16, the mechanism is specific to the region where the bimodality lives.",
-  "note_output_len": "output_len=1 keeps decode iterations from crowding the histogram. e04 confirmed the bimodality is present at output_len=1 (n=12: 87.9 vs 136.5 ms), so nothing is lost by measuring it in the cleaner regime."
+  "note_output_len": "output_len=1 keeps decode iterations from crowding the histogram. e04 confirmed the bimodality is present at output_len=1 (n=12: 87.9 vs 136.5 ms), so nothing is lost by measuring it in the cleaner regime.",
+  "dimension": "D2"
 }

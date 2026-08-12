@@ -38,7 +38,7 @@ slot count from 256 to 8 changes it by **−0.9% at n=1**, where a per-slot padd
 cost would have been ~42%. §4.5 also reports the memory-bandwidth account we held
 earlier and the measurement that withdrew it.
 
-We report four optimisations we designed, measured and rejected, and eleven
+We report four optimisations we designed, measured and rejected, and twelve
 invalid inferences we made and caught — most sharing one cause, and now blocked
 by a mechanical check rather than by intent.
 
@@ -244,12 +244,14 @@ on this hardware, and the regime where it breaks is the one serving uses.
 
 ### 4.3 The cost of a step is not a property of the step
 
-**These are PREFILL steps.** The distinction is load-bearing rather than
-expository: decode stays memory-bound to a batch of roughly 240 (§4.5), so if
-these were decode steps, 85% of padding being paid at n=1–2 would contradict the
-mechanism. A prefill step carries hundreds to thousands of tokens, is past the
-ridge, and both FLOPs and attention scale with padded tokens — which is why
-padding is paid there and not in decode.
+**These are PREFILL steps, and they measure the TOKEN dimension (D2).** The
+distinction is load-bearing rather than expository, and its justification is not
+the memory-bound account §4.5 withdraws: a prefill step carries hundreds to
+thousands of tokens, and **padded tokens are real FLOPs** — the kernel computes
+them — so token padding is paid wherever the step's cost is dominated by
+arithmetic on those tokens. Request-dimension padding (D3) is a different
+quantity with a different mechanism (§4.5) and is free at every batch size
+measured; the two must not be read off the same table.
 
 Measured as the share of nominal padding paid, straddling a compiled boundary at
 fixed batch size and near-fixed sequence length:
@@ -672,13 +674,22 @@ non-weight fixed costs — collectives, which our operator profile puts at a fla
 ~13.4%, plus dispatch and attention — are a larger fraction of a 0.55 GB model's
 step, leaving *more* slack for padding to hide in, not less.
 
-**Quantization is the lever that does move it**, and we can now predict
-quantitatively rather than directionally. W8 weights halve bytes and leave FLOPs
-alone, doubling intensity per token, so the crossing moves from batch ≈ 240 to
-batch ≈ 120. Both sit above our measured ceiling of 32 and near the ladder top of
-256. **Registered prediction: for this model on this chip, request-dimension
-padding is free across the entire compiled ladder in bf16, and int8 halves the
-batch size at which that stops.** We have not run it.
+**Quantization is the lever that does move it — on the token dimension only.**
+W8 weights halve bytes and leave FLOPs alone, doubling intensity per token, so
+the arithmetic-intensity crossing moves from batch ≈ 240 to ≈ 120.
+
+An earlier draft registered this as a prediction about **request**-dimension
+padding: "free across the entire compiled ladder in bf16, and int8 halves the
+batch size at which that stops." **That prediction is withdrawn as
+unformulable.** Under the mechanism §4.5 establishes — RPA does no work for
+padded request slots, a data-structure property — there is no batch size at
+which free request padding stops, in any dtype, so the sentence does not name a
+possible outcome. It was written while the withdrawn bandwidth account was still
+in force and survived the account's retraction by two sections.
+
+The correctly-scoped version is: **registered prediction — under W8 weights the
+TOKEN-dimension paid share at a fixed boundary rises, because the crossing moves
+to a batch we can reach.** We have not run it.
 
 ---
 
@@ -706,7 +717,7 @@ less work.
 
 ---
 
-## 6. Eleven failures, one dominant cause
+## 6. Twelve failures, one dominant cause
 
 | looked like | was |
 |---|---|
@@ -721,6 +732,7 @@ less work.
 | paid padding at n=16 | split dispatches pooled into the median, not excluded |
 | a smaller model standing in for a quantized one | a lever that cannot move the target quantity |
 | a decode identity explaining prefill data (§4.8) | an argument applied outside its stated domain |
+| a sharding ablation licensing a bucketing ban | a D3 result used to support a D2 claim |
 
 The dominant cause: **a quantity measured under one configuration, used under
 another.**
@@ -768,9 +780,20 @@ target as a formula in the lever and why the derivative is nonzero — the check
 that would have caught it before any hardware was provisioned. That is one
 instance and we do not oversell it, but the class is no longer entirely open.
 
+The twelfth is a fourth variety and it survived a retraction. §4.7's sharding
+ablation measures the **request** dimension; §9 used its TP-invariance to license
+a ban on length bucketing, which is a **token**-dimension intervention. Separately,
+a registered prediction about request-dimension padding outlived the withdrawal of
+the account that made it formulable, and under the replacement mechanism it does
+not name a possible outcome at all. Neither provenance nor the lever check sees
+this: both quantities are real, both levers move something, and what is wrong is
+that they sit in different dimensions of the ladder. Registration now requires a
+`dimension` field — D1, D2, D3 or none — so a claim spanning two can be rejected
+mechanically rather than by a reader noticing.
+
 ### The pattern the failure list does not show
 
-Eleven entries above are inferences from numbers. Counting them alone hides
+Twelve entries above are inferences from numbers. Counting them alone hides
 something the project's history makes obvious: **the measurements have survived
 three rounds of external review largely intact, and the explanations have not.**
 
@@ -894,9 +917,14 @@ the stack; we withdraw our earlier range as confounded by offered token load and
 do not replace it with another.
 
 The practical advice is negative **for batched, throughput-oriented serving**:
-on this stack, at batch sizes from roughly 4 up to 16, with a 4B model at any
-sharding of four v5e chips, do not build length bucketing, shape-aware admission
-control, or ladder design.
+on this stack, at batch sizes from roughly 4 up to 16 with a 4B model, do not
+build length bucketing, shape-aware admission control, or ladder design.
+
+**The sharding ablation does not extend that advice.** §4.7 varies TP on the
+*request* dimension and finds padding cheap at every sharding; length bucketing
+is a *token*-dimension intervention, and the paid-share measurement was never
+repeated at TP=1 or TP=2. The TP-invariance we measured licenses nothing about
+token bucketing, and an earlier draft used it to.
 
 **It does not extend to the low-batch regime, and we say so rather than let the
 scope be assumed.** At n≤2 we measure ~85% of nominal padding paid on the token

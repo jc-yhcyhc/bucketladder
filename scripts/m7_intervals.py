@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     controlled = dict(base.get("controlled", {}))
     controlled.setdefault("ATTN_BUCKETIZED_NUM_REQS", False)
-    cfg = {"experiment": "m7_intervals", "mode": "offline", "bootstrap_resamples": B,
+    cfg = {"experiment": "m7_intervals", "dimension": "D3", "mode": "offline", "bootstrap_resamples": B,
            "seed": SEED, "controlled": controlled, "model": base.get("model"),
            "note_varies": ("ATTN_BUCKETIZED_NUM_REQS is False in three of the four arms and "
                            "True in the fourth BY DESIGN -- comparing them is the point. Every "

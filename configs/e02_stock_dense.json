@@ -45,5 +45,6 @@
   "repeats": 21,
   "warmup_discard": 2,
   "note_gap": "n=11..14 were never measured. At prompt_len 512 the sparse sweep jumped from 5120 tokens (n=10, ~89 ms) to 7680 (n=15, ~158 ms), so the SHAPE of the cost curve across that range is unknown -- and it is exactly the range where request padding (all of 9..16 pad to 16) and token padding (4608..8192 all pad to 8192) predict a flat cost while the measurements do not. Filling it is what makes a refit possible rather than a guess.",
-  "note_budget": "n=16 x 512 = 8192 tokens is exactly max_num_batched_tokens, so n<=16 is one scheduler step and n=18 must split into two. The split cell is kept deliberately: it is the only direct evidence of what a two-step dispatch costs."
+  "note_budget": "n=16 x 512 = 8192 tokens is exactly max_num_batched_tokens, so n<=16 is one scheduler step and n=18 must split into two. The split cell is kept deliberately: it is the only direct evidence of what a two-step dispatch costs.",
+  "dimension": "none"
 }

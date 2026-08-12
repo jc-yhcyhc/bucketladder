@@ -32,5 +32,6 @@
   ],
   "latency_weight": 1.0,
   "max_wait_s": 0.5,
-  "note_holdout": "plan_v4 requires MAPE<15% per cell on data the fit never saw. Seeds AND rates are both new here; the earlier holdout varied only seed and server instance."
+  "note_holdout": "plan_v4 requires MAPE<15% per cell on data the fit never saw. Seeds AND rates are both new here; the earlier holdout varied only seed and server instance.",
+  "dimension": "none"
 }

@@ -22,9 +22,22 @@
   "note_cells": "seq_len is held at 128 so total tokens stay at 512-4096, i.e. well under max_num_batched_tokens=8192 at every n. If splitting were a token-capacity effect none of these would split; the captured data says n=8 splits about half the time at ~1024 tokens.",
   "note_repeats": "15 rather than 9: the quantity is a FRACTION of dispatches that split, and the prior cells sat near 50%, where a 9-sample estimate has a wide interval.",
   "cells": [
-    {"n": 4,  "seq_len": 128},
-    {"n": 8,  "seq_len": 128},
-    {"n": 16, "seq_len": 128},
-    {"n": 32, "seq_len": 128}
-  ]
+    {
+      "n": 4,
+      "seq_len": 128
+    },
+    {
+      "n": 8,
+      "seq_len": 128
+    },
+    {
+      "n": 16,
+      "seq_len": 128
+    },
+    {
+      "n": 32,
+      "seq_len": 128
+    }
+  ],
+  "dimension": "D3"
 }
