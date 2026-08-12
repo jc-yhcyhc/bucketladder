@@ -1,6 +1,6 @@
 # Research summary — what was done, and what it showed
 
-**Twenty hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
+**Twenty-one hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
 verified numerical claims, 192 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
@@ -220,7 +220,9 @@ memory-bound step would sit near the roof. What replaces it is a direct
 observation: with per-sequence KV constant, absolute attention device time rises
 **9.72× as real requests rise 16×**, where a kernel doing work for its 256 padded
 slots would be flat. Request-dimension padding is free because Ragged Paged
-Attention skips it. The byte accounting survives on its own terms —
+Attention skips it — established by cutting the compiled slot count from 256 to
+8 and measuring a **−0.9%** change in attention time at n=1, where a per-slot
+padding cost would have been ~42%. The byte accounting survives on its own terms —
 2.01 GB of weights crosses HBM every decode step regardless of batch size — Additional sequences, real or padded, are nearly free until that
 floor is left. This is the memory-bound regime **Pope et al.** characterise
 analytically; the measurement lands in it, and the contribution is the

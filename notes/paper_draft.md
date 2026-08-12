@@ -1,7 +1,7 @@
 # What Compiled-Shape Padding Actually Costs in Production TPU Serving
 
 Stack: vLLM 0.25.0 + `tpu-inference` 0.25.0, JAX 0.10.2, libtpu 0.0.42.1, on
-`v5litepod-4` (4 chips, TP=4). Twenty hardware sessions, **[redacted]**.
+`v5litepod-4` (4 chips, TP=4). Twenty-one hardware sessions, **[redacted]**.
 
 ---
 
