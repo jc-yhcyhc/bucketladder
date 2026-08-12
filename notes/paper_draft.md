@@ -33,11 +33,10 @@ disabling it changes nothing. Decode, which dominates production serving, is
 well-behaved: per-step cost rises 2.4× while batch size rises 32×, with no
 discontinuity to n=32. Request-dimension padding is free for a data-structure
 reason rather than a bandwidth one: with per-sequence KV held constant, absolute
-attention time rises 9.72× as real requests rise 16×. That is consistent with
-ragged skipping but does not establish it — a fixed per-slot cost would sit in
-the 7 050 µs intercept, 42% of attention at n=1 — and §4.5 states the one
-profiling run that would decide it. §4.5 also reports the memory-bandwidth
-account we held earlier and the measurement that withdrew it.
+attention time rises 9.72× as real requests rise 16×, and cutting the compiled
+slot count from 256 to 8 changes it by **−0.9% at n=1**, where a per-slot padding
+cost would have been ~42%. §4.5 also reports the memory-bandwidth account we held
+earlier and the measurement that withdrew it.
 
 We report four optimisations we designed, measured and rejected, and eleven
 invalid inferences we made and caught — most sharing one cause, and now blocked
@@ -465,15 +464,28 @@ skips padded slots" and with "RPA pays a fixed cost for all 256, large at n=1 an
 negligible by n=16." **We cannot claim the first from this table**, and the
 request-dimension mechanism is therefore *supported but not established*.
 
-The discriminating experiment is one profiling run and we name it rather than
-leave it implicit: enable `ATTN_BUCKETIZED_NUM_REQS` so attention compiles at 8
-slots instead of 256, and profile the attention operator at the same real batch.
-**If `b` collapses, `b` is padding** and the conclusion needs a low-batch
-qualifier; if `b` survives, it is block-table or dispatch overhead and the
-mechanism claim is established. Note the sign this puts on §4.1: that paired
-experiment ran at n=8 and n=9, where a fixed 256-slot cost would be ~8% of
-attention time; at n=1 it would be ~42%, so the high-power version of the same
-test is the one we did not run.
+**We ran the discriminating experiment: `b` survives, so it is not padding.**
+Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots instead of 256
+— a 32× reduction in padded slots — and the attention operator was profiled in
+both arms at the same real batch:
+
+| n | flag off (256 slots) | flag on (8-slot ladder) | change |
+|---|---|---|---|
+| 1 | 16 898 µs | 16 749 µs | **−0.9%** |
+| 2 | 26 130 µs | 25 999 µs | −0.5% |
+| 8 | 85 081 µs | 85 055 µs | −0.0% |
+| fitted fixed term `b` | 7 158 µs | 6 991 µs | **−2%** |
+
+A per-padded-slot cost would fall by roughly 97% when the slot count drops 32×.
+It falls by 2%. **The fixed term is block-table and dispatch overhead, not
+padding**, and the request-dimension mechanism is established: Ragged Paged
+Attention does no work for padded request slots.
+
+This also runs the high-power version of §4.1's test. That paired experiment used
+n=8 and n=9, where a fixed 256-slot cost would have been ~8% of attention time;
+at n=1 it would be ~42%, and at n=1 the measured difference is **−0.9%**. The
+0.0% in §4.1 was not a low-power result hiding an effect — the effect is absent
+where it would have been largest.
 
 **An operator profile**, which unlike the roofline is a direct observation of
 where time went. Share of TPU device time:
