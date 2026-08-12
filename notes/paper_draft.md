@@ -835,10 +835,12 @@ and multi-host topology are unmeasured, and both change what padding hides under
 §4.8 argues analytically that the regime map is a function of batch size and
 dtype rather than parameter count, for dense weight-stationary decode only.
 
-**The low-batch token regime is the gap that matters.** The ~85% paid share at
-n≤2 rests on one boundary with no interval, and every recommendation we decline
-to make about interactive serving rests on it. It is the cheapest experiment left
-and we did not run it.
+**The low-batch token regime is measured at one concurrency only.** The ~85% paid
+share at n≤2 still rests on one boundary with no interval (§4.3). §4.9 tests the
+regime directly and finds a finer ladder pays there, but at n=2 alone: we do not
+locate the concurrency at which the benefit crosses zero, and that crossing is
+what decides which of the two ladder recommendations applies to a given
+deployment. A sweep over n is the cheapest experiment left.
 
 **No production trace.** §4.4's four length distributions are parametric families
 and were not matched on offered tokens, which is why we withdraw the range they
