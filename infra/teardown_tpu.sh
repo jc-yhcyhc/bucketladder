@@ -101,3 +101,9 @@ log "deleting…"
 log "deleted. Billing stopped."
 log ""
 log "Now record the billed VM-hours for this session in DECISIONS.md."
+
+# Disarm any backstop this session armed. Belt and braces alongside the
+# timestamp scoping in infra/deadman.sh: once the VM is gone deliberately, no
+# switch should still be counting down toward a VM name that a later session
+# may reuse.
+pkill -f "tpu-vm delete ${TPU_NAME:-bucketladder-tpu}" 2>/dev/null || true

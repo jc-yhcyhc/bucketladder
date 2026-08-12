@@ -395,12 +395,19 @@ account cannot accommodate at any batch size, let alone at the ridge. The claim
 that every cell is memory-bound is **withdrawn on that evidence alone**.
 
 The n=256 column corroborates and is not required: MFU 5.1% against a predicted
-49%, bandwidth 11.1%. We attach the caveat rather than burying it — 298 ms of
-queue time means the running batch was smaller than 256 for part of the window,
-so if the effective batch never reached the ridge, that column is consistent with
-the bandwidth account rather than fatal to it. **The frontier table is withdrawn
-regardless**, because it was a prediction about a regime we cannot currently
-measure cleanly. The
+49%, bandwidth 11.1%. Its caveat has since been half-resolved. Sampling
+`vllm:num_requests_running` throughout the window shows the ladder **is** fully
+reachable — under a synchronised launch, n=128 and n=256 both reach and hold
+their full requested batch, so the 298 ms of queue time in the sweep above was
+our arrival pattern again, the same artifact as the prefill splits in §4.3, not a
+capacity limit.
+
+That establishes reachability, not cleanliness: the decode numbers in the table
+were themselves taken under the old launcher, with the queueing present. They
+should be re-measured under a synchronised launch before anyone leans on them,
+and we have not done that. **The frontier table stays withdrawn** — it predicted
+49% MFU in a regime where the cleanest reading we have says 5.1%, and no
+launcher change rescues an order of magnitude. The
 roofline retains one honest use, byte accounting: 2.01 GB of weights crosses HBM
 every decode step regardless of batch, which is 99% of bytes moved at n≤2 and
 falls below half by n=64 as KV traffic overtakes it. That is arithmetic about
