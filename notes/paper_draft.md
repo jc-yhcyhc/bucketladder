@@ -169,9 +169,15 @@ Prepared attn request paddings: [256]
 
 The load-bearing evidence is a paired experiment: enabling the flag compiles the
 full ladder — verified in the warmup log — and changes decode by **0.0%**
-(identical to 0.1 ms at n=8 and n=9), because RPA's padded request slots hold no
-KV blocks. Because both arms run on one server under one workload, this
-comparison is insensitive to the noise that affects the table below.
+(identical to 0.1 ms at n=8 and n=9).
+
+**That end-to-end comparison is far less powerful than its point estimate looks.**
+Bootstrapped, the paired difference is +0.00 ms with a 95% interval of
+[−10.7, +10.8] ms at n=8 — **±20% of the decode phase** — so this design could
+not have resolved anything smaller. It excludes a large effect and nothing more.
+The claim rests instead on the operator-level measurement in §4.5, which compares
+attention time directly at 256 versus 8 compiled slots and resolves **−0.9% at
+n=1**, where a per-slot padding cost would have been ~42%.
 
 A second, weaker line of evidence points the same way. If decode padded 9
 sequences up to 16, decode at n=9 would cost what n=16 costs
@@ -253,12 +259,30 @@ fixed batch size and near-fixed sequence length:
 | 8 | 14.3% | 11.8% | [0.2%, 21.0%] | 3 | 3–5 |
 | 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] | 3 | 7–11 |
 
-The intervals are bootstrapped over *boundaries*, not repeats, because with three
-or four boundaries per row that is the dominant source of spread — and they are
-correspondingly weak. Tested pairwise, **only n=4 and n=16 separate.** n=8
-separates from neither neighbour. The n≤2 row rests on a single boundary and we
-do not quote an interval for it at all; it is the least well supported number in
-the paper and also the largest, which is the wrong way round.
+**The rows above are not matched on boundary, and that confounds them.** At fixed
+n=4 the paid share rises with boundary size — 10.0% at 512→1024 to 24.8% at
+4096→8192 — so which boundaries a row contains shifts it independently of batch
+size. The sets are not the same: n=8 lacks 512→1024, the *lowest*-paying
+boundary, and n=16 lacks 4096→8192, the *highest*. Both omissions push in the
+same direction and **exaggerate the decline the table is used to show.** This is
+the error class §6 names as the project's dominant one, appearing in the headline
+table, and we found it only when a reviewer asked which boundaries each row used.
+
+Restricted to the two boundaries present in every row:
+
+| n | 1024→2048 | 2048→4096 | mean |
+|---|---|---|---|
+| 4 | 22.1% | 24.0% | **23.1%** |
+| 8 | 0.2% | 21.0% | **10.6%** |
+| 16 | −2.7% | +0.5% | **−1.1%** |
+
+**The decline survives matching**, and the matched n=8 mean is 10.6% rather than
+14.3%. Bootstrapping over two boundaries is not worth reporting as an interval;
+what the matched table supports is the ordering, not the levels.
+
+The n≤2 row rests on a single boundary, which we do not identify with either of
+the matched pair, and we quote no interval for it. It is the least well supported
+number in the paper and also the largest, which is the wrong way round.
 
 **We no longer describe this as monotone, and the intervals are stricter than
 the earlier prose.** The defensible statement is ordinal: **substantially paid at
