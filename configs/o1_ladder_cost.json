@@ -1,0 +1,37 @@
+{
+  "experiment": "o1_ladder_cost",
+  "dimension": "D2",
+  "description": "What a compiled shape costs (warmup) against what it buys (latency). VLLM_TPU_BUCKET_PADDING_GAP unset gives 10 token shapes, 512 gives 21. If padding is free, the finer ladder costs warmup and buys nothing \u2014 which turns the paper's characterisation into a recommendation.",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "independent_vars": {
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder granularity IS the experiment: unset compiles 10 token shapes, 512 compiles 21. Varying it is the point."
+  },
+  "prompt_lens": [
+    300,
+    600,
+    1200,
+    3000
+  ],
+  "concurrency": 2,
+  "output_len": 32,
+  "repeats": 9,
+  "warmup_discard": 2,
+  "note_prompt_lens": "Chosen to sit BETWEEN exponential ladder entries (300 pads to 512, 600 to 1024, 1200 to 2048, 3000 to 4096) so the fine ladder has the largest possible advantage. If it cannot win here it cannot win anywhere.",
+  "note_prediction": "REGISTERED. At n=2, where ~85% of nominal token padding is paid, a finer ladder should help if length bucketing's premise holds: prompt lengths of 300/600/1200/3000 pad to 512/1024/2048/4096 on the default ladder but to 512/1024/1536/3072 on gap512, cutting padded tokens by up to 25%. If latency is unchanged, padding is free even in the regime most favourable to the premise, and the coarse ladder strictly dominates on warmup and memory.",
+  "prediction_mechanism": "Target: end-to-end latency at prompt lengths that straddle ladder entries. Lever: ladder granularity, which changes padded tokens per step by up to 2x while leaving real tokens fixed \u2014 so d(padded)/d(lever) is large and nonzero, and the two hypotheses predict opposite signs.",
+  "note_concurrency": "n=2, for two reasons. 8 x 3000 = 24000 tokens exceeds max_num_batched_tokens=8192 and splits the dispatch, which is what produced an empty latency table on the first attempt. And n<=2 is the ONE regime where token padding is measurably paid (~85%, \u00a74.3), so it is where a finer ladder has its best chance. If the 21-shape ladder cannot beat the 10-shape ladder here, it cannot anywhere."
+}
