@@ -22,8 +22,8 @@ absolute percentage error (MAPE) on NPUs; reproduced on TPU with a withheld
 point it gives 5.23%, and a constant-only predictor with no length term matches
 it at batch sizes 1–2 and *beats* it at 4. And **the cost of a compiled step is
 not a property of the step** — roughly 85% of nominal padding is paid at batch
-size 1–2, a median of 23.1% at n=4 and 14.3% at n=8 with ranges that overlap,
-and approximately none at 16.
+size 1–2, and on boundaries matched across rows, 23.1% at n=4, 10.6% at n=8 and
+approximately none at 16.
 
 Padding is abundant, and **how abundant is a property of the workload rather than
 of the stack** — a single-figure characterisation of the stack is not available.
@@ -69,10 +69,12 @@ reports what is true instead.
    and vendor documentation.
 2. **LENS's model form does not transfer to TPU** (§4.2), and the length term it
    turns on never earns its place at any batch size we measured.
-3. **Shape-quantization cost is batch-size-dependent** (§4.3), and our own
-   memory-bandwidth explanation for it is withdrawn on the measurement that
-   contradicts it (§4.5). We name the surviving hypothesis and state what would
-   discriminate it, rather than claiming it is established.
+3. **Shape-quantization cost is batch-size-dependent on the token dimension**
+   (§4.3), while request-dimension padding is free because the ragged attention
+   kernel does no work for padded slots (§4.5) — established by cutting the
+   compiled slot count 32× and measuring a −0.9% change. Our own
+   memory-bandwidth explanation for the same phenomenon is withdrawn, on the
+   measurement that contradicts it.
 4. **Four optimisations measured and rejected** (§5), with the measurement that
    killed each.
 5. **A methodological rule with a mechanical guardrail** (§6), including two
@@ -324,9 +326,13 @@ splits — so we report the sign and the trend rather than a precise value.
 1.61 / 0.75 / 17.18 µs/token at n=1/2/4, but the third value rests on a single
 measurement (points 9.78 / 13.13 / 13.15 at bucket 512), and all three sequence
 lengths there pad to the same sequence *and* token bucket, so no padding model
-predicts a difference. Three independent observations converge on n=4 — this
-slope, the paid-padding fraction, and LENS's failure — and **we could not identify
-what changes there.**
+predicts a difference. Three observations were previously described as converging on n=4 — this slope,
+the paid-padding fraction, and LENS's failure. **They are not three.** LENS's
+per-bucket linear model works at n=1–2 because within-bucket flatness is 0.97 and
+fails at n=4 because flatness has dropped; "flatness dropped" and "the paid share
+dropped" are two descriptions of one measured quantity. The slope rests on a
+single measurement by our own account. What remains is one observation, seen
+twice, plus a fragile third — and **we could not identify what changes there.**
 
 ### 4.4 Padding is abundant, workload-dependent, and mostly free
 
