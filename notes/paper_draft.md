@@ -33,9 +33,11 @@ disabling it changes nothing. Decode, which dominates production serving, is
 well-behaved: per-step cost rises 2.4× while batch size rises 32×, with no
 discontinuity to n=32. Request-dimension padding is free for a data-structure
 reason rather than a bandwidth one: with per-sequence KV held constant, absolute
-attention time rises 9.72× as real requests rise 16×, where a kernel doing work
-for its 256 padded slots would be flat. §4.5 reports the memory-bandwidth account
-we held earlier and the measurement that withdrew it.
+attention time rises 9.72× as real requests rise 16×. That is consistent with
+ragged skipping but does not establish it — a fixed per-slot cost would sit in
+the 7 050 µs intercept, 42% of attention at n=1 — and §4.5 states the one
+profiling run that would decide it. §4.5 also reports the memory-bandwidth
+account we held earlier and the measurement that withdrew it.
 
 We report four optimisations we designed, measured and rejected, and eleven
 invalid inferences we made and caught — most sharing one cause, and now blocked
@@ -440,16 +442,38 @@ device time is:
 | attention (µs) | 16 830 | 26 011 | 45 919 | 85 103 | **163 535** |
 | per real request | 16 830 | 13 005 | 11 480 | 10 638 | 10 221 |
 
-**If the kernel did work for its 256 padded slots, this column would be flat in
-n.** It is not: attention time rises **9.72×** for a 16× rise in real request
-count, dominated by a term proportional to real requests plus a fixed component.
-That is a direct positive observation that Ragged Paged Attention skips padded
-slots, and it is the load-bearing evidence for the request-dimension row of the
-table above. It needs no ridge, no crossover, and no high-batch column — it is
-visible at n≤16 where every measurement is clean.
+**This does not discriminate the hypothesis, and an earlier version of this
+section claimed it did.** The argument was: a kernel doing work for 256 padded
+slots would be flat in n; this is not flat; therefore padded slots are skipped.
+But *flat* was never the alternative. Padded slots hold no KV blocks (§4.1), so
+no kernel could do KV-proportional work for them. The only cost padding can
+plausibly carry is a **fixed per-slot overhead** — walking 256 block-table
+entries, loading 256 metadata records, launching tiles across 256 slots
+regardless of occupancy — and that is constant in n by construction.
 
-It also explains why free padding survived the sharding ablation (§4.7): ragged
-tiling does not care how the weights are split.
+Fitting the table to `T = a·n + b` through its endpoints:
+
+| n | 1 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|
+| measured | 16 830 | 26 011 | 45 919 | 85 103 | 163 535 |
+| 9 780·n + 7 050 | 16 830 | 26 610 | 46 171 | 85 292 | 163 535 |
+
+Residuals are under 2.3%, and **the fixed term is 7 050 µs — 42% of attention
+time at n=1**, falling to 4% at n=16. If that term were a 256-slot padding cost
+it would be 27.5 µs per padded slot. The data is equally consistent with "RPA
+skips padded slots" and with "RPA pays a fixed cost for all 256, large at n=1 and
+negligible by n=16." **We cannot claim the first from this table**, and the
+request-dimension mechanism is therefore *supported but not established*.
+
+The discriminating experiment is one profiling run and we name it rather than
+leave it implicit: enable `ATTN_BUCKETIZED_NUM_REQS` so attention compiles at 8
+slots instead of 256, and profile the attention operator at the same real batch.
+**If `b` collapses, `b` is padding** and the conclusion needs a low-batch
+qualifier; if `b` survives, it is block-table or dispatch overhead and the
+mechanism claim is established. Note the sign this puts on §4.1: that paired
+experiment ran at n=8 and n=9, where a fixed 256-slot cost would be ~8% of
+attention time; at n=1 it would be ~42%, so the high-power version of the same
+test is the one we did not run.
 
 **An operator profile**, which unlike the roofline is a direct observation of
 where time went. Share of TPU device time:
