@@ -38,8 +38,12 @@ slot count from 256 to 8 changes it by **−0.9% at n=1**, where a per-slot padd
 cost would have been ~42%. §4.5 also reports the memory-bandwidth account we held
 earlier and the measurement that withdrew it.
 
-We report four optimisations we designed, measured and rejected, and twelve
-invalid inferences we made and caught — most sharing one cause, and now blocked
+A GPU control on the same vLLM finds batch padding cheap there too — 17% of the
+way to the next capture entry with graphs on, 13% with none — so the padding
+premise is false on both architectures we measured; what CUDA-graph capture
+actually costs is **+108 s of startup**, not per-step time. We report four
+optimisations we designed, measured and rejected, and twelve invalid inferences
+we made and caught — most sharing one cause, and now blocked
 by a mechanical check rather than by intent.
 
 ---
@@ -77,7 +81,12 @@ reports what is true instead.
    measurement that contradicts it.
 4. **Four optimisations measured and rejected** (§5), with the measurement that
    killed each.
-5. **A methodological rule with a mechanical guardrail** (§6), including two
+5. **A measured GPU control** (§8) rather than an analytic one: the same vLLM,
+   the same instrument, an L4 in place of the v5e. It refutes our own
+   architectural claim — batch padding is cheap on both — and relocates the cost
+   BucketServe and LAPS manage to where it actually is, startup rather than
+   per step.
+6. **A methodological rule with a mechanical guardrail** (§6), including two
    headline numbers of our own that it killed.
 
 We do **not** claim an admission-control policy, a ladder redesign, or any
@@ -887,20 +896,49 @@ explicitly controls for and disables.
 architectural response to §4.6's finding — and which bounds our advice to
 co-located deployments.
 
-**BucketServe** and **LAPS** manage length-bucketing overhead on GPU. We do not
-refute them, and we can now say precisely why not. The regime argument is not
-TPU-specific: intensity ≈ batch size on any weight-stationary accelerator, and
-the ridge differs only modestly (v5e ≈240 FLOP/byte, H100 ≈295). What differs is
-architectural — **CUDA-graph capture makes the batch dimension a paid quantity on
-GPU in a way it is not here**, because a graph is captured per shape and replayed,
-so an unseen batch size costs a capture rather than riding inside a compiled
-step. That is the real distinction between this stack and theirs, and stating it
-as architecture is more useful than leaving it as an unmeasured caveat. We have
-not run a GPU control; this is an analytic comparison, not a measurement.
+**BucketServe** and **LAPS** manage length-bucketing overhead on GPU, and we
+measured the comparison rather than asserting it. Same vLLM 0.25.0, same
+measurement, an L4 in place of the v5e:
 
-We bound their transferability. On this stack the padding they
-target is largely not paid, and the batch dimension they would bucket over is
-pinned to a single shape by default.
+| | n=8 | n=9 | n=16 | where n=9 sits | startup |
+|---|---|---|---|---|---|
+| GPU, CUDA graphs on | 10.61 | 10.89 | 12.30 ms/step | **17%** | 118.7 s |
+| GPU, `--enforce-eager` | 19.93 | 20.15 | 21.62 ms/step | **13%** | 10.7 s |
+| TPU, v5e (§4.1) | — | — | — | **−5% / −3% / −3%** | — |
+
+"Where n=9 sits" is the same statistic §4.1 uses: 0% means a batch just above a
+ladder or capture entry costs what the entry below costs, 100% means it costs
+what the entry above costs.
+
+**Our architectural claim was wrong, and we withdraw it.** An earlier draft
+asserted that CUDA-graph capture makes the batch dimension a paid quantity on GPU
+in a way it is not on TPU. It is not paid per step on either: 17% with graphs
+against 13% with no graphs at all, so almost all of the small rise from n=8 to
+n=9 is the batch size itself rather than capture padding. **The padding premise
+behind this family of optimisations is false on both architectures we measured**,
+which is a broader claim than the one we set out to make and a weaker
+explanation — we no longer have an architectural story for a difference that
+turned out not to exist.
+
+**What is paid on GPU is the capture, and it is paid at startup.** Enabling
+graphs costs **+108 seconds** of initialisation — 118.7 s against 10.7 s eager —
+for a set of captured shapes fixed in advance. That is precisely the quantity
+BucketServe and LAPS are managing when they write that "the number of graphs must
+be limited", and it is a *warmup* cost, not a per-step one. The TPU analogue is
+XLA compilation, which we measure at 5–30 minutes for the first bucket and
+30–120 s per additional one.
+
+So the honest cross-architecture statement is: **both stacks pay for shape
+coverage once, up front, and neither pays for it per step.** Work that reduces
+the number of compiled or captured shapes is buying startup time and memory
+footprint; work that routes requests to avoid padding at run time is optimising a
+quantity that is close to free on both. That distinction is what we would want a
+practitioner to take from this paper, and it is not the distinction we predicted.
+
+**Scope.** One GPU (L4, 23 GB), one model, one batch triple. The startup figure
+is specific to vLLM's default capture set. We did not vary the number of captured
+shapes, so the +108 s is one point on a curve BucketServe and LAPS are explicitly
+trading along, not the curve itself.
 
 **Vidur** established simulator-fidelity validation as the standard for this kind
 of work; our holdout discipline follows it.

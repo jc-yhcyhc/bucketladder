@@ -291,6 +291,28 @@ def m16_share(edge: str) -> tuple[float, str]:
                         / (r["padded_ratio"] - r["real_ratio"])), rid
     return float("nan"), ""
 
+def g1(arm: str, field, n: int | None = None) -> tuple[float, str]:
+    """GPU control cells, from the captured JSON rather than the paper's table."""
+    import json as _j  # noqa: PLC0415
+    f = ROOT / "captured" / "session23-gpu-control" / f"g1_{arm}.json"
+    if not f.exists():
+        return float("nan"), ""
+    d = _j.loads(f.read_text())
+    if n is None:
+        return d[field], "g1"
+    for c in d["cells"]:
+        if c["n"] == n:
+            return c[field], "g1"
+    return float("nan"), ""
+
+
+def g1_position(arm: str) -> tuple[float, str]:
+    """Where n=9 sits between n=8 and n=16 -- the same statistic as §4.1."""
+    c = {n: g1(arm, "ms_per_step", n)[0] for n in (8, 9, 16)}
+    if any(v != v for v in c.values()) or c[16] == c[8]:
+        return float("nan"), ""
+    return 100 * (c[9] - c[8]) / (c[16] - c[8]), "g1"
+
 def h1() -> tuple[dict, str]:
     """Recompute the headroom directly rather than trusting a stored table."""
     tot_r = tot_p = 0
@@ -479,6 +501,16 @@ CLAIMS: list[Claim] = [
      lambda: m16_share("n4:1024/2048")),
     ("M16.tiny.n8", "4.5", "TinyLlama paid share n=8, 1024/2048 %", 5.9, 1.5,
      lambda: m16_share("n8:1024/2048")),
+
+    # --- session 23: the GPU control (review's highest-value experiment) -----
+    ("G1.pos.graphs", "8", "GPU n=9 position, graphs on %", 17.0, 2.0,
+     lambda: g1_position("graphs")),
+    ("G1.pos.eager", "8", "GPU n=9 position, enforce-eager %", 13.0, 2.0,
+     lambda: g1_position("eager")),
+    ("G1.startup.graphs", "8", "GPU startup with graphs, s", 118.7, 3.0,
+     lambda: g1("graphs", "startup_s")),
+    ("G1.startup.eager", "8", "GPU startup eager, s", 10.7, 2.0,
+     lambda: g1("eager", "startup_s")),
 
     # --- the analytic frontier (review M1/Q3) -------------------------------
     ("M13.margin.256", "4.5", "margin to ridge at 256-token context %", 10.0, 1.0,
