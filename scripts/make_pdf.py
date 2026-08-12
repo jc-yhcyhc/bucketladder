@@ -80,12 +80,32 @@ def inline(t: str) -> str:
     return t
 
 
+# A figure reference in the draft looks like
+#   **[Figure 1 — `figures/fig1_lens.png`]** *caption text...*
+# Thirteen drafts rendered that as literal text because this converter had no
+# image handling at all. The PNGs existed on disk the whole time.
+FIGRE = re.compile(r"^\*\*\[Figure (\d+)[^\]]*?`?([\w./-]+\.png)`?\]\*\*\s*(.*)$")
+
+
 def convert(md: str) -> str:
     lines = md.split("\n")
     body: list[str] = []
     i = 0
     while i < len(lines):
         ln = lines[i]
+
+        # A figure line: emit an actual float, not the literal markdown.
+        mfig = FIGRE.match(ln)
+        if mfig:
+            num, path, cap = mfig.groups()
+            i += 1
+            while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "|", "```")):
+                cap += " " + lines[i].strip(); i += 1
+            cap = inline(cap.strip().strip("*"))
+            body.append("\\begin{figure}[t]\\centering\n"
+                        f"\\includegraphics[width=\\columnwidth]{{{path}}}\n"
+                        f"\\caption{{{cap}}}\n\\end{{figure}}")
+            continue
 
         if ln.startswith("```"):
             block = []
@@ -101,7 +121,11 @@ def convert(md: str) -> str:
 
         m = re.match(r"^(#{1,4})\s+(.*)$", ln)
         if m:
-            lvl, txt = len(m.group(1)), inline(m.group(2))
+            # LaTeX numbers sections itself, and the markdown heading carries its
+            # own number, so "### 4.8 Model scale" rendered as "5.8 4.8 Model
+            # scale". Strip the authored number and let LaTeX own it.
+            raw = re.sub(r"^\d+(\.\d+)*\.?\s+", "", m.group(2))
+            lvl, txt = len(m.group(1)), inline(raw)
             cmd = {1: "title", 2: "section", 3: "subsection", 4: "subsubsection"}[lvl]
             body.append(f"\\{cmd}{{{txt}}}" if cmd != "title"
                         else f"\\begin{{center}}\\LARGE\\bfseries {txt}\\end{{center}}")
@@ -185,6 +209,7 @@ PREAMBLE = r"""\documentclass[10pt,twocolumn]{article}
         columns=fullflexible,xleftmargin=2pt}
 \setlength{\columnsep}{18pt}
 \usepackage{sectsty}\allsectionsfont{\sffamily}
+\graphicspath{{GRAPHICSROOT/}}
 \pagestyle{plain}
 \begin{document}
 """
@@ -200,7 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     if not shutil.which("pdflatex"):
         print("[pdf] pdflatex not found", file=sys.stderr); return 1
     try:
-        tex = PREAMBLE + convert(args.source.read_text()) + "\n\\end{document}\n"
+        root = args.source.resolve().parent.parent
+        tex = (PREAMBLE.replace("GRAPHICSROOT", str(root))
+               + convert(args.source.read_text()) + "\n\\end{document}\n")
     except ValueError as e:
         print(f"[pdf] {e}", file=sys.stderr); return 1
 
