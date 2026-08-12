@@ -15,10 +15,10 @@ on a production TPU stack and, with the same serving framework and the same
 instrument, on a GPU.
 
 **The premise is largely false, and it is false on both architectures.** A batch
-placed just above a compiled entry costs what the entry *below* costs, not the one
-above: on TPU it sits 3–5% *under* the lower entry, and on GPU 17% of the way to
-the upper one with graph capture enabled against 13% with capture disabled
-entirely — so almost all of even that is the batch size, not the padding. What is
+placed just above a compiled entry costs about what the entry *below* costs: on
+TPU it sits 3–5% *under* the lower entry, and on GPU padding a batch from 8 up to
+a captured 16 costs **67 µs — 0.6% of the step**, isolated by differencing
+against an eager arm whose constant launch overhead cancels to 9 µs. What is
 paid is **shape coverage itself, once, at warmup**: enabling CUDA-graph capture
 costs **+108 s** of startup, and XLA compiles a TPU ladder in 5–30 minutes for the
 first bucket. Work that reduces the number of compiled or captured shapes buys
@@ -232,10 +232,12 @@ of the two calibration points, no length term at all:
 | 4 | 19.77% | **14.80%** |
 
 At n=1–2 the within-bucket curve is nearly flat (flatness 0.97), so any two-point
-fit is near-perfect and a constant is within 0.6 percentage points. The
-near-perfect accuracy there is therefore **not evidence that the model form
-transfers**. At n=4 the length term is *actively harmful*. It earns its place at
-no batch size we measured.
+fit is near-perfect. LENS does beat a constant there — 0.38% against 0.96% — but
+the absolute gap is 0.6 percentage points on errors already below 1%, which is
+immaterial rather than absent, and it is not evidence that the model **form**
+transfers. At n=4 the length term is *actively harmful*. The defensible statement
+is that its contribution is negligible where errors are already tiny and negative
+where they are large.
 
 **The failure is not an artifact of which points were fitted.** LENS specifies
 two measurements per bucket but not which two. Over all three choices per cell,
@@ -442,26 +444,19 @@ launch, so the queueing in the sweep above was our arrival pattern, as in §4.3.
 The decode numbers there were still taken under the old launcher and want
 re-measuring; no conclusion rests on them.)
 
-**One mechanism per dimension, stated once.** The paper measures two different
-padding dimensions and they do not share an explanation, which earlier drafts
-conflated:
-
-| dimension | is padding paid? | mechanism |
-|---|---|---|
-| **D3, requests/step** | no, at every batch size measured | RPA does no work for padded request slots — a data-structure property |
-| **D2, tokens/step** | yes in prefill, falling with batch | arithmetic intensity: padded tokens are real FLOPs once the step is past the ridge |
-
-§4.3's paid-share table is the **token** dimension in prefill. §4.8's dtype
-prediction applies to the **token** dimension only, because quantization moves the
-ridge and the ridge is not in the request-dimension story at all. Where §4.7
-concludes "the result is about the weight floor," it is describing the level of
-decode step cost, not why request padding is free.
+**One mechanism per dimension.** The two padding dimensions do not share an
+explanation, and earlier drafts conflated them. **D3, requests/step:** free at
+every batch size measured, because RPA does no work for padded request slots — a
+data-structure property. **D2, tokens/step:** paid in prefill and falling with
+batch, because padded tokens are real FLOPs. §4.3's table is D2; §4.8's dtype
+prediction applies to D2 only, since quantization moves the arithmetic-intensity
+ridge and the ridge is not in the D3 story.
 
 **What the request-dimension mechanism is, measured directly.**
 `ATTN_BUCKETIZED_NUM_REQS` is off, so attention executes at 256 request slots
 whatever the batch — and the operator profile says what that costs. With prompt
-and output length fixed, so per-sequence KV is constant, absolute attention
-device time is:
+and output length fixed, so per-sequence KV is constant, attention device time
+**aggregated over the full 64-step generation** (not per step) is:
 
 | n | 1 | 2 | 4 | 8 | 16 |
 |---|---|---|---|---|---|
@@ -619,65 +614,33 @@ tiling does not care how the weights are split.
 
 ### 4.8 Model scale does not move the regime map; dtype does
 
-A registered prediction failed here, and the failure is the result. TinyLlama-1.1B
-has a 3.6× smaller per-chip weight floor than Qwen3-4B, so if the mechanism is
-that floor, its paid share should be higher. It is lower — −1.2% and 13.4% at
-n=4, −1.1% and 5.9% at n=8.
+A second registered prediction failed here. TinyLlama-1.1B has a 3.6× smaller
+per-chip weight floor than Qwen3-4B, so if the mechanism were that floor its paid
+share should be higher. It is lower — −1.2% and 13.4% at n=4, −1.1% and 5.9% at
+n=8.
 
-The prediction was wrong because model size is the wrong lever. For dense,
-weight-stationary decode, bytes ≈ 2·params and FLOPs per token ≈ 2·params, so
+Model size is the wrong lever. For dense weight-stationary decode, bytes ≈
+2·params and FLOPs per token ≈ 2·params, so both models sit at **1.00
+FLOP/byte/token** and **arithmetic intensity is the batch size, independent of
+parameter count**. The ridge is a property of the chip (v5e: 197 TFLOP/s ÷
+819 GB/s ≈ 240 FLOP/byte); shrinking the model shrinks the floor and the work in
+the same proportion. This answers the "one primary model" limitation
+analytically for that regime — it breaks for mixture-of-experts, where bytes
+scale with distinct experts touched, and at long context, where KV rather than
+weights sets the floor.
 
-| | weights/chip | FLOPs/token/chip | intensity |
-|---|---|---|---|
-| Qwen3-4B | 2.01 GB | 2.01 GF | 1.00 FLOP/byte/token |
-| TinyLlama-1.1B | 0.55 GB | 0.55 GF | 1.00 FLOP/byte/token |
+Two cautions. The identity is derived for *decode*, while the paid-share numbers
+above are *prefill* (§4.3) — applying it to them is the domain error §6 classes
+as our twelfth, and we report the numbers as measurements with the explanation
+withdrawn. And the intensity argument explains why model size should not move the
+paid share, not why it moved *down*; the likely reason is that non-weight fixed
+costs are a larger fraction of a 0.55 GB model's step, leaving more slack for
+padding to hide in.
 
-**Arithmetic intensity is the batch size, independent of parameter count.** The
-ridge is a property of the chip (v5e: 197 TFLOP/s ÷ 819 GB/s ≈ 240 FLOP/byte),
-and shrinking the model shrinks the floor and the work in the same proportion.
-
-This partly answers the "one primary model" limitation analytically: the regime
-map is a function of batch size and dtype, not of model scale. **Scope:** it holds
-for dense weight-stationary decode. It breaks for mixture-of-experts, where bytes
-read scale with the distinct experts touched so intensity falls below the batch
-size, and at long context, where KV bytes rather than weights set the floor. It
-does not extend to prefill.
-
-**A scope error we made in this very section, and the eleventh instance of the
-class §6 catalogs.** The paid-share numbers above are §4.3's quantity, and §4.3
-is emphatic that those are *prefill* steps. The intensity identity used to
-explain them is derived for dense weight-stationary *decode* and this section
-closes by saying it does not extend to prefill. Applying it here is exactly the
-lever/target mismatch that registration was added to catch — and registration did
-not catch it, because the check we added tests whether the lever moves the
-target, not whether the argument's domain matches the data's. The comparison
-needs redoing on decode steps, or replacing with a prefill argument in which
-FLOPs scale with padded tokens and the identity does not hold. Until then the
-n=4/n=8 numbers below stand as measurements and the explanation attached to them
-does not.
-
-**Why the paid share moved *down* rather than staying flat** is a separate
-question the intensity argument does not answer. The likely reason is that
-non-weight fixed costs — collectives, which our operator profile puts at a flat
-~13.4%, plus dispatch and attention — are a larger fraction of a 0.55 GB model's
-step, leaving *more* slack for padding to hide in, not less.
-
-**Quantization is the lever that does move it — on the token dimension only.**
-W8 weights halve bytes and leave FLOPs alone, doubling intensity per token, so
-the arithmetic-intensity crossing moves from batch ≈ 240 to ≈ 120.
-
-An earlier draft registered this as a prediction about **request**-dimension
-padding: "free across the entire compiled ladder in bf16, and int8 halves the
-batch size at which that stops." **That prediction is withdrawn as
-unformulable.** Under the mechanism §4.5 establishes — RPA does no work for
-padded request slots, a data-structure property — there is no batch size at
-which free request padding stops, in any dtype, so the sentence does not name a
-possible outcome. It was written while the withdrawn bandwidth account was still
-in force and survived the account's retraction by two sections.
-
-The correctly-scoped version is: **registered prediction — under W8 weights the
-TOKEN-dimension paid share at a fixed boundary rises, because the crossing moves
-to a batch we can reach.** We have not run it.
+**Dtype is the lever that does move it, on the token dimension.** W8 weights halve
+bytes and leave FLOPs alone, doubling intensity per token, so the crossing moves
+from batch ≈ 240 to ≈ 120. **Registered prediction: under W8, the token-dimension
+paid share at a fixed boundary rises.** We have not run it.
 
 ---
 
@@ -846,47 +809,62 @@ co-located deployments.
 
 **BucketServe** and **LAPS** manage length-bucketing overhead on GPU, and we
 measured the comparison rather than asserting it. Same vLLM 0.25.0, same
-measurement, an L4 in place of the v5e:
+instrument, an L4 in place of the v5e:
 
-| | n=8 | n=9 | n=16 | where n=9 sits | startup |
-|---|---|---|---|---|---|
-| GPU, CUDA graphs on | 10.61 | 10.89 | 12.30 ms/step | **17%** | 118.7 s |
-| GPU, `--enforce-eager` | 19.93 | 20.15 | 21.62 ms/step | **13%** | 10.7 s |
-| TPU, v5e (§4.1) | — | — | — | **−5% / −3% / −3%** | — |
+| arm | n=8 | n=9 | n=16 | 8→9 | 8→16 | startup |
+|---|---|---|---|---|---|---|
+| CUDA graphs on | 10.605 | 10.887 | 12.298 | **0.283** | **1.693** | 118.7 s |
+| `--enforce-eager` | 19.934 | 20.150 | 21.618 | **0.215** | **1.684** | 10.7 s |
 
-"Where n=9 sits" is the same statistic §4.1 uses: 0% means a batch just above a
-ladder or capture entry costs what the entry below costs, 100% means it costs
-what the entry above costs.
+**The increments are the measurement; the levels are not.** Eager execution pays
+a constant per-op launch overhead — the levels differ by roughly 9.3 ms
+throughout — and that constant cancels in any increment. It does so to within
+**9 µs on the 8→16 step** (1.693 vs 1.684 ms), which is the control this
+comparison needs and which we did not design: it says the two arms measure the
+same underlying work plus an offset, so their difference isolates what capture
+adds.
 
-**Our architectural claim was wrong, and we withdraw it.** An earlier draft
-asserted that CUDA-graph capture makes the batch dimension a paid quantity on GPU
-in a way it is not on TPU. It is not paid per step on either: 17% with graphs
-against 13% with no graphs at all, so almost all of the small rise from n=8 to
-n=9 is the batch size itself rather than capture padding. **The padding premise
-behind this family of optimisations is false on both architectures we measured**,
-which is a broader claim than the one we set out to make and a weaker
-explanation — we no longer have an architectural story for a difference that
-turned out not to exist.
+On that basis, **padding a batch from 8 up to the captured entry at 16 costs
+about 67 µs** — the 0.283 ms increment with graphs against 0.215 ms without.
+That is **0.6% of a 10.9 ms step, or 4.0% of the nominal padding** implied by
+rounding 9 up to 16. Run-time batch padding is close to free on GPU as well as
+on TPU.
 
-**What is paid on GPU is the capture, and it is paid at startup.** Enabling
-graphs costs **+108 seconds** of initialisation — 118.7 s against 10.7 s eager —
-for a set of captured shapes fixed in advance. That is precisely the quantity
-BucketServe and LAPS are managing when they write that "the number of graphs must
-be limited", and it is a *warmup* cost, not a per-step one. The TPU analogue is
-XLA compilation, which we measure at 5–30 minutes for the first bucket and
-30–120 s per additional one.
+**We state the cross-architecture comparison as a bound, not an equality.** §4.1's
+TPU statistic carries intervals of roughly ±50 percentage points, so this table
+cannot resolve a difference between the architectures; what both support is that
+the paid share is small on each. An earlier draft of this section reported only
+the normalised "17% versus 13%" figures, which turn on a 4-point difference with
+no repeats and no interval — a violation of the policy §2 states, in the
+paper's own headline claim. The millisecond increments above are the honest
+form, and they remain single measurements: **three batch points, one GPU, no
+repeats.**
 
-So the honest cross-architecture statement is: **both stacks pay for shape
-coverage once, up front, and neither pays for it per step.** Work that reduces
-the number of compiled or captured shapes is buying startup time and memory
-footprint; work that routes requests to avoid padding at run time is optimising a
-quantity that is close to free on both. That distinction is what we would want a
-practitioner to take from this paper, and it is not the distinction we predicted.
+**What is paid is the capture, and it is paid at startup.** Enabling graphs costs
+**+108 s** of initialisation — 118.7 s against 10.7 s — for a capture set fixed
+in advance. That is precisely the quantity BucketServe and LAPS manage when they
+write that the number of graphs must be limited, and it is a warmup cost. The TPU
+analogue is XLA compilation: 5–30 minutes for the first bucket and 30–120 s per
+additional one.
 
-**Scope.** One GPU (L4, 23 GB), one model, one batch triple. The startup figure
-is specific to vLLM's default capture set. We did not vary the number of captured
-shapes, so the +108 s is one point on a curve BucketServe and LAPS are explicitly
-trading along, not the curve itself.
+So the cross-architecture statement is: **both stacks pay for shape coverage once,
+up front, and neither pays materially for it per step.**
+
+**Where, then, do the reported gains come from?** If the padding premise is false
+on both architectures, systems reporting end-to-end improvements from bucketing
+are improving something else, and §5 supplies a candidate from our own data: the
+one positive measurement in this work — release timing saving 26% of TPU time at
+25 req/s (p=0.001, six paired seeds) — is **dynamic batching**, an
+arrival-and-composition effect, not a shape effect. Bucketing schemes change
+which requests occupy a step together, and that is worth something independent of
+padding. We cannot separate the two in others' reported settings, but we can say
+that our own shape-motivated intervention paid off through a mechanism that had
+nothing to do with shape, and that a bucketing result which does not control for
+batch composition cannot distinguish the two.
+
+**Scope.** One GPU (L4, 23 GB), one model, three batch points, no repeats. The
+startup figure is one sample at vLLM's default capture set; we did not vary the
+number of captured shapes, which is the axis BucketServe and LAPS trade along.
 
 **Vidur** established simulator-fidelity validation as the standard for this kind
 of work; our holdout discipline follows it.

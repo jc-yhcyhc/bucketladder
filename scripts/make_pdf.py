@@ -172,7 +172,13 @@ def convert(md: str) -> str:
 
 PREAMBLE = r"""\documentclass[10pt,twocolumn]{article}
 \usepackage[margin=0.75in]{geometry}
+% cmap emits ToUnicode CMaps and lmodern supplies a font with real Unicode
+% mappings for the fi/fl ligatures. Without both, "flatness" extracts as
+% "latness" and "prefill" as "prell" -- a reviewer cannot text-search the
+% submission, which a reviewer told us.
+\usepackage{cmap}
 \usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage[utf8]{inputenc}
 \usepackage{textcomp,amsmath,amssymb,listings,parskip,graphicx}
 \lstset{basicstyle=\ttfamily\scriptsize,breaklines=true,frame=single,
