@@ -236,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         (d / "p.tex").write_text(tex)
         for _ in range(2):                      # twice, so any refs settle
             r = subprocess.run(["pdflatex", "-interaction=nonstopmode", "p.tex"],
-                               cwd=d, capture_output=True, text=True)
+                               cwd=d, capture_output=True, text=True,
+                               errors="replace")
         pdf = d / "p.pdf"
         if not pdf.exists():
             tail = "\n".join(r.stdout.splitlines()[-25:])
