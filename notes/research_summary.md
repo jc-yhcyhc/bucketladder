@@ -1,6 +1,6 @@
 # Research summary — what was done, and what it showed
 
-**Eighteen hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
+**Twenty hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
 verified numerical claims, 192 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
