@@ -86,6 +86,13 @@ if $FIGURES; then
   step "figures" "$PY" scripts/make_figures.py --out "$HERE/figures"
 fi
 
+# 7. The manuscript itself. Every check in the linter exists because that defect
+#    reached a reader -- figures that never rendered, doubled section numbers,
+#    unextractable ligatures, notebook voice. Reading the draft again is not a
+#    control, which is the argument §6 makes about mechanisms, applied here.
+step "paper lint (source + rendered PDF)" "$PY" scripts/lint_paper.py \
+    notes/paper_draft.md paper.pdf
+
 printf '\n'
 if [[ $FAILED -eq 0 ]]; then
   printf '\033[32mALL REPRODUCED\033[0m — every paper number regenerated from captured/\n'

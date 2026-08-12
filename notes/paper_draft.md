@@ -1,7 +1,7 @@
 # Shape Coverage Is a Warmup Cost: Compiled-Shape Padding in Production TPU and GPU Serving
 
-Stack: vLLM 0.25.0 on `v5litepod-4` (`tpu-inference` 0.25.0, JAX 0.10.2, TP=4)
-and on an NVIDIA L4. Twenty-two hardware sessions, **[redacted]**.
+Stack: vLLM 0.25.0 on `v5litepod-4` (`tpu-inference` 0.25.0, JAX 0.10.2,
+tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-two hardware sessions, **[redacted]**.
 
 ---
 
@@ -21,7 +21,7 @@ a captured 16 costs **67 µs — 0.6% of the step**, isolated by differencing
 against an eager arm whose constant launch overhead cancels to 9 µs. What is
 paid is **shape coverage itself, once, at warmup**: enabling CUDA-graph capture
 costs **+108 s** of startup, and XLA compiles a TPU ladder in 5–30 minutes for the
-first bucket. Work that reduces the number of compiled or captured shapes buys
+first bucket; neither is a per-step or high-bandwidth-memory (HBM) cost. Work that reduces the number of compiled or captured shapes buys
 startup time and memory; work that routes requests to avoid run-time padding is
 optimising something close to free.
 
@@ -29,7 +29,8 @@ Three findings support this. **The request ladder a TPU stack reports is not the
 one it executes**: a default-off environment flag pins the attention kernel to a
 single 256-request shape, enabling the advertised six-entry ladder changes decode
 by 0.0%, and the compiler writes the padding into the kernel's own name. **Padded
-request slots cost nothing because the ragged attention kernel skips them** — a
+request slots cost nothing because the Ragged Paged Attention (RPA) kernel skips
+them** — a
 data-structure property, established by cutting the compiled slot count 32× for a
 −0.9% change. We test the memory-bandwidth explanation the same data invites and
 reject it. **Token padding is different**: it is real arithmetic, paid at 23.1% of
@@ -213,7 +214,8 @@ default configuration had already excluded.
 
 ### 4.2 Reproducing a published latency predictor on TPU
 
-LENS predicts NPU inference latency to 2.15% MAPE using a per-bucket
+LENS predicts NPU inference latency to 2.15% mean absolute percentage
+error (MAPE) using a per-bucket
 `intercept + slope × length` fitted from two end-to-end measurements per bucket.
 We reproduced its protocol on TPU across 5 buckets × 3 batch sizes, 7 repeats per
 point, withholding a mid-bucket point from each fit: **MAPE 5.23%, worst 22.4%**,
@@ -349,7 +351,8 @@ twice, plus a fragile third — and **we could not identify what changes there.*
 
 How much padding a stack executes is a property of the workload, not of the
 stack. Across four prompt-length distributions at one Poisson arrival rate
-(8 req/s, `output_len=64`, 120 requests each):
+(8 req/s, `output_len=64`, 120 requests each), reporting time to first token
+(TTFT) and inter-token latency (ITL):
 
 | length distribution | CV | padded share of executed tokens | TTFT p50 / p95 | ITL p50 / p95 |
 |---|---|---|---|---|
