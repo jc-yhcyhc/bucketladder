@@ -117,26 +117,28 @@ points calibrate, the n=4 error swings up to 44.8 pp but its **minimum is still
 
 ### 3.3 Shape-quantization cost depends on batch size
 
-**These are PREFILL steps.** The distinction is load-bearing rather than
-expository: decode stays memory-bound to a batch of roughly 240 (below), so if
-these were decode steps, 85% of padding being paid at n=1–2 would contradict the
-mechanism. In prefill the step carries hundreds to thousands of tokens, is past
-the ridge, and both FLOPs and attention scale with padded tokens — which is why
-padding is paid there and not in decode. Share of nominal padding paid,
-straddling a compiled boundary at fixed batch size and near-fixed sequence
-length:
+**These are PREFILL steps, on the TOKEN dimension.** The distinction is
+load-bearing: the request dimension (§3.5) is free by ragged skipping at any
+batch size, so if these were request-dimension numbers they would contradict the
+mechanism outright. A prefill step carries hundreds to thousands of tokens and
+FLOPs scale with padded tokens, which is why token padding is paid here.
+Share of nominal padding paid, straddling a compiled boundary at fixed batch size
+and near-fixed sequence length:
 
-| batch size | median share paid | range across boundaries | clean cells |
+| batch size | median | 95% CI over boundaries | boundaries |
 |---|---|---|---|
-| 1–2 | **~85%** | — | — |
-| 4 | 23.1% | [10.0%, 24.8%] | 4 |
+| 1–2 | **~85%** | *not computed* | 1 |
+| 4 | 23.1% | [13.5%, 24.4%] | 4 |
 | 8 | 14.3% | [0.2%, 21.0%] | 3 |
 | 16 | **−2.7%** | [−15.4%, +0.5%] | 3 |
 
-**We no longer describe this as monotone.** The n=4 and n=8 ranges overlap
-substantially, so those two levels are not separable with the data we have; only
-the n≤2 and n=16 ends are. The defensible statement is **high at n≤2,
-intermediate and not separable at n=4–8, indistinguishable from zero at n=16**.
+Tested pairwise, **only n=4 and n=16 separate**; n=8 separates from neither. The
+n≤2 row rests on one boundary and gets no interval — the least supported number
+here and the largest.
+
+**We no longer describe this as monotone.** The defensible statement is ordinal:
+substantially paid at n≤2, intermediate at n=4–8, indistinguishable from zero at
+n=16, with only the n=4/n=16 contrast surviving at interval level.
 The n=8 row is also a correction: it was previously 16%, computed with split
 dispatches pooled into the median. Recomputed with them excluded it is 14.3% —
 the conclusion survives, the number moved.
@@ -212,9 +214,14 @@ mechanism**, computed offline for $0:
 | 8 | 421 GB/s | 51.4% | 1.68% | memory |
 | 32 | 258 GB/s | 31.4% | 3.65% | memory |
 
-**2.01 GB of weights crosses HBM every decode step regardless of batch size** —
-99% of all bytes at n≤2, 89% at n≥16. Every cell is memory-bound; MFU never
-exceeds 3.65%. Additional sequences, real or padded, are nearly free until that
+**The memory-bandwidth account is withdrawn.** Measured to n=64 (clean, 0.1 ms
+queue), bandwidth utilisation *falls* — 61.4% → 52.1% → 31.2% → 21.4% — where a
+memory-bound step would sit near the roof. What replaces it is a direct
+observation: with per-sequence KV constant, absolute attention device time rises
+**9.72× as real requests rise 16×**, where a kernel doing work for its 256 padded
+slots would be flat. Request-dimension padding is free because Ragged Paged
+Attention skips it. The byte accounting survives on its own terms —
+2.01 GB of weights crosses HBM every decode step regardless of batch size — Additional sequences, real or padded, are nearly free until that
 floor is left. This is the memory-bound regime **Pope et al.** characterise
 analytically; the measurement lands in it, and the contribution is the
 consequence for compiled-shape ladders, not the regime.
