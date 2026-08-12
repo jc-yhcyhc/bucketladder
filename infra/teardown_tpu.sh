@@ -52,6 +52,24 @@ command -v gcloud >/dev/null 2>&1 || {
 }
 
 # ── Status ──────────────────────────────────────────────────────────────────
+# Returns 0 if no stray TPU is billing in any swept zone, 1 if one is found.
+sweep_other_zones() {
+  local z found stray=0
+  for z in ${TEARDOWN_SWEEP_ZONES:-}; do
+    [[ "$z" == "$ZONE" ]] && continue
+    found=$(gcloud compute tpus tpu-vm list --zone="$z" --project="$PROJECT" \
+              --format='value(name)' 2>/dev/null | grep -Fx "$TPU_NAME" || true)
+    if [[ -n "$found" ]]; then
+      log "STRAY: '$TPU_NAME' EXISTS in $z and IS BILLING."
+      log "       Re-run as:  ZONE=$z $0 --yes"
+      stray=1
+    fi
+  done
+  (( stray )) && return 1
+  log "swept zones [${TEARDOWN_SWEEP_ZONES:-none}] — nothing billing in any of them."
+  return 0
+}
+
 exists=unknown
 if command -v gcloud >/dev/null 2>&1 && [[ -n "${PROJECT:-}" ]]; then
   if tpu_exists; then
@@ -64,7 +82,9 @@ fi
 if [[ "$STATUS_ONLY" == "true" ]]; then
   case "$exists" in
     yes)     log "'$TPU_NAME' EXISTS in $ZONE and is BILLING. Run this script without --status." ; exit 1 ;;
-    no)      log "'$TPU_NAME' does not exist in $ZONE. Nothing billing." ; exit 0 ;;
+    no)      log "'$TPU_NAME' does not exist in $ZONE."
+             sweep_other_zones || { log "NOT all-clear."; exit 1; }
+             log "Nothing billing." ; exit 0 ;;
     unknown) log "could not determine state (no gcloud or no project set)." ; exit 0 ;;
   esac
 fi
@@ -80,6 +100,17 @@ fi
 
 if [[ "$exists" == "no" ]]; then
   log "'$TPU_NAME' does not exist in $ZONE — nothing to delete."
+  # "Nothing to delete" is the most dangerous sentence this script can print,
+  # because it is what it says both when nothing is billing and when something
+  # is billing SOMEWHERE ELSE. Session 25 provisioned in us-west4-a (the zone
+  # with v5e capacity that day), ran teardown with ZONE unset, and got exactly
+  # this message and exit 0 while a v5litepod-4 sat READY at $4.80/hr. Only a
+  # manual `tpu-vm list` caught it. So never report all-clear on the strength of
+  # one zone: sweep the others before claiming nothing is billing.
+  if ! sweep_other_zones; then
+    log "NOT all-clear — a TPU is billing in another zone (see above)."
+    exit 1
+  fi
   exit 0
 fi
 

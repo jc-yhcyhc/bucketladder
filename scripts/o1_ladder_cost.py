@@ -78,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--warmup-seconds", type=float, required=True,
                     help="measured externally: process start -> /health 200")
     ap.add_argument("--base-url", default="http://localhost:8000")
+    ap.add_argument("--order", required=True,
+                    help="which position this arm ran in its pair (e.g. 'AB1' "
+                         "for first of the default-then-gap512 pair). Arm order "
+                         "and arm were confounded in the first measured pair; "
+                         "running both orders separates them.")
     ap.add_argument("--results-root", type=pathlib.Path, default=None)
     args = ap.parse_args(argv)
 
@@ -100,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(req)} request shapes")
 
         # Steady-state latency at matched load, so "no latency cost" is measured.
-        rows = []
+        rows: list[dict] = []
+        reps: list[dict] = []
         for plen in cfg["prompt_lens"]:
             lat = []
             for rep in range(cfg["repeats"] + cfg["warmup_discard"]):
@@ -122,10 +128,18 @@ def main(argv: list[str] | None = None) -> int:
                           file=sys.stderr)
                 if ok:
                     lat.append(statistics.median([s.total_ms for s in ok]))
+                    # Persist EVERY repeat, not just the median of them. Saving
+                    # only aggregates left the first successful run unable to
+                    # carry a confidence interval, and an effect without a CI is
+                    # not reportable in this paper.
+                    reps.append({"arm": args.arm, "prompt_len": plen,
+                                 "rep": rep, "e2e_ms": lat[-1],
+                                 "order": args.order})
             if lat:
                 rows.append({"arm": args.arm, "prompt_len": plen,
                              "e2e_ms_median": statistics.median(lat),
-                             "e2e_ms_min": min(lat), "reps": len(lat)})
+                             "e2e_ms_min": min(lat), "reps": len(lat),
+                             "order": args.order})
                 print(f"[o1:{args.arm}]   prompt_len={plen:<5} "
                       f"e2e {statistics.median(lat):8.1f} ms")
         if not rows:
@@ -134,8 +148,10 @@ def main(argv: list[str] | None = None) -> int:
                 "no latency rows: every request failed at every prompt length. "
                 "See the per-cell errors above; the arm is not measured.")
         save_table(run, "latency", rows)
+        save_table(run, "latency_reps", reps)
         save_table(run, "ladder", [{
-            "arm": args.arm, "warmup_s": args.warmup_seconds,
+            "arm": args.arm, "order": args.order,
+            "warmup_s": args.warmup_seconds,
             "n_token_shapes": len(tok), "n_request_shapes": len(req),
             "token_shapes": json.dumps(tok), "request_shapes": json.dumps(req),
             "warmup_s_per_token_shape": args.warmup_seconds / len(tok) if tok else float("nan"),

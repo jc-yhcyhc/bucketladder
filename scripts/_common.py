@@ -67,6 +67,19 @@ CONTROLLED_VARS: dict[str, Any] = {
     # max_model_len with that gap.
     "VLLM_TPU_BUCKET_PADDING_GAP": REQUIRE_EXPLICIT,
     "max_model_len": REQUIRE_EXPLICIT,
+    # The fraction of HBM vLLM may claim. Promoted to a control in session 25,
+    # when it turned out to decide whether an experiment can run at all: the
+    # 21-shape token ladder dies in warmup with RESOURCE_EXHAUSTED at the stack
+    # default of 0.92 (32.50M requested, 12.40M free) on two independently
+    # provisioned v5e-4 hosts, and boots only at 0.80. Compiled executables are
+    # charged against the same HBM the KV cache is sized to fill, so the ladder
+    # and this number are coupled -- which makes an unrecorded value a silent
+    # confound between any two arms whose shape counts differ. Every run before
+    # session 25 used 0.92: `gpu-memory-utilization` appears in no committed
+    # revision of serve_remote.sh and in no config, so the default was in force
+    # throughout. REQUIRE_EXPLICIT rather than a literal, because 0.80 is the
+    # correct and deliberate value for the ladder-cost experiment.
+    "gpu_memory_utilization": REQUIRE_EXPLICIT,
     "XLA_FLAGS": REQUIRE_EXPLICIT,
     # tpu-inference's own env flag, added 2026-08-10. Default False, and when
     # False `get_attn_req_paddings` returns [max_req_size] — ONE bucket — so

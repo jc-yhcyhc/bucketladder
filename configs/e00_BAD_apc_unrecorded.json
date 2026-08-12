@@ -10,7 +10,8 @@
     "speculative_model": null,
     "kv_cache_dtype": "auto",
     "VLLM_TPU_BUCKET_PADDING_GAP": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "gpu_memory_utilization": 0.92
   },
   "tpu_type": "v5litepod-4",
   "dimension": "none"

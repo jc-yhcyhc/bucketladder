@@ -47,6 +47,35 @@ def bootstrap_ci(
     return diffs[int(alpha / 2 * n)], diffs[int((1 - alpha / 2) * n)]
 
 
+def bootstrap_ci_unpaired(
+    a: Sequence[float],
+    b: Sequence[float],
+    stat_fn: Callable[[Sequence[float]], float] = statistics.mean,
+    n: int = 10000,
+    alpha: float = 0.05,
+    seed: int = 42,
+) -> tuple[float, float]:
+    """Two-sample bootstrap CI for stat_fn(a) - stat_fn(b), resampled separately.
+
+    The paired version above is the right tool when both arms are observed under
+    one server instance, because the shared resample cancels whatever moves them
+    together. It is the WRONG tool for a ladder comparison: each arm is its own
+    boot of vLLM, so repeat i of one arm has no partner in the other, and the
+    pairing would be an artefact of loop order. Resampling the arms independently
+    states the uncertainty that is actually there -- which is wider, and honest.
+    """
+    if not a or not b:
+        raise ValueError("empty input")
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(n):
+        ra = [a[rng.randint(0, len(a) - 1)] for _ in range(len(a))]
+        rb = [b[rng.randint(0, len(b) - 1)] for _ in range(len(b))]
+        diffs.append(stat_fn(ra) - stat_fn(rb))
+    diffs.sort()
+    return diffs[int(alpha / 2 * n)], diffs[int((1 - alpha / 2) * n)]
+
+
 def bootstrap_p(a: Sequence[float], b: Sequence[float], n: int = 10000, seed: int = 42) -> float:
     """Two-sided permutation test p-value for a difference in means."""
     rng = random.Random(seed)
