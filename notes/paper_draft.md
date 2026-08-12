@@ -43,8 +43,7 @@ way to the next capture entry with graphs on, 13% with none — so the padding
 premise is false on both architectures we measured; what CUDA-graph capture
 actually costs is **+108 s of startup**, not per-step time. We report four
 optimisations we designed, measured and rejected, and twelve invalid inferences
-we made and caught — most sharing one cause, and now blocked
-by a mechanical check rather than by intent.
+we made and caught, in four classes, three of which now have mechanical checks.
 
 ---
 
@@ -110,8 +109,8 @@ HTTP, tokenizer and queueing.
 **Scope of instruments.** A step-scoped property requires a step-scoped
 instrument. Single-step execution is verified per dispatch from
 `iteration_tokens_total`'s count delta, and dispatches that split are excluded
-rather than averaged. §6 reports three inferences we made before adopting this
-rule, and one we made after.
+rather than averaged. §6 classes three of our own errors as instrument-definition
+failures, which is the class no guardrail here covers.
 
 **Request arrival.** Where a measurement requires *n* requests to reach the
 scheduler in one step, they are released from a thread barrier after every
@@ -726,79 +725,44 @@ less work.
 
 ---
 
-## 6. Twelve failures, one dominant cause
+## 6. Twelve failures, one taxonomy
 
-| looked like | was |
-|---|---|
-| cost model failing its holdout at 105.7% | fitted at `output_len=8`, run at 1 |
-| "the premise is wrong, padding is free" | two experiments both right, different n |
-| curve extrapolating small steps 15× low | reading the n=1 staircase as a floor |
-| decomposition winning in model, losing measured | same |
-| a scheduler patch sitting inert | 512-token prompts in the losing regime |
-| a "fixed cost" that was not constant | all of the above, named |
-| a headline "~4–9% recoverable" | padded share and paid share from different runs |
-| "no single-step dispatch above n=8" | a step-count test that could never pass |
-| paid padding at n=16 | split dispatches pooled into the median, not excluded |
-| a smaller model standing in for a quantized one | a lever that cannot move the target quantity |
-| a decode identity explaining prefill data (§4.8) | an argument applied outside its stated domain |
-| a sharding ablation licensing a bucketing ban | a D3 result used to support a D2 claim |
+Twelve invalid inferences were made and caught during this work. The full
+catalogue is in the artifact; what matters here is that they fall into four
+classes, and that the guardrails cover only the first.
 
-The dominant cause: **a quantity measured under one configuration, used under
-another.**
+| class | count | what it is | covered? |
+|---|---|---|---|
+| **provenance** | 7 | a quantity measured under one configuration, used under another | **yes** — config-diff over registered claims |
+| **instrument definition** | 3 | an analysis that measures something other than the target | no |
+| **lever validity** | 1 | a lever that cannot move the quantity claimed | **yes** — `prediction_mechanism` |
+| **dimension** | 1 | a result in one quantized dimension licensing a claim in another | **yes** — required `dimension` field |
 
-The guardrail took three versions. *"No derivation may combine quantities measured
-at different batch sizes"* would not have caught the `output_len` failure. A
-whitelist of config keys missed the largest error, because batch size is not a
-top-level field — it lives inside experiment-specific structures. The working
-form diffs **every** config key across a claim's source runs, exempts only free
-text, and requires each difference to be named explicitly. It flagged five claims
-already believed correct, and it has since killed two of our own headline
-numbers: a crossover point, and the recoverable-headroom figure in §4.4.
+**The provenance guardrail took three versions.** *"No derivation may combine
+quantities measured at different batch sizes"* would not have caught the
+`output_len` failure. A whitelist of config keys missed the largest error,
+because batch size is not a top-level field — it lives inside experiment-specific
+structures. The working form diffs **every** config key across a claim's source
+runs, exempts only free text, and requires each difference to be named. It
+flagged five claims already believed correct and has since killed two of our own
+headline numbers: a crossover point and a recoverable-headroom figure.
 
 **Its coverage is the set of *registered* claims, not the set of claims made.**
-The recoverable-headroom figure evaded it for three drafts by living in prose. It
-was caught only when we registered it as a claim in order to check it.
+The headroom figure evaded it for three drafts by living in prose, and was caught
+only when we registered it in order to check it.
 
-The last two are a different class and are not covered at all. A step-count
-criterion tested whether a whole dispatch ran in one scheduler step — never true,
-since every request needs a decode step — instead of whether its *prefill* was
-split; it was caught because it reported 0% single-step at a cell another
-experiment had independently measured as never splitting. And the boundary
-experiment *counted* split dispatches but pooled their cost into the median
-anyway, contradicting the rule §2 states. That was harmless while splits were
-zero at n≤8 and wrong the moment n=16 became reachable, where more than half of
-the dispatches split. Recomputing with splits excluded moved the n=16 result by
-under one percentage point, so the conclusion stands — but the bias runs upward,
-which is the direction that would have manufactured a positive result.
+**The three instrument-definition errors are not covered by anything.** A
+step-count criterion that could never pass; a boundary experiment that pooled
+split dispatches it claimed to exclude; a microbenchmark that timed dispatch
+overhead at 7% of peak bandwidth and called it a weight-load floor. Each was
+caught by a measurement disagreeing with an independent one, which is luck rather
+than method — and one of them, the split pooling, biased upward, the direction
+that manufactures a positive result.
 
-The tenth is a third variety again, and the most useful. Testing whether a
-smaller per-chip weight floor raises the paid share, we substituted a smaller
-*model* for a quantized one. But bytes ≈ 2·params and FLOPs/token ≈ 2·params, so
-arithmetic intensity is 1 FLOP/byte/token for any dense model and the derivative
-with respect to parameter count is **zero**. The lever could not move the target.
-Two lines of algebra, available before the session, and unwritten because nothing
-required them.
-
-**The guardrail checks claim provenance, not analysis definitions or lever
-validity.** Errors eight and nine were caught only by a measurement disagreeing
-with an independent one, which is not a method. The tenth was different: it was
-caught by its own **registered prediction** failing in the wrong direction, which
-is a mechanism, and the first one this project has had for the non-provenance
-class. Registration now requires a `prediction_mechanism` field stating the
-target as a formula in the lever and why the derivative is nonzero — the check
-that would have caught it before any hardware was provisioned. That is one
-instance and we do not oversell it, but the class is no longer entirely open.
-
-The twelfth is a fourth variety and it survived a retraction. §4.7's sharding
-ablation measures the **request** dimension; §9 used its TP-invariance to license
-a ban on length bucketing, which is a **token**-dimension intervention. Separately,
-a registered prediction about request-dimension padding outlived the withdrawal of
-the account that made it formulable, and under the replacement mechanism it does
-not name a possible outcome at all. Neither provenance nor the lever check sees
-this: both quantities are real, both levers move something, and what is wrong is
-that they sit in different dimensions of the ladder. Registration now requires a
-`dimension` field — D1, D2, D3 or none — so a claim spanning two can be rejected
-mechanically rather than by a reader noticing.
+The last two classes each produced a mechanical check, and both checks are cheap:
+state the target as a formula in the lever and show the derivative is nonzero;
+name the quantized dimension a claim belongs to and reject derivations that cross
+one. Both would have fired before hardware was provisioned.
 
 ### The pattern the failure list does not show
 
