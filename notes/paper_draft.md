@@ -1,7 +1,7 @@
 # Shape Coverage Is a Warmup Cost: Compiled-Shape Padding in Production TPU and GPU Serving
 
 Stack: vLLM 0.25.0 on `v5litepod-4` (`tpu-inference` 0.25.0, JAX 0.10.2,
-tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-two hardware sessions, **[redacted]**.
+tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-six hardware sessions, **well under budget**.
 
 ---
 
@@ -29,10 +29,9 @@ Three findings support this. **The request ladder a TPU stack reports is not the
 one it executes**: a default-off environment flag pins the attention kernel to a
 single 256-request shape, enabling the advertised six-entry ladder changes decode
 by 0.0%, and the compiler writes the padding into the kernel's own name. **Padded
-request slots cost nothing because the Ragged Paged Attention (RPA) kernel skips
-them** — a
-data-structure property, established by cutting the compiled slot count 32× for a
-−0.9% change. We test the memory-bandwidth explanation the same data invites and
+request slots cost under 0.7 µs each, against 27.5 µs if they were paid, because
+the Ragged Paged Attention (RPA) kernel skips them** — a data-structure property,
+established by cutting the compiled slot count 32× for a −0.9% change. We test the memory-bandwidth explanation the same data invites and
 reject it. **Token padding is different**: it is real arithmetic, paid at 23.1% of
 nominal at batch 4 falling to indistinguishable from zero at 16, and it is the
 one dimension where bucketing could pay.
@@ -42,10 +41,12 @@ Doubling the token ladder from ten compiled shapes to twenty-one cuts end-to-end
 latency by **8.7% and 12.5%** at two concurrent requests for prompts that straddle
 ladder entries, while prompts that pad identically on both ladders move by 0.5 ms
 — a placebo built into the design. The two treated cells agree on cost per padded
-token to 1% (34.9 and 35.3 µs). The price is **+53% cold startup** and, decisively,
-**15.0% of KV cache capacity**: at the stack's default memory fraction the finer
-ladder does not boot at all, because compiled executables and the KV cache compete
-for the same high-bandwidth memory.
+token to 1% (34.9 and 35.3 µs). The price is **+53% cold startup**, twice the
+resident executables, and a **boot cliff**: at the stack's default memory fraction
+the finer ladder does not start at all, missing by 20 MB, because compilation asks
+for scratch after the KV cache has been sized to fill the budget. At equal memory
+fraction the two ladders have identical KV capacity, so shape count costs startup
+and headroom rather than serving capacity.
 
 We predicted this benefit would decay with concurrency and vanish by batch 16,
 following our own paid-share curve, and **registered that prediction before
@@ -56,9 +57,9 @@ rather than to a compiled shape — so padding migrates from per-request to
 per-packed-step instead of dissolving. That leaves a tension with the paid-share
 curve which we report rather than resolve.
 
-We also reproduce a published latency predictor and find its length term earns
-its place at no batch size tested; report five optimisations, four rejected and
-one that works; and catalogue thirteen invalid inferences of our own in four
+We also reproduce a published latency predictor and find its length term
+contributes negligibly where errors are already below 1% and turns actively
+harmful at batch 4; report five optimisations, four rejected and one that works; and catalogue thirteen invalid inferences of our own in four
 classes, three of which now have mechanical checks.
 
 ---
@@ -98,20 +99,23 @@ shape coverage is a warmup charge that neither literature measures.
    no work for padded slots, established by cutting the compiled slot count 32×
    for a −0.9% change. We also test and reject the memory-bandwidth explanation
    the same section's data invites.
-4. **The dimension where bucketing might still pay** (§4.3): token padding is
-   real arithmetic, and its paid share is high at batch ≤2 — the interactive and
-   prefill-side regime our own negative advice does not cover.
-5. **A published latency predictor validated and scoped** (§4.2): LENS's
-   per-bucket linear form is beaten by a constant at the batch size where it
-   matters, so its reported accuracy is a property of within-bucket flatness
-   rather than of the model.
-6. **Four optimisations measured and rejected** (§5), and **thirteen invalid
-   inferences of our own** in four classes (§6), three now blocked mechanically.
+4. **The dimension where bucketing does pay** (§4.3, §4.9, §4.10): token padding
+   is real arithmetic, its paid share is high at batch ≤2, and a finer compiled
+   token ladder converts that into 8.7–12.5% lower end-to-end latency.
+5. **A published latency predictor validated and scoped** (§4.2): LENS's length
+   term beats a constant by 0.6 percentage points where errors are already under
+   1%, and is beaten by one at batch 4, so its reported accuracy is a property of
+   within-bucket flatness rather than of the model form.
+6. **Five optimisations, four rejected and one that works** (§5), and
+   **thirteen invalid inferences of our own** in four classes (§6), three now
+   blocked mechanically.
 
-**Scope.** This is a measurement study. It characterises what shape quantization
-costs and identifies where an optimisation could pay; it does not implement one.
-§5 reports four we designed and rejected on measurement, including one that
-appeared to win by 29% until a correctness gate showed it was dropping tokens.
+**Scope.** This is primarily a measurement study: it characterises what shape
+quantization costs and where an optimisation can pay. The one intervention it
+lands (§4.9) is a documented environment variable rather than a patch, which is
+why it is measurable without a custom scheduler to be suspicious of. §5 reports
+the four we designed and rejected on measurement, including one that appeared to
+win by 29% until a correctness gate showed it was dropping tokens.
 
 ---
 
@@ -263,12 +267,14 @@ where they are large.
 two measurements per bucket but not which two. Over all three choices per cell,
 the n=4 error swings by up to 44.8 percentage points — but its *minimum* over
 every choice is still 16.97%, far above LENS's 2.15%. The magnitude must be
-reported as a range; the localisation survives.
+reported as a range; the growth in error by n=4 survives. Whether accuracy
+returns above n=4 is not sampled and not claimed.
 
 **[Figure 1 — `figures/fig1_lens.png`]** *Held-out prediction error against batch
 size, with LENS's reported 2.15% as a reference line and the failure region
 shaded. The claim is not that the predictor is inaccurate; it is that the error
-is localised.*
+grows sharply by n=4. Batch sizes 1, 2 and 4 are sampled, with the failure at the
+endpoint, so these data cannot say whether accuracy returns above 4.*
 
 We report this as validation rather than criticism: no prior work had tested LENS
 on this hardware, and the regime where it breaks is the one serving uses.
@@ -392,8 +398,9 @@ tell — that is a different point on the load curve, not only a different shape
 The spread therefore mixes distribution shape with utilisation, which is the
 error class §6 names as this project's dominant one, found in our own table. What
 survives is the qualitative claim, which does not depend on the magnitudes:
-**padded share is a property of the workload, not of the stack**, and the 35.9%
-we previously reported as a stack property was not one. A matched re-run is
+**padded share is a property of the workload, not of the stack**, and a single
+stack-level padded-share figure of the kind this experiment was built to produce
+is not a well-defined quantity. A matched re-run is
 needed before any range is quoted.
 
 **[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
@@ -464,9 +471,9 @@ launch, so the queueing in the sweep above was our arrival pattern, as in §4.3.
 The decode numbers there were still taken under the old launcher and want
 re-measuring; no conclusion rests on them.)
 
-**The two padding dimensions do not share an explanation.**,. **D3, requests/step:** free at
-every batch size measured, because RPA does no work for padded request slots — a
-data-structure property. **D2, tokens/step:** paid in prefill and falling with
+**The two padding dimensions do not share an explanation.** **D3, requests/step:** free at
+every batch size measured, because RPA does substantially no work for padded
+request slots — under 0.7 µs each, a data-structure property. **D2, tokens/step:** paid in prefill and falling with
 batch, because padded tokens are real FLOPs. §4.3's table is D2; §4.8's dtype
 prediction applies to D2 only, since quantization moves the arithmetic-intensity
 ridge and the ridge is not in the D3 story.
@@ -518,8 +525,12 @@ both arms at the same real batch:
 
 A per-padded-slot cost would fall by roughly 97% when the slot count drops 32×.
 It falls by 2%. **The fixed term is block-table and dispatch overhead, not
-padding**, and the request-dimension mechanism is established: Ragged Paged
-Attention does no work for padded request slots.
+padding.** Stated as the bound the experiment actually supports: removing 248 of
+256 slots moves the fitted fixed term by 167 µs, so a padded request slot costs
+**under 0.7 µs**, against the 27.5 µs per slot that fully-paid padding would imply
+if the 7 050 µs fixed term were padding. That is a factor of 41, and it is a bound
+rather than a zero — at 256 slots the residue is up to ~170 µs, about 1% of
+attention time at n=1.
 
 This also runs the high-power version of §4.1's test. That paired experiment used
 n=8 and n=9, where a fixed 256-slot cost would have been ~8% of attention time;
@@ -659,7 +670,7 @@ bytes and leave FLOPs alone, doubling intensity per token, so the crossing moves
 from batch ≈ 240 to ≈ 120. **Registered prediction: under W8, the token-dimension
 paid share at a fixed boundary rises.** We have not run it.
 
-### 4.9 A finer ladder does pay — and the price is KV capacity
+### 4.9 A finer ladder does pay — and the price is startup, not capacity
 
 Every result above says token padding is paid at small batch and vanishes as
 batch grows (§4.3, §4.4). That is a claim about where bucketing's premise could
@@ -698,24 +709,40 @@ against the same stack with the compiled-shape cache cleared before each boot:
 |---|---|---|---|
 | cold warmup | 285 s | 436 s | +151 s (+53%) |
 | compiled-shape cache on disk | 43 MB | 92 MB | +114% |
-| KV cache at the 0.92 default | 367,360 tokens | *does not boot* | — |
-| KV cache at 0.80 | 312,320 tokens | 312,320 tokens | −55,040 tokens (−15.0%) |
+| KV cache at 0.80 | 312,320 tokens | 312,320 tokens | **none** |
+| boots at the 0.92 default? | yes (367,360 tokens) | **no** | — |
 
-The last row is the real constraint. At vLLM 0.25.0's default
-`gpu_memory_utilization` of 0.92 the twenty-one-shape ladder does not start at
-all: it compiles its shapes and then dies with `RESOURCE_EXHAUSTED`, requesting
-32.50 MB against 12.40 MB free — byte-identical on two independently provisioned
-v5e-4 hosts, while the ten-shape ladder boots and serves on the same host, script,
-model and topology. Compiled executables are charged against the same
-high-bandwidth memory the KV cache is sized to fill, so the ladder and the cache
-are in direct competition, and buying the finer ladder means selling 15% of
-concurrent capacity.
+**The two ladders have identical KV capacity at equal memory fraction.** That is
+the row that matters, and it is the one a natural reading of these measurements
+gets wrong. Differencing the ten-shape ladder's 367,360 tokens at the 0.92 default
+against 312,320 at 0.80 yields −15.0% and attributes it to shape count; the two
+numbers come from different memory fractions, so the difference is the fraction,
+not the ladder. That is a provenance error of exactly the class §6 names as this
+project's most common, and it is recorded there as the fourteenth. The corrected
+statement is that at 0.80 both ladders report the same 312,320 tokens — the same
+figure to the token, which also bounds the effect: capacity is block-quantized, a
+49 MB executable delta would be roughly 1,300 tokens or 81 blocks, and that would
+have been visible.
+
+What is real is a **boot cliff**. At vLLM 0.25.0's default `gpu_memory_utilization`
+of 0.92 the twenty-one-shape ladder does not start: it compiles its shapes and
+then dies with `RESOURCE_EXHAUSTED`, requesting 32.50 MB against 12.40 MB free —
+byte-identical on two independently provisioned v5e-4 hosts, while the ten-shape
+ladder boots and serves on the same host, script, model and topology.
+
+The mechanism is not steady-state competition between executables and cache,
+which the identical capacities rule out. It is that **compilation needs transient
+headroom the KV sizing does not reserve**: vLLM profiles, sizes the cache to fill
+the fraction, and then compiles, so a longer ladder asks for scratch after the
+budget is already committed. That predicts the cliff is narrow and the remedy
+small — the failure misses by 20 MB, not by 2 GB — rather than costing a seventh
+of serving capacity.
 
 ### 4.10 The benefit does not decay with concurrency, and the prediction that it would was wrong
 
-§4.9's trade looks like it should be conditional on load. Padding is paid at small
-batch and free at large (§4.3); KV capacity binds at large batch and is slack at
-small. That reasoning predicts a crossing, and we registered it before measuring:
+§4.9's benefit looks like it should be conditional on load, because padding is
+paid at small batch and free at large (§4.3). That reasoning predicts a crossing,
+and we registered it before measuring:
 the difference should shrink monotonically and reach zero between n=4 and n=16,
 tracking §4.3's paid-share curve. Sweeping concurrency 1→16 on both ladders, in
 both arm orders, refutes it. Placebo-corrected difference, in ms, negative where
@@ -773,8 +800,8 @@ rather than ladder size.
 
 The recommendation that survives is therefore simpler and broader than the
 conditional one we expected to write: **where prompt lengths straddle a coarse
-ladder's entries, a finer token ladder is worth its startup and its KV capacity
-across the whole concurrency range we tested, not only at low load.** What we
+ladder's entries, a finer token ladder is worth its startup and its memory
+headroom across the whole concurrency range we tested, not only at low load.** What we
 cannot say is where it stops, because within 1→16 it does not.
 
 ---
@@ -783,7 +810,7 @@ cannot say is where it stops, because within 1→16 it does not.
 
 | | outcome |
 |---|---|
-| **finer token ladder** | **works: −8.7% and −12.5% end-to-end at n=2, persisting 1→16, at −15.0% KV capacity (§4.9, §4.10)** |
+| **finer token ladder** | **works: −8.7% and −12.5% end-to-end at n=2, persisting 1→16, at +53% startup and a boot cliff (§4.9, §4.10)** |
 | bucket-aware admission control | premise false (§4.4) |
 | ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
@@ -1027,8 +1054,8 @@ a ladder of shapes, CUDA captures a graph per batch size — and both round ever
 step up to the nearest entry. The optimisation literature treats that rounding as
 a cost to be recovered. **It is not, on either.** A batch just above an entry
 costs what the entry below costs; the padding rides inside work the step was
-doing anyway, because a ragged attention kernel does no work for slots holding no
-KV blocks and a captured graph does not care that some of its batch is unused.
+doing anyway, because a ragged attention kernel does almost no work for slots
+holding no KV blocks — under 0.7 µs per slot, against 27.5 µs if it were paid and a captured graph does not care that some of its batch is unused.
 
 What shape coverage costs is **warmup**. Enabling CUDA-graph capture costs 108
 seconds of startup; XLA compiles the first TPU bucket in 5–30 minutes. That is
@@ -1040,13 +1067,16 @@ Routing requests to dodge run-time padding is not worth doing anywhere.**
 
 The exception is the token dimension. Padded *tokens* are real arithmetic: their
 paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero by
-16, and is around 85% at batch ≤2. That low-batch regime is interactive serving,
+16, and is around 85% at batch ≤2 — a figure that rests on a single boundary and
+carries no interval, the least well supported number here and also the largest.
+That low-batch regime is interactive serving,
 tight-TTFT deployments, and the prefill half of any disaggregated system — and it
 is the one place where making the ladder finer buys something. Twenty-one compiled
 token shapes instead of ten cut end-to-end latency 8.7% and 12.5% at two
-concurrent requests, at a cost of 53% more cold startup and 15.0% of KV cache
-capacity, the latter binding hard enough that the finer ladder will not boot at
-the stack's default memory fraction (§4.9).
+concurrent requests, at a cost of 53% more cold startup, twice the resident
+executables, and a boot cliff: the finer ladder does not start at all at the
+stack's default memory fraction, missing by 20 MB, though at equal fraction the
+two ladders hold identical KV capacity (§4.9).
 
 We expected that benefit to be confined to low concurrency and predicted, in
 advance, that it would vanish by batch 16. It does not: it holds at 3.5–12% across

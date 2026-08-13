@@ -124,10 +124,21 @@ def convert(md: str) -> str:
             # LaTeX numbers sections itself, and the markdown heading carries its
             # own number, so "### 4.8 Model scale" rendered as "5.8 4.8 Model
             # scale". Strip the authored number and let LaTeX own it.
+            #
+            # But ONLY headings that were authored with a number may be numbered
+            # by LaTeX. "## Abstract" has none, and numbering it consumed the 1,
+            # pushing Introduction to 2 and Results to 5 while every in-text
+            # cross-reference still said 4 -- roughly forty pointers off by one,
+            # in the PDF only. The markdown was self-consistent, which is why a
+            # linter that checked the source found nothing. An unnumbered heading
+            # must render unnumbered, so the authored numbering IS the rendered
+            # numbering.
             raw = re.sub(r"^\d+(\.\d+)*\.?\s+", "", m.group(2))
+            numbered = raw != m.group(2)
             lvl, txt = len(m.group(1)), inline(raw)
             cmd = {1: "title", 2: "section", 3: "subsection", 4: "subsubsection"}[lvl]
-            body.append(f"\\{cmd}{{{txt}}}" if cmd != "title"
+            star = "" if numbered else "*"
+            body.append(f"\\{cmd}{star}{{{txt}}}" if cmd != "title"
                         else f"\\begin{{center}}\\LARGE\\bfseries {txt}\\end{{center}}")
             i += 1; continue
 

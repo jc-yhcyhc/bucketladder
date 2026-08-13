@@ -16,6 +16,8 @@ Checks, each named after the failure that motivated it:
   FIG-LITERAL    figure markup survived into the PDF text as literal characters
   MD-LITERAL     markdown emphasis/code markers survived into the PDF text
   NUM-DOUBLED    a heading shows two section numbers ("5.8 4.8 Model scale")
+  NUM-DRIFT      a heading's rendered number differs from its authored one, so
+                 every in-text cross-reference points one section off
   LIGATURE       fi/fl ligatures are not extractable ("latness" for "flatness")
   CELL-DROPPED   a numeric table cell in the source is absent from the PDF
   DRAFT-VOICE    references to our own unpublished drafts, meaningless to a reader
@@ -62,9 +64,13 @@ ACRONYMS = {
 }
 
 
-def pdftext(pdf: pathlib.Path) -> str:
-    r = subprocess.run(["pdftotext", str(pdf), "-"], capture_output=True,
-                       text=True, errors="replace")
+def pdftext(pdf: pathlib.Path, layout: bool = False) -> str:
+    # Plain extraction reflows the two columns into reading order, which is what
+    # the prose checks want. It also separates a section heading from its number,
+    # so the numbering check must read -layout output instead, where the number
+    # and the title stay on one line.
+    cmd = ["pdftotext"] + (["-layout"] if layout else []) + [str(pdf), "-"]
+    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     return r.stdout
 
 
@@ -165,6 +171,38 @@ def main(argv: list[str] | None = None) -> int:
         for m in re.finditer(r"^ *(\d+(?:\.\d+)+) +(\d+(?:\.\d+)+) +([A-Z][a-z]+)",
                              txt, re.M):
             flag("NUM-DOUBLED", f"heading shows two numbers: {m.group(0).strip()[:60]!r}")
+
+        # A heading's authored number must be the number the PDF shows. LaTeX
+        # numbered the unnumbered Abstract as 1, so Introduction rendered as 2
+        # and Results as 5 while every in-text "S4.x" still said 4 -- ~40 dead
+        # cross-references, none visible in the source. XREF above checks the
+        # markdown against itself and cannot see this; only the render can.
+        lay = norm(pdftext(args.pdf, layout=True))
+        for m in re.finditer(r"^#{2,3}\s+(\d+(?:\.\d+)*)\.?\s+(\S+(?:\s+\S+){0,2})",
+                             md, re.M):
+            num, words = m.group(1), norm(m.group(2))
+            first = words.split()[0].rstrip(":,")
+            if len(first) < 4:
+                continue
+            # A heading's own words recur in body text and cross-references, and
+            # a number happens to sit before some of those too ("...see S7.
+            # Related work covers..."). Taking the FIRST occurrence flagged
+            # Related work as misnumbered when the heading itself was correct.
+            # So look at every occurrence and flag only if NONE carries the
+            # authored number: one correct rendering is proof of no drift.
+            seen: list[str] = []
+            for pm in re.finditer(re.escape(first), lay):
+                before = lay[max(0, pm.start() - 12):pm.start()]
+                bm = re.search(r"(\d+(?:\.\d+)*)\s*$", before)
+                if bm:
+                    if bm.group(1) == num:
+                        seen = []
+                        break
+                    seen.append(bm.group(1))
+            if seen:
+                flag("NUM-DRIFT",
+                     f"heading {num!r} ({first}) never appears with its own "
+                     f"number in the PDF; saw {sorted(set(seen))[:3]}")
 
         broken = re.findall(r"\b(?:latness|prell|rooine|dierence|conguration|"
                             r"signicant|nding|dened|rst|eciency)\b", txt)
