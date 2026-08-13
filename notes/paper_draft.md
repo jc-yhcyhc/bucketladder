@@ -38,19 +38,20 @@ reject it. **Token padding is different**: it is real arithmetic, paid at 23.1% 
 nominal at batch 4 falling to indistinguishable from zero at 16, and it is the
 one dimension where bucketing could pay.
 
-**On that dimension an intervention does pay, and we quantify the trade.**
-Doubling the token ladder from ten compiled shapes to twenty-one cuts end-to-end
-latency by **8.7% and 12.5%** at two concurrent requests for prompts that straddle
-ladder entries, while prompts that pad identically on both ladders move by 0.5 ms
-— a placebo built into the design. The two treated cells agree on cost per padded
-token to 1% (34.9 and 35.3 µs). The price is **+53% cold startup**, twice the
-resident executables, and a **boot cliff**: the finer ladder will not start above
-`gpu_memory_utilization` 0.85 against the stack's default of 0.92, because
-compilation asks for scratch after the KV cache has already been sized to fill the
-budget. At equal fraction the two ladders hold identical KV capacity to the token,
-so shape count does not shrink the cache — it caps the fraction you may request,
-and that cap costs **8.8% of KV capacity** (367,360 tokens at 0.92 against 335,104
-at 0.85).
+**On that dimension an intervention does pay, and it is placement rather than
+count.** Compiling twenty-one token shapes instead of ten cuts end-to-end latency
+by **8.7% and 12.5%** at two concurrent requests for prompts that straddle ladder
+entries, while prompts padding identically on both ladders move by 0.5 ms — a
+placebo built into the design. But shape count is not what buys it. A
+**fourteen**-shape ladder that places one entry the default lacks recovers
+**−12.1%** at the prompt it straddles and **+0.2%** at the prompt it does not, and
+it boots at the stack's default memory fraction with full KV capacity. The
+twenty-one-shape ladder, by contrast, will not start above `gpu_memory_utilization`
+0.85 against a 0.92 default — compilation asks for scratch after the cache is
+already sized — which costs **8.8% of KV capacity** and 53% more startup. Every
+cost we measured scales with cardinality; the benefit tracks only whether a
+boundary falls between the prompt and the next entry. **Compile the shapes your
+prompt distribution straddles, not more of them.**
 
 We predicted this benefit would decay with concurrency and vanish by batch 16,
 following our own paid-share curve, and **registered that prediction before
@@ -104,9 +105,11 @@ shape coverage is a warmup charge that neither literature measures.
    under 0.7 µs of work per padded slot against 27.5 µs if it were paid,
    established by cutting the compiled slot count 32× for a −0.9% change. We also test and reject the memory-bandwidth explanation
    the same section's data invites.
-4. **The dimension where bucketing does pay** (§4.3, §4.9, §4.10): token padding
-   is real arithmetic, its paid share is high at batch ≤2, and a finer compiled
-   token ladder converts that into 8.7–12.5% lower end-to-end latency.
+4. **The dimension where bucketing does pay, and the variable that pays**
+   (§4.3, §4.9, §4.10): token padding is real arithmetic, and a compiled token
+   ladder placed against the workload converts it into 12.1% lower end-to-end
+   latency at no memory cost — while a uniformly finer ladder buys the same effect
+   plus 8.8% of KV capacity and 53% more startup.
 5. **A published latency predictor validated and scoped** (§4.2): LENS's length
    term beats a constant by 0.6 percentage points where errors are already under
    1%, and is beaten by one at batch 4, so its reported accuracy is a property of
@@ -750,6 +753,49 @@ and 0.80 was a coarse guess rather than the measured requirement, so the figure
 was both misattributed and too large. It is a provenance error of the class §6
 names as this project's most common, recorded there as the fourteenth.
 
+**The cost is avoidable, because it is bought by the wrong variable.**
+`VLLM_TPU_BUCKET_PADDING_GAP` changes the spacing law and the shape count
+together — unset it is ten exponential entries, 512 is twenty-one linear ones —
+so the benefit above and the price above are not attributable to the same
+quantity. Every cost measured here scales with **cardinality**: warmup, resident
+executables, and the headroom that sets the boot cliff. The benefit does not.
+Two intermediate gaps separate them, all at 0.92 and all measured in one session:
+
+| ladder | shapes | 1200 pads to | 3000 pads to | prompt 1200 | prompt 3000 |
+|---|---|---|---|---|---|
+| default | 10 | 2048 | 4096 | 215.4 ms | 297.2 ms |
+| gap 1024 | 14 | 2048 | **3072** | 210.9 ms | **256.5 ms** |
+| gap 512 | 21 | **1536** | **3072** | 188.2 ms | 253.7 ms |
+| gap 2048 | 11 | 2048 | 4096 | 214.1 ms | 296.1 ms |
+
+Against the ten-shape ladder, and correcting by the prompt-300 cell as before,
+the fourteen-shape ladder is **+0.2 ms at prompt 1200 and −36.0 ms (−12.1%) at
+prompt 3000**. It wins exactly where it places an entry the default lacks (3072)
+and nowhere else (it has no 1536, so 1200 is untouched). The eleven-shape ladder,
+which places nothing new near either prompt, tracks the default at both. Shape
+count moves from 10 to 21 across these arms while the benefit tracks only whether
+a boundary falls between the prompt and the next default entry.
+
+**And the fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens** —
+the same capacity as the default. So the 8.8% is the price of the twenty-one-shape
+ladder, not the price of the optimisation: −12.1% of end-to-end latency at prompt
+3000 is available at full memory, for the warmup of four extra shapes. The
+twenty-one-shape ladder buys a further −8.7% at prompt 1200, and *that* is what
+costs 8.8% of capacity and 53% more startup.
+
+The recommendation this supports is therefore not "compile more shapes" but
+**"compile the shapes your prompt distribution straddles."** Cardinality is what
+the stack charges for; placement is what serving latency responds to. A ladder
+chosen against a workload dominates a uniformly finer one on both axes at once,
+and the mechanism says why: padding is arithmetic (§4.3), a well-placed boundary
+removes it, and a badly-placed boundary is an executable the compiler pays for and
+the scheduler never benefits from.
+
+Scope. Two prompt lengths on one model, and the placement that helps here was
+chosen by knowing the prompts in advance. Choosing a ladder from a measured
+length distribution, rather than from two known lengths, is the obvious next step
+and is not done here.
+
 ### 4.10 The benefit does not decay with concurrency, and the prediction that it would was wrong
 
 §4.9's benefit looks like it should be conditional on load, because padding is
@@ -839,7 +885,7 @@ Where the benefit stops we cannot say, because within 1→16 it does not.
 
 | | outcome |
 |---|---|
-| **finer token ladder** | **works: −8.7% and −12.5% end-to-end at n=2, persisting 1→16, at +53% startup and a boot cliff (§4.9, §4.10)** |
+| **ladder placed against the workload** | **works: −12.1% end-to-end at n=2 at full memory; a uniformly finer ladder buys the same and costs 8.8% of KV (§4.9, §4.10)** |
 | bucket-aware admission control | premise false (§4.4) |
 | ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
@@ -1117,12 +1163,15 @@ paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero 
 carries no interval, the least well supported number here and also the largest.
 That low-batch regime is interactive serving,
 tight-TTFT deployments, and the prefill half of any disaggregated system — and it
-is the one place where making the ladder finer buys something. Twenty-one compiled
-token shapes instead of ten cut end-to-end latency 8.7% and 12.5% at two
-concurrent requests, at a cost of 53% more cold startup, twice the resident
-executables, and a boot cliff: the finer ladder does not start at all at the
-stack's default memory fraction, missing by 20 MB, though at equal fraction the
-two ladders hold identical KV capacity (§4.9).
+is the one place where the ladder buys something. Twenty-one compiled token
+shapes instead of ten cut end-to-end latency 8.7% and 12.5% at two concurrent
+requests — but shape count is not the variable that pays. A fourteen-shape ladder
+placing a single entry the default lacks recovers 12.1% at the prompt that
+straddles it, gains nothing at the prompt that does not, and boots at the stack's
+default memory fraction with full KV capacity. The twenty-one-shape ladder buys
+the same effect and additionally will not start above 0.85, costing 8.8% of KV
+capacity and 53% more startup (§4.9). Every cost we measured scales with
+cardinality; the benefit tracks placement alone.
 
 We expected that benefit to be confined to low concurrency and predicted, in
 advance, that it would vanish by batch 16. It does not: it holds at 3.5–12% across
@@ -1130,9 +1179,10 @@ advance, that it would vanish by batch 16. It does not: it holds at 3.5–12% ac
 rather than to a compiled shape, so padding moves from per-request to
 per-packed-step instead of disappearing. So the rule is not that shape coverage
 should always be minimised, and not the load-conditional rule the paid-share curve
-implies either: **where prompt lengths straddle a coarse ladder's entries, a finer token
-ladder earns its startup and its capacity across the whole load range we tested.**
-Where it stops earning them, we do not know.
+implies either. It is that **a ladder chosen against the workload dominates a
+uniformly finer one on every axis at once — latency, startup, memory — because a
+badly-placed boundary is an executable the compiler pays for and the scheduler
+never uses.** Where that advantage stops, we do not know; within 1→16 it does not.
 
 Three things we got wrong are worth carrying forward as much as the results. We
 explained free request padding with a memory-bandwidth argument, published it,
