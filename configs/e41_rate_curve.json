@@ -1,0 +1,42 @@
+{
+  "experiment": "e41_rate_curve",
+  "description": "A rate curve for the release-timing policies, because the 26% saving the paper quotes was measured at a single load point and a single point cannot tell a large effect near saturation from a modest one in the linear regime. Same policies and harness as e40; the only change is that rate is swept.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "prompt_len": 512,
+  "output_len": 1,
+  "n_requests": 60,
+  "seed": 99,
+  "rates_hz": [
+    10,
+    25,
+    40,
+    55,
+    70
+  ],
+  "policies": [
+    "promote",
+    "wait",
+    "hybrid"
+  ],
+  "latency_weight": 1.0,
+  "max_wait_s": 0.5,
+  "note_holdout": "seed 99 and these rates were NOT used to fit the cost model \u2014 the fit came from e02's concurrency sweep at fixed n. plan_v4 requires MAPE<15% per cell on data the fit never saw.",
+  "dimension": "none",
+  "note_rate_curve": "10 through 70 req/s. o5's throughput sweep put the knee for a 3000-token prompt between 8 and 12 req/s, but this workload is prompt_len=512, output_len=1, so its knee is elsewhere and the range is chosen to bracket rather than to assume it. The curve is the result; a single rate is what this experiment exists to replace.",
+  "note_harness_overhead": "The known confound, restated because it bounds what this curve can say: e40's driver scrapes /metrics around every batch and adds a median 22.6-24.9 ms of inter-dispatch overhead on a policy that never waits. That inflates STOCK's p95 and therefore flatters any policy that deliberately delays, which is why the 'no detectable latency cost' reading of the 26% does not survive. The simulator models it as client_overhead_s; the hardware numbers here still carry it, so latency differences are lower bounds on the true cost of waiting."
+}

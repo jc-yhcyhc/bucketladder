@@ -73,8 +73,21 @@ curve which we report rather than resolve.
 
 We also reproduce a published latency predictor and find its length term
 contributes negligibly where errors are already below 1% and turns actively
-harmful at batch 4; report five optimisations, four rejected and one that works; and catalogue fourteen invalid inferences of our own in four
-classes, three of which now have mechanical checks.
+harmful at batch 4, and report five optimisations, four rejected and one that
+works.
+
+**One finding is about this kind of work rather than about TPUs.** We catalogue
+fourteen invalid inferences of our own, and their distribution is lopsided in a
+way we did not expect: across four rounds of external review every headline
+*measurement* survived, while four of the last five retractions were *mechanism*
+claims — a bandwidth account, a frontier bound, a microbenchmark and what it
+purported to isolate. The cause is structural. Every number here passes a contract
+that aborts on an unstated variable and is recomputed by a script that exits
+non-zero on disagreement; **no comparable machinery exists for explanations**, so a
+mechanism can be written, believed, cited by three later sections and carried
+across drafts without ever being executed. A reader should trust §4's numbers
+considerably more than §4's explanations. §6 develops this, and §4.10 and §4.12
+are two cases where a registered prediction caught it working.
 
 ---
 
@@ -99,6 +112,18 @@ dimensions of a TPU serving stack, isolate the mechanism behind each, and repeat
 the central measurement on a GPU with the same framework and instrument. The
 result is that run-time padding is close to free on both, and that the cost of
 shape coverage is a warmup charge that neither literature measures.
+
+A second thread runs through the paper and is worth naming at the outset, because
+it shaped what we chose to measure. Our measurements have proved durable and our
+*explanations* have not: over four review rounds no headline number was withdrawn,
+while four of the last five retractions were mechanism claims. That is not
+carelessness, it is asymmetric tooling — numbers here run through a contract that
+aborts on an unstated variable and a script that recomputes them, while a
+mechanism is prose and nothing in the pipeline can reject it. The response was to
+force mechanisms to emit falsifiable numbers before running the hardware. Three of
+those registered predictions failed (§4.7, §4.10, §4.12), and each failure was
+worth more than the confirmation would have been. §6 makes the argument in
+full.
 
 **Contributions.**
 
@@ -126,6 +151,12 @@ shape coverage is a warmup charge that neither literature measures.
 6. **Five optimisations, four rejected and one that works** (§5), and
    **fourteen invalid inferences of our own** in four classes (§6), three now
    blocked mechanically.
+7. **An asymmetry between measurements and explanations** (§6), offered as a
+   finding rather than a disclaimer: across four review rounds every headline
+   number survived and four of the last five retractions were mechanism claims,
+   because measurements pass through machinery that can reject them and prose does
+   not. The registered-prediction discipline this produced is what caught §4.10
+   and §4.12.
 
 **Scope.** This is primarily a measurement study: it characterises what shape
 quantization costs and where an optimisation can pay. The one intervention it
@@ -996,6 +1027,58 @@ ms on the default ladder, a 38% reduction, against the 12.3% the best placement
 buys without it. Where both apply, the ordering of effort is clear.
 
 
+### 4.13 Choosing the ladder from the length distribution, and testing the choice
+
+§4.9's winning placement was chosen by knowing two prompt lengths in advance,
+which is an existence proof and not a method. A method starts from a length
+distribution, picks a ladder without looking at latency, and is then right.
+
+Sampling 120 prompts from a lognormal with median 1200 and σ=0.9, replaying the
+*same* sampled lengths against every ladder so the arms are paired on workload,
+and predicting each arm's latency from expected padded tokens × the 35 µs per
+padded token measured in §4.9:
+
+| ladder | shapes | mean padded tok/req | predicted Δ | measured e2e | boots at 0.92? |
+|---|---|---|---|---|---|
+| default | 10 | 602 | — | 219.8 ms | yes |
+| gap 1024 | 14 | 389 | −7.5 ms | **212.7 ms** (−7.1) | yes |
+| gap 512 | 21 | — | −16.2 ms | *does not boot* | **no** |
+| gap 256 | 35 | — | — | *does not boot* | **no** |
+
+**The offline model predicted the measured win to within 5%** — 7.5 ms predicted
+against 7.1 ms measured. Inverting it gives 33.3 µs per padded token, against the
+34.9–35.3 µs of §4.9, and the two workloads share nothing: §4.9 used two fixed
+lengths straddling known entries, this a heavy-tailed mixture over the whole
+ladder. A constant fitted on one and confirmed on the other is doing real work.
+
+So ladder design does not need a hardware sweep. Sample the length distribution,
+compute expected padding per candidate ladder, multiply by the per-token cost, and
+the win is known before anything is provisioned.
+
+**But the objective must be constrained, and the unconstrained one is the premise
+this paper refutes.** Expected padding falls monotonically in shape count — 602,
+389, and by extension lower still for 21 and 35 shapes — so minimising padding
+alone drives the ladder toward "as fine as the stack can compile", which is
+exactly what §4.9 shows the stack cannot afford. Both finer arms failed to boot at
+the stock memory fraction, the 35-shape ladder more decisively (23.75 MB requested
+against 4.94 MB free) than the 21-shape one (32.50 MB against 12.40 MB). The
+feasible set here was {10, 14} and the answer was 14.
+
+The design rule that survives is therefore: **the finest ladder that still boots,
+with its entries placed against the distribution** — a constrained optimum where
+the constraint is compilation headroom, not latency, and where the objective is
+computable offline.
+
+One caveat on the model's reach. Predicting padding requires knowing the ladder a
+gap will produce, and the rule is not the obvious one: the stack keeps doubling
+while the doubling step is no larger than the gap, then goes linear. At gap 256
+that inserts an entry at 768, which a "powers of two, then linear" reading does
+not predict. The predictions above were computed from the corrected rule and each
+arm re-reads the ladder its server actually printed, but the discrepancy was
+caught by reading a boot log rather than by the check written to catch it — that
+check has still never fired against a real mismatch.
+
+
 ---
 
 ## 5. Five optimisations, four rejected and one that works
@@ -1018,8 +1101,42 @@ payoff would be confined to low concurrency and it was not (§4.10).
 
 A second positive measurement — release timing saving 26% of TPU time against
 stock at 25 req/s (p=0.001, six paired seeds) — is **dynamic batching**, not a
-shape effect. We report it as a re-measurement rather than a contribution. It is
-a single load point with no saturation curve.
+shape effect, and we report it as a re-measurement rather than a contribution.
+
+**And it is a low-load effect that reverses.** Swept across arrival rate against
+stock, positive being a saving:
+
+| req/s | wait | hybrid | hybrid p95 |
+|---|---|---|---|
+| 10 | +36.2% | +29.0% | −32.6% |
+| 25 | +22.2% | +22.8% | +28.9% |
+| 40 | +7.1% | +17.6% | +21.5% |
+| 55 | +7.2% | +11.6% | −6.6% |
+| 70 | +2.3% | **−11.7%** | +18.7% |
+
+The saving decays monotonically with load and becomes an 11.7% *penalty* by 70
+req/s. A single measurement at 25 req/s — which is what the 26% was — cannot
+distinguish that from a robust effect, and it happens to sample the most
+flattering region of the curve.
+
+**It is also not free, and an earlier reading of it that said so was an artifact
+of our own driver.** The harness scrapes `/metrics` around every batch, adding a median
+22.6–24.9 ms of inter-dispatch overhead to a policy that never waits. That
+inflates *stock's* p95 from roughly 24 ms to 86 ms and hides the delay the waiting
+policy introduces on purpose. Measured under that harness the cost looked like
++14.8% p95 (p=0.570); simulated on an efficiently driven server the same policy
+costs about **+188% p95** at 25 req/s. What survives is narrower and still worth
+saying: the hybrid policy reaches nearly all of wait-to-fill's saving — 30.2%
+against 31.9% — for a small fraction of its latency, +188% against +1461%. It is a
+point on a cost–latency curve, not a free lunch.
+
+**The cost model does not survive a wider sweep either.** Holding out rates it was
+never fitted on gives 4.9% mean absolute percentage error overall but a worst cell
+of 19.7% (hybrid at 55 req/s), against this project's own <15%-per-cell rule — so
+it fails. The earlier holdout varied neither rate nor prompt length and so could
+not catch an error constant across them, which is what this sweep was for. The
+simulated policy numbers are internally consistent predictions that do not
+transfer to unseen load, and we report them as that and nothing more.
 
 Bucket-aligned packing deserves its own note. The second implementation measured
 **−29% TPU time and −49% p99**; the correctness gate then showed 4 of 48 greedy
@@ -1116,7 +1233,9 @@ map is independent of parameter count. A mechanism that never generates a
 falsifiable number is not doing work, and this project shipped three of them.
 
 We state this as the paper's least comfortable finding rather than as a
-methodological flourish. A reader should trust §4's numbers considerably more
+methodological flourish, and it is why §1 raises it before any result: a reader
+who takes it seriously will read §4's numbers and §4's explanations with different
+levels of trust, which is the correct response. A reader should trust §4's numbers considerably more
 than §4's explanations, and we would rather say so than have it discovered.
 
 ---
@@ -1249,14 +1368,18 @@ up front, and neither pays materially for it per step.**
 **Where, then, do the reported gains come from?** If the padding premise is false
 on both architectures, systems reporting end-to-end improvements from bucketing
 are improving something else, and §5 supplies a candidate from our own data: the
-one positive measurement in this work — release timing saving 26% of TPU time at
+a positive measurement in this work — release timing saving 26% of TPU time at
 25 req/s (p=0.001, six paired seeds) — is **dynamic batching**, an
 arrival-and-composition effect, not a shape effect. Bucketing schemes change
 which requests occupy a step together, and that is worth something independent of
-padding. We cannot separate the two in others' reported settings, but we can say
-that our own shape-motivated intervention paid off through a mechanism that had
-nothing to do with shape, and that a bucketing result which does not control for
-batch composition cannot distinguish the two.
+padding.
+
+We put weight on the mechanism and not on the magnitude, because the magnitude is
+the weaker half: that saving costs latency once the harness overhead inflating the
+baseline is removed (§5). The defensible claim is the negative one — **a bucketing
+result that does not control for batch composition cannot distinguish a shape
+effect from a scheduling one** — and it rests on the premise measurements in §4.3
+and §4.5, not on the size of our own re-measurement.
 
 **Scope.** One GPU (L4, 23 GB), one model, three batch points, no repeats. The
 startup figure is one sample at vLLM's default capture set; we did not vary the

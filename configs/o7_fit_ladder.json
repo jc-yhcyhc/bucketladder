@@ -1,0 +1,55 @@
+{
+  "experiment": "o7_fit_ladder",
+  "dimension": "D2",
+  "description": "Can a ladder be chosen offline from a length distribution, and does the choice predict the measured win? §4.9's winning placement was picked by knowing two prompt lengths in advance, which is not a method. This samples a lognormal workload, computes expected padded tokens per request for each available ladder, and tests whether measured latency tracks the offline prediction at the per-padded-token cost §4.9 measured.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "serve_extra_args": "--gpu-memory-utilization 0.92",
+  "independent_vars": {
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder IS the experiment: unset gives ten exponential shapes; 1024, 512 and 256 give fourteen, twenty-one and thirty-five. The point is whether the offline padding model picks the right one."
+  },
+  "workload": {
+    "kind": "lognormal",
+    "median_len": 1200,
+    "sigma": 0.9,
+    "min_len": 64,
+    "max_len": 7000,
+    "n_prompts": 120,
+    "seed": 20260813
+  },
+  "note_workload": "median 1200 rather than m10's 256, because a distribution concentrated below the first interesting ladder entry cannot discriminate between ladders -- every sample would pad to 256 or 512 on all of them. sigma 0.9 is the spread m10 uses for chat-like prompts. The SAME sampled lengths are replayed against every arm, so arms are paired on workload and differ only in ladder.",
+  "gaps": [
+    null,
+    1024,
+    512,
+    256
+  ],
+  "concurrency": 2,
+  "output_len": 32,
+  "repeats": 3,
+  "warmup_discard": 1,
+  "predicted_padding": {
+    "null": 705,
+    "1024": 407,
+    "512": 241,
+    "256": 161
+  },
+  "note_predicted": "Mean padded tokens per request over 2000 draws from this distribution, computed offline from the ladder rule (powers of two to 1024, then 1024 + k*gap). The rule was derived from three observed boot logs, not assumed; the run re-reads each arm's real ladder from the warmup log and aborts if it disagrees.",
+  "note_prediction": "REGISTERED, and quantitative. §4.9 measured a padded token at 34.9-35.3 us at this concurrency. So the offline model predicts latency reductions against the default of 298 x 35 us = 10.4 ms (gap 1024), 464 x 35 us = 16.2 ms (gap 512) and 544 x 35 us = 19.0 ms (gap 256). If measured reductions track these within the spread §4.9 reported, an offline padding model over a length distribution is a usable ladder-design tool and the placement recommendation becomes a method rather than an anecdote. If measured reductions are flat or unordered, the model does not transfer to a mixed workload and the recommendation stays anecdotal.",
+  "prediction_mechanism": "Target: mean end-to-end latency over a fixed replayed workload. Lever: ladder granularity, which changes mean padded tokens per request from 705 to 161 across the arms while leaving real tokens identical, since the same prompts are replayed. Padded tokens are real arithmetic (§4.3) at a measured 35 us each, so d(latency)/d(padded tokens) is nonzero, known, and turns the comparison into a calibrated prediction rather than a direction.",
+  "note_cardinality": "gap 256 asks for thirty-five shapes. §4.9 measured twenty-one failing to boot above 0.85, so this arm is expected to fail at 0.92 and that failure is part of the result: the padding objective is monotone in shape count, so minimising it alone drives the ladder toward the cardinality the stack cannot afford. A usable fit is the finest ladder that still boots."
+}
