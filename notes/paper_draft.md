@@ -53,41 +53,46 @@ cost we measured scales with cardinality; the benefit tracks only whether a
 boundary falls between the prompt and the next entry.
 
 Two measurements bound what that win is worth. Swept against offered load it is
-**46% of p50 latency just below the knee but only 2.6% of goodput at saturation**
-— a latency optimisation for under-saturated serving, not a capacity one, because
-a saturated server packs prefills to its token budget and padding amortises. And
+it reduces median latency by 46% at loads just below saturation, but increases
+sustained throughput by only 2.6% at saturation. The intervention therefore
+improves latency in under-saturated deployments rather than increasing capacity,
+because a saturated server packs prefill work to its token budget and the padding
+is amortised across the resulting step. And
 with prefix caching enabled, as production vLLM ships it, the same placement buys
 **1.7% rather than 12.3%**: caching shortens the prefill onto a different compiled
 entry, so the entry chosen for the prompt length is no longer the entry the step
 uses. **Compile the shapes your workload's uncached prefills straddle, not more of
 them.**
 
-We predicted this benefit would decay with concurrency and vanish by batch 16,
-following our own paid-share curve, and **registered that prediction before
-measuring it. It is wrong.** Across concurrency 1→16 in both arm orders the
-benefit persists at 3.5–12% of end-to-end latency with no crossing, because under
-chunked prefill the scheduler packs requests into steps sized to a token budget
-rather than to a compiled shape — so padding migrates from per-request to
-per-packed-step instead of dissolving. That leaves a tension with the paid-share
-curve which we report rather than resolve.
+A prediction registered before measurement, derived from the paid-share curve of
+§4.3, stated that this benefit would decay with concurrency and reach zero by
+batch 16. The measurements do not support it. Across concurrencies of 1 to 16, in
+both arm orders, end-to-end latency remains between 3.5% and 12% lower than the
+default ladder, and no crossing point is observed. The explanation is that chunked
+prefill causes the scheduler to assemble steps against a token budget rather than
+against a compiled shape, so padding is transferred from individual requests to
+the packed step rather than eliminated. This result is in tension with the
+paid-share curve, and §4.10 reports the tension rather than resolving it.
 
 We also reproduce a published latency predictor and find its length term
 contributes negligibly where errors are already below 1% and turns actively
 harmful at batch 4, and report five optimisations, four rejected and one that
 works.
 
-**One finding is about this kind of work rather than about TPUs.** We catalogue
-fourteen invalid inferences of our own, and their distribution is lopsided in a
-way we did not expect: across four rounds of external review every headline
-*measurement* survived, while four of the last five retractions were *mechanism*
-claims — a bandwidth account, a frontier bound, a microbenchmark and what it
-purported to isolate. The cause is structural. Every number here passes a contract
-that aborts on an unstated variable and is recomputed by a script that exits
-non-zero on disagreement; **no comparable machinery exists for explanations**, so a
-mechanism can be written, believed, cited by three later sections and carried
-across drafts without ever being executed. A reader should trust §4's numbers
-considerably more than §4's explanations. §6 develops this, and §4.10 and §4.12
-are two cases where a registered prediction caught it working.
+**A further result concerns experimental methodology rather than TPU serving.**
+This work catalogues fourteen invalid inferences of its own, and their
+distribution is asymmetric. Across four rounds of external review, every headline
+measurement was retained, whereas four of the five most recent retractions were
+claims about mechanism: a bandwidth account, a frontier bound, a microbenchmark,
+and the effect that microbenchmark was intended to isolate. The cause appears to
+be structural. Every reported number passes a configuration contract that aborts
+on an unstated variable, and is recomputed by a script that exits non-zero on
+disagreement, whereas no equivalent machinery constrains explanations. A proposed
+mechanism can therefore be written, accepted, cited by later sections, and carried
+across successive drafts without ever being evaluated. Readers should accordingly
+place greater confidence in the measurements of §4 than in its explanations. §6
+develops this argument, and §4.10 and §4.12 provide two cases in which a
+registered prediction identified the problem before publication.
 
 ---
 
@@ -131,7 +136,7 @@ full.
    or captured entry is close to free on a TPU ladder and on CUDA-graph capture
    alike; what shape coverage costs is warmup. The GPU comparison covers the
    request dimension, which is what graph capture quantizes.
-2. **The request ladder a TPU stack reports is not the one it executes** (§4.1).
+2. **The request ladder reported by the TPU stack differs from the one its attention kernel executes** (§4.1).
    Readable from source, confirmed by a paired hardware experiment, and visible
    in the compiler-emitted kernel name — and absent from the Ragged Paged
    Attention (RPA) paper, from LENS, and from vendor documentation.
@@ -173,12 +178,14 @@ win by 29% until a correctness gate showed it was dropping tokens.
 `max_model_len`, `max_num_batched_tokens`, tensor-parallel (TP) size, `XLA_FLAGS`
 and `ATTN_BUCKETIZED_NUM_REQS` all recorded. Every run parses the server's own
 engine-config line and **aborts** if any controlled variable disagrees with the
-config it claims to be running. This has fired three times on real mistakes, once
-on an experiment of ours that deliberately varied a control (§7).
+configuration it reports. The check has rejected three runs in which a controlled
+variable had drifted, and one in which a control was varied deliberately and
+declared (§7).
 
-**Units.** Server-side, from Prometheus histogram *deltas* taken around each
-measurement block — never client wall-clock, which includes round-trip time,
-HTTP, tokenizer and queueing.
+**Units.** All timings are measured server-side, as differences between
+Prometheus histogram snapshots taken before and after each measurement block.
+Client-side wall-clock timings are not used, because they include round-trip time,
+HTTP overhead, tokenisation and queueing delay.
 
 **Scope of instruments.** A step-scoped property requires a step-scoped
 instrument. Single-step execution is verified per dispatch from
@@ -236,7 +243,7 @@ From `tpu_inference/runner/tpu_runner.py:2133` and `runner/utils.py`, per step:
 
 ## 4. Results
 
-### 4.1 The attention ladder is not the one the system reports
+### 4.1 The attention kernel executes a different request ladder from the one reported
 
 `envs.ATTN_BUCKETIZED_NUM_REQS` defaults to `False`, and when off,
 `get_attn_req_paddings` returns `[max_req_size]` — one bucket. Every boot prints
@@ -247,7 +254,7 @@ Prepared request paddings:      [8, 16, 32, 64, 128, 256]
 Prepared attn request paddings: [256]
 ```
 
-**Attention executes at 256 requests whatever the batch size.**
+**The attention kernel executes at a fixed size of 256 request slots, independently of the batch size.**
 
 The load-bearing evidence is a paired experiment: enabling the flag compiles the
 full ladder — verified in the warmup log — and changes decode by **0.0%**
@@ -278,7 +285,8 @@ independent confirmation.
 
 An operator profile taken later closes this independently: the decode attention
 kernel is emitted as `RPAd-p_256-bq_1_1-bkv_8192_8192`. **The compiler writes the
-256-request padding into the kernel's own name**, whatever the batch size.
+256-request padding into the name of the emitted kernel**, independently of the
+batch size.
 
 Two sessions were spent searching for a promotion cost at the 8→16 edge that the
 default configuration had already excluded.
@@ -522,10 +530,12 @@ that was made in the same units, not as a figure of merit.
 
 A memory-bound step is one whose achieved bandwidth sits near the roof. Ours
 falls monotonically to **21.4% by n=64**, where the queue is 0.1 ms and the
-column is clean, so the account fails without needing the high-batch cells at
-all. **Neither holds.** The roofline keeps one honest use — byte accounting, 2.01 GB of
-weights per decode step regardless of batch — but achieved bandwidth is
-`bytes / measured time` and therefore restates the step time it is computed from.
+column is clean, so the account fails without recourse to the high-batch cells.
+**Neither the compute-bound nor the memory-bound account is supported.** One use
+of the roofline remains valid, namely byte accounting: the step reads 2.01 GB of
+weights regardless of batch size. Achieved bandwidth, however, is computed as
+bytes divided by measured time, and therefore restates the step time from which it
+is derived.
 
 (Sampling `vllm:num_requests_running` later confirmed the ladder is fully
 reachable: n=128 and n=256 both hold their requested batch under a synchronised
@@ -542,7 +552,7 @@ ridge and the ridge is not in the D3 story.
 
 **What the request-dimension mechanism is, measured directly.**
 `ATTN_BUCKETIZED_NUM_REQS` is off, so attention executes at 256 request slots
-whatever the batch — and the operator profile says what that costs. With prompt
+independently of the batch size — and the operator profile says what that costs. With prompt
 and output length fixed, so per-sequence KV is constant, attention device time
 **aggregated over the full 64-step generation** (not per step) is:
 
@@ -574,9 +584,9 @@ negligible by n=16." **We cannot claim the first from this table**, and the
 request-dimension mechanism is therefore *supported but not established*.
 
 **We ran the discriminating experiment: `b` survives, so it is not padding.**
-Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots instead of 256
-— a 32× reduction in padded slots — and the attention operator was profiled in
-both arms at the same real batch:
+Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots rather than
+256, a 32-fold reduction in padded slots. The attention operator was profiled in
+both arms at the same real batch size:
 
 | n | flag off (256 slots) | flag on (8-slot ladder) | change |
 |---|---|---|---|
@@ -585,8 +595,9 @@ both arms at the same real batch:
 | 8 | 85 081 µs | 85 055 µs | −0.0% |
 | fitted fixed term `b` | 7 158 µs | 6 991 µs | **−2%** |
 
-A per-padded-slot cost would fall by roughly 97% when the slot count drops 32×.
-It falls by 2%. **The fixed term is block-table and dispatch overhead, not
+A per-padded-slot cost would be expected to fall by approximately 97% when the
+slot count is reduced by a factor of 32. The measured reduction is 2%. **The fixed
+term therefore represents block-table and dispatch overhead rather than
 padding.** Stated as the bound the experiment actually supports: removing 248 of
 256 slots moves the fitted fixed term by 167 µs, so a padded request slot costs
 **under 0.7 µs**, against the 27.5 µs per slot that fully-paid padding would imply
@@ -757,12 +768,13 @@ requests, `output_len=32`, 18 repeats per cell pooled over both arm orders:
 | 1200 | 2048 | **1536** | 512 | 206.0 ms | 188.2 ms | **−17.9 ms** [−18.2, −17.5] |
 | 3000 | 4096 | **3072** | 1024 | 289.9 ms | 253.7 ms | **−36.2 ms** [−36.5, −36.0] |
 
-The two treated cells agree on cost per padded token to 1% — **34.9 and 35.3 µs**
-— while the placebo cells sit at +0.5 ms combined. That agreement is the load-
-bearing evidence: an arm-level offset, such as one boot simply running slower,
-produces a *constant* difference and therefore a per-token figure that scales as
-1/(tokens saved). A padding effect scales with tokens saved, which is what is
-observed. For scale, a *real* prefill token costs 46.6 µs on the same arm
+The two treated cells agree on cost per padded token to within 1%, at **34.9 and
+35.3 µs**, while the two placebo cells differ by +0.5 ms in total. This agreement
+is the principal evidence for the effect. An arm-level offset, such as one server
+instance running uniformly slower, would produce a constant difference between the
+arms, and therefore a per-token figure inversely proportional to the number of
+tokens saved. A padding effect scales with the number of tokens saved, which is
+what the measurements show. For scale, a *real* prefill token costs 46.6 µs on the same arm
 (1200→3000 tokens, 83.9 ms), so at two concurrent requests a padded token costs
 about three quarters of a real one. Token padding here is arithmetic, as §4.3
 found, and at this batch size it is arithmetic that is actually executed.
@@ -791,9 +803,10 @@ capacity.**
 Reaching that number required measuring the cliff rather than assuming it. The
 long ladder fails at 0.92, 0.90 and 0.88, and boots at 0.85; each failure is a
 `RESOURCE_EXHAUSTED` in warmup, at 0.92 requesting 32.50 MB against 12.40 MB free,
-byte-identical on two independently provisioned v5e-4 hosts. A 20 MB miss invites
-the inference that a hair of headroom would fix it. It does not: the requirement
-survives three successive backoffs, and only the fourth clears it.
+byte-identical on two independently provisioned v5e-4 hosts. A shortfall of 20 MB
+might suggest that a small reduction in the memory fraction would be sufficient.
+It is not: the requirement persists through three successive reductions, and only
+the fourth permits the server to start.
 
 **The mechanism is not steady-state competition between executables and cache**,
 which the identical capacities rule out. Every failed boot *logs a KV cache size
@@ -835,8 +848,8 @@ a boundary falls between the prompt and the next default entry.
 
 **And the fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens** —
 the same capacity as the default. So the 8.8% is the price of the twenty-one-shape
-ladder, not the price of the optimisation: −12.1% of end-to-end latency at prompt
-3000 is available at full memory, for the warmup of four extra shapes. The
+ladder, not the price of the optimisation: a 12.1% reduction in end-to-end latency at
+prompt 3000 is available at full memory, for the warmup of four extra shapes. The
 twenty-one-shape ladder buys a further −8.7% at prompt 1200, and *that* is what
 costs 8.8% of capacity and 53% more startup.
 
@@ -868,9 +881,9 @@ the finer ladder is faster:
 | 1200 | −9.9 | −18.0 | −8.9 | −16.2 | −23.0 |
 | 3000 | −18.7 | −37.3 | −21.5 | −50.4 | −37.0 |
 
-There is no crossing. The benefit is 3.5–12% of end-to-end latency at every
-concurrency sampled, it is non-monotone rather than decaying, and at n=16 it is
-larger in absolute terms than at n=1. The treated cells reproduce across arm
+There is no crossing. End-to-end latency is 3.5% to 12% lower at every concurrency
+sampled. The effect is non-monotone rather than decaying, and at n=16 it is larger
+in absolute terms than at n=1. The treated cells reproduce across arm
 orders to within a few ms at n=4 and n=16.
 
 **Why the prediction failed is visible in what the stack executes.** The
@@ -1127,8 +1140,9 @@ policy introduces on purpose. Measured under that harness the cost looked like
 +14.8% p95 (p=0.570); simulated on an efficiently driven server the same policy
 costs about **+188% p95** at 25 req/s. What survives is narrower and still worth
 saying: the hybrid policy reaches nearly all of wait-to-fill's saving — 30.2%
-against 31.9% — for a small fraction of its latency, +188% against +1461%. It is a
-point on a cost–latency curve, not a free lunch.
+against 31.9% — for a small fraction of its latency cost, +188% against +1461%.
+The result is a point on a cost–latency trade-off curve, and should not be
+presented as a saving obtained without cost.
 
 **The cost model does not survive a wider sweep either.** Holding out rates it was
 never fitted on gives 4.9% mean absolute percentage error overall but a worst cell
@@ -1232,10 +1246,10 @@ became a calibrated two-term cost model, the other established that the regime
 map is independent of parameter count. A mechanism that never generates a
 falsifiable number is not doing work, and this project shipped three of them.
 
-We state this as the paper's least comfortable finding rather than as a
-methodological flourish, and it is why §1 raises it before any result: a reader
-who takes it seriously will read §4's numbers and §4's explanations with different
-levels of trust, which is the correct response. A reader should trust §4's numbers considerably more
+We report this as a finding rather than as a methodological remark, and §1 states
+it before any result for that reason. A reader who accepts it will assign
+different levels of confidence to the measurements of §4 and to its explanations,
+which is the response the evidence warrants. A reader should trust §4's numbers considerably more
 than §4's explanations, and we would rather say so than have it discovered.
 
 ---
@@ -1310,7 +1324,7 @@ introduced the chunked prefill §4.4 controls for. **DistServe** and **Splitwise
 disaggregate prefill from decode, which is the architectural response to §4.6's
 finding that variance is a prefill phenomenon and which bounds our advice to
 co-located deployments. **Vidur** established simulator-fidelity validation as
-the standard for this kind of work; our holdout discipline follows it.
+the standard for simulation-based serving studies; our holdout discipline follows it.
 
 **BucketServe** and **LAPS** manage length-bucketing overhead on GPU, and we
 measured the comparison rather than asserting it. Same vLLM 0.25.0, same

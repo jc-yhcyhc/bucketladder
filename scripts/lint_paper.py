@@ -55,6 +55,27 @@ SELF_ADDRESSED = [
     r"stated once", r"note to self", r"TODO", r"FIXME", r"XXX",
     r"we should", r"needs rewriting", r"rewrite this",
 ]
+# Colloquial or literary register. A reviewer objected that passages read as
+# narrative rather than as technical prose, and named these as instances. Each
+# has a plain replacement: "not a free lunch" -> "a point on a trade-off curve",
+# "a hair of headroom" -> "a small reduction", "the tell" -> "the indication".
+REGISTER = [
+    r"free lunch", r"a hair of", r"\bthe tell\b", r"flourish", r"lopsided",
+    r"least comfortable", r"whatever the batch", r"this kind of work",
+    r"survives? contact with", r"\bslack the server had anyway\b",
+    r"\bnice\b", r"\bcool\b", r"\bhuge\b", r"\bawesome\b",
+]
+# A percentage belongs to a change in a quantity, not to the quantity itself.
+# "46% of p50 latency" is not English; "reduces p50 latency by 46%" is.
+UNITS_MISUSE = [
+    r"\d+(?:\.\d+)?% of (?:p50|p95|p99|median|end-to-end|e2e|goodput|throughput)",
+]
+# Single-clause dramatic declaratives. Kept as an explicit list rather than a
+# pattern, because a general rule for "short sentence" flags correct prose.
+DRAMATIC = [
+    r"\bIt is wrong\.", r"\bNeither holds\.", r"\bIt does not\.(?= )",
+    r"\bIt falls by \d", r"\bThat is that\.", r"\bFull stop\.",
+]
 # Acronym -> the expansion that must appear at or before first bare use.
 ACRONYMS = {
     "TP": "tensor-parallel", "RPA": "Ragged Paged Attention",
@@ -112,6 +133,17 @@ def main(argv: list[str] | None = None) -> int:
     for pat in SELF_ADDRESSED:
         for m in re.finditer(pat, md):
             flag("SELF-ADDRESSED", f"{pat!r}: {md[max(0, m.start() - 30):m.start() + 40]!r}")
+    for pat in REGISTER:
+        for m in re.finditer(pat, md, re.I):
+            flag("REGISTER", f"{pat!r}: {md[max(0, m.start() - 35):m.start() + 45]!r}")
+    for pat in UNITS_MISUSE:
+        for m in re.finditer(pat, md, re.I):
+            flag("UNITS-PHRASING",
+                 f"a percentage is of a CHANGE, not of the quantity: "
+                 f"{md[max(0, m.start() - 20):m.start() + 60]!r}")
+    for pat in DRAMATIC:
+        for m in re.finditer(pat, md):
+            flag("DRAMATIC", f"{pat!r}: {md[max(0, m.start() - 45):m.start() + 35]!r}")
 
     # Acronym expanded at or before first bare use. Search a whitespace-collapsed
     # copy: expansions routinely wrap across lines ("mean absolute percentage\n
