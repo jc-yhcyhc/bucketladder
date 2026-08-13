@@ -1,7 +1,8 @@
 # Shape Coverage Is a Warmup Cost: Compiled-Shape Padding in Production TPU and GPU Serving
 
 Stack: vLLM 0.25.0 on `v5litepod-4` (`tpu-inference` 0.25.0, JAX 0.10.2,
-tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-six hardware sessions, **well under budget**.
+tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-nine hardware sessions,
+approximately $108 of accelerator time.
 
 ---
 
@@ -52,9 +53,9 @@ already sized — which costs **8.8% of KV capacity** and 53% more startup. Ever
 cost we measured scales with cardinality; the benefit tracks only whether a
 boundary falls between the prompt and the next entry.
 
-Two measurements bound what that win is worth. Swept against offered load it is
-it reduces median latency by 46% at loads just below saturation, but increases
-sustained throughput by only 2.6% at saturation. The intervention therefore
+Two measurements bound what that win is worth. Swept against offered load, the
+finer placement reduces median latency by 46% at loads just below saturation, but
+increases sustained throughput by only 2.6% at saturation. The intervention therefore
 improves latency in under-saturated deployments rather than increasing capacity,
 because a saturated server packs prefill work to its token budget and the padding
 is amortised across the resulting step. And
@@ -164,9 +165,10 @@ full.
    and §4.12.
 
 **Scope.** This is primarily a measurement study: it characterises what shape
-quantization costs and where an optimisation can pay. The one intervention it
-lands (§4.9) is a documented environment variable rather than a patch, which is
-why it is measurable without a custom scheduler to be suspicious of. §5 reports
+quantization costs and where an optimisation can pay. The single intervention it
+reports (§4.9) is set through a documented environment variable rather than a
+patch, so the measurement does not depend on the correctness of a modified
+scheduler. §5 reports
 the four we designed and rejected on measurement, including one that appeared to
 win by 29% until a correctness gate showed it was dropping tokens.
 
@@ -190,8 +192,8 @@ HTTP overhead, tokenisation and queueing delay.
 **Scope of instruments.** A step-scoped property requires a step-scoped
 instrument. Single-step execution is verified per dispatch from
 `iteration_tokens_total`'s count delta, and dispatches that split are excluded
-rather than averaged. §6 classes three of our own errors as instrument-definition
-failures, which is the class no guardrail here covers.
+rather than averaged. §6 classifies three of our own errors as instrument-definition
+failures, the one class for which no guardrail described here provides coverage.
 
 **Request arrival.** Where a measurement requires *n* requests to reach the
 scheduler in one step, they are released from a thread barrier after every
@@ -365,8 +367,8 @@ of ladder boundaries.** At fixed n=4 the paid share rises with boundary size, fr
 contains shift its value independently of batch size. The sets are not the same: n=8 lacks 512→1024, the *lowest*-paying
 boundary, and n=16 lacks 4096→8192, the *highest*. Both omissions push in the
 same direction and **exaggerate the decline the table is used to show.** This is
-the error class §6 names as the project's dominant one, appearing in the headline
-table, and we found it only when a reviewer asked which boundaries each row used.
+the error class §6 identifies as this work's most frequent, occurring here in a
+headline table.
 
 Restricted to the two boundaries present in every row:
 
@@ -382,8 +384,8 @@ the matched table should be read as establishing the ordering of the rows rather
 than their absolute values.
 
 The n≤2 row rests on a single boundary, which we do not identify with either of
-the matched pair, and we quote no interval for it. It is the least well supported
-number in the paper and also the largest, which is the wrong way round.
+the matched pair, and we quote no interval for it. It is simultaneously the largest figure in the
+paper and the least well supported.
 
 The defensible statement is ordinal rather than monotone: the paid share is
 **substantial at n≤2, intermediate at n=4–8, and indistinguishable from zero at
@@ -397,9 +399,10 @@ the correct treatment, and it does not change the ordering.
 At n=1 a single request pays its full sequence bucket (flatness 0.97 at buckets
 ≤1024). At n=4 it pays a fraction.
 
-**How far up this can be measured was, in part, our own limitation.** A naive launcher makes this quantity look
-unmeasurable above n=8, because the scheduler splits every dispatch. Splitting turned out to track request count, not token
-count — a dispatch of 8192 tokens at `max_num_batched_tokens=8192` never splits,
+**The upper limit of what can be measured here was partly a property of the
+measurement apparatus.** A naive launcher makes this quantity appear unmeasurable
+above n=8, because the scheduler splits every dispatch. Splitting tracks request
+count rather than token count — a dispatch of 8192 tokens at `max_num_batched_tokens=8192` never splits,
 while one of ~1024 tokens at n=8 splits half the time — which is the signature of
 an arrival race, not a capacity limit. Releasing all requests from a thread
 barrier after connection setup cut arrival spread 7.6× at n=32 (15.4 ms → 1.7 ms)
@@ -420,17 +423,18 @@ substantially paid at n≤2 and indistinguishable from zero at n=16. The clean
 sample is small — 7 to 11 dispatches per arm after excluding
 splits — so we report the sign and the trend rather than a precise value.
 
-**We do not claim a shape for this dependence.** A within-bucket slope sweep gave
+**The functional form of this dependence is not established.** A within-bucket
+slope sweep gave
 1.61 / 0.75 / 17.18 µs/token at n=1/2/4, but the third value rests on a single
 measurement (points 9.78 / 13.13 / 13.15 at bucket 512), and all three sequence
 lengths there pad to the same sequence *and* token bucket, so no padding model
-predicts a difference. Three observations were previously described as converging on n=4 — this slope,
-the paid-padding fraction, and LENS's failure. **They are not three.** LENS's
-per-bucket linear model works at n=1–2 because within-bucket flatness is 0.97 and
-fails at n=4 because flatness has dropped; "flatness dropped" and "the paid share
-dropped" are two descriptions of one measured quantity. The slope rests on a
-single measurement by our own account. What remains is one observation, seen
-twice, plus a fragile third — and **we could not identify what changes there.**
+predicts a difference. Three observations appear to converge on n=4: this slope, the paid-padding
+fraction, and LENS's failure. They are not independent. LENS's per-bucket linear
+model works at n=1–2 because within-bucket flatness is 0.97, and fails at n=4
+because flatness has fallen; "flatness fell" and "the paid share fell" are two
+descriptions of a single measured quantity. The slope rests on one measurement, as
+noted above. What remains is one observation reported twice, together with a third
+that is not robust, and **we were unable to determine what changes at n=4.**
 
 ### 4.4 What padding costs at each boundary, and why per-request length padding does not exist
 
@@ -502,19 +506,19 @@ ladder:
 **[Figure 3 — `figures/fig3_decode.png`]** *Decode cost per sequence against
 batch size, log–log.*
 
-Two regimes, and the boundary is sharp. Below n≈8 the step barely moves: batch
-rises 8× for 1.22× the cost, and per-sequence cost falls almost as fast as batch
+There are two regimes and the boundary between them is sharp. Below n≈8 the step
+barely moves: batch rises 8× for 1.22× the cost, and per-sequence cost falls almost as fast as batch
 rises. **Above n≈32 the step is nearly linear in batch** — 1.67×, 1.82×, 1.86×
 for successive doublings — and per-sequence cost flattens at roughly 200 µs
 rather than continuing to fall.
 
 Queue time at n=128 and n=256 means those two columns are not clean wide batches;
-requests are not all resident. Nothing below rests on them. The n=64 column has a
-0.1 ms queue and already shows the second regime.
+requests are not all resident, and no claim below depends on them. The n=64
+column has a 0.1 ms queue and already shows the second regime.
 
 **The memory-bandwidth account does not survive.** A natural explanation for free
 request padding is that the step reads the whole weight set regardless of batch,
-so padded slots ride inside a floor batch size cannot move. That account predicts
+so padded slots are absorbed into a fixed cost that batch size does not change. That account predicts
 utilisation climbing toward the compute roof past the arithmetic-intensity ridge
 near 240 FLOP/byte, reaching **MFU ≈49% at n=256**. Measured:
 
@@ -529,10 +533,9 @@ and the refutation is stated below at n=64, where the queue is 0.1 ms.
 
 **MFU here is `2 × parameters × tokens` against the chip's 197 TFLOP/s bf16 peak,
 with attention FLOPs excluded** — the same dense weight-stationary accounting used
-for the intensity argument above, so the two are consistent. Two honest caveats:
-MFU during memory-bound decode is close to a tautology, since it restates step
-time against a fixed numerator, and it is used here only to falsify a prediction
-that was made in the same units, not as a figure of merit.
+for the intensity argument above, so the two are consistent. Two caveats apply. MFU during memory-bound decode is close to a tautology, since
+it restates step time against a fixed numerator; and it is used here only to
+falsify a prediction expressed in the same units, not as a figure of merit.
 
 A memory-bound step is one whose achieved bandwidth sits near the roof. Ours
 falls monotonically to **21.4% by n=64**, where the queue is 0.1 ms and the
@@ -567,9 +570,10 @@ and output length fixed, so per-sequence KV is constant, attention device time
 | attention (µs) | 16 830 | 26 011 | 45 919 | 85 103 | **163 535** |
 | per real request | 16 830 | 13 005 | 11 480 | 10 638 | 10 221 |
 
-**This does not discriminate the hypothesis.** The tempting argument — a kernel
-doing work for 256 padded slots would be flat in n, this is not flat, therefore
-padded slots are skipped — fails because *flat* was never the alternative. Padded slots hold no KV blocks (§4.1), so
+**These figures do not discriminate between the hypotheses.** The apparent
+argument — that a kernel doing work for 256 padded slots would be flat in n, that
+this is not flat, and therefore that padded slots are skipped — fails because
+flatness was never the alternative. Padded slots hold no KV blocks (§4.1), so
 no kernel could do KV-proportional work for them. The only cost padding can
 plausibly carry is a **fixed per-slot overhead** — walking 256 block-table
 entries, loading 256 metadata records, launching tiles across 256 slots
@@ -589,7 +593,8 @@ skips padded slots" and with "RPA pays a fixed cost for all 256, large at n=1 an
 negligible by n=16." **We cannot claim the first from this table**, and the
 request-dimension mechanism is therefore *supported but not established*.
 
-**We ran the discriminating experiment: `b` survives, so it is not padding.**
+**The discriminating experiment shows that the fixed term `b` is unchanged, and
+therefore is not padding.**
 Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots rather than
 256, a 32-fold reduction in padded slots. The attention operator was profiled in
 both arms at the same real batch size:
@@ -617,8 +622,8 @@ at n=1 it would be ~42%, and at n=1 the measured difference is **−0.9%**. The
 0.0% in §4.1 was not a low-power result hiding an effect — the effect is absent
 where it would have been largest.
 
-**An operator profile**, which unlike the roofline is a direct observation of
-where time went. Share of TPU device time:
+An operator profile is a direct observation of where time was spent, which the
+roofline is not. Share of TPU device time:
 
 | n | attention | collective | matmul/fusion |
 |---|---|---|---|
@@ -632,9 +637,10 @@ Nothing moves discontinuously at n=4 — every category's share changes less int
 n=4 than across some other adjacent pair — so **§4.3's convergence is not visible
 at operator granularity.**
 
-**A microbenchmark that does not measure what it appears to.** An isolated matmul at
-the model's real sharded shapes returns 142.9 µs at M=1, flat to 143.6 µs at
-M=256, which invites reading as the weight-load floor with confounds removed. The
+**One microbenchmark does not measure the quantity it appears to.** An isolated
+matmul at the model's real sharded shapes returns 142.9 µs at M=1 and 143.6 µs at
+M=256, a flatness that can be read as the weight-load floor with confounds
+removed. The
 qkv projection holds 7.86 MB per chip, so the bandwidth floor is 9.6 µs: the
 measurement sits 15× above it at **7% of peak**, timing per-dispatch overhead.
 Amortising over a loop reports 1250% of peak because XLA hoists the
@@ -643,16 +649,16 @@ streams weights from HBM every iteration and stays bandwidth-bound. **The MXU
 tiling hypothesis for §4.3's n=4 convergence is untested**; settling it needs
 weights resident in VMEM, which here means a Pallas kernel.
 
-**The pathology is real and lives in the phase that matters least.**
+The effect is real, and it occurs in the phase that contributes least to serving
+cost.
 
 ### 4.6 Per-dispatch variance is a prefill phenomenon
 
 Spread over 9 repeats, same server: decode **1.00–1.04×** at most batch sizes;
-prefill **1.00–1.03×** at n≤4 and **1.18–1.26×** at n≥8. Variance appears exactly
-where the scheduler begins splitting dispatches, and decode — which has no
-chunking decision — never shows it. Localisation, not mechanism: step *count*
-does not correlate with cost within a cell, so the variance is in *how* a
-dispatch splits.
+prefill **1.00–1.03×** at n≤4 and **1.18–1.26×** at n≥8. Variance appears exactly where the scheduler begins splitting dispatches, and
+decode, which makes no chunking decision, never exhibits it. This localises the
+effect without explaining it: step *count* does not correlate with cost within a
+cell, so the variance lies in *how* a dispatch splits.
 
 The 1.00–1.04× figure does not describe every cell. Bootstrapping the decode
 cells §4.1 depends on gives 95% interval widths of 38.7% at n=8 and 28.2% at
@@ -661,8 +667,8 @@ than several differences a reader might otherwise treat as signal.
 
 ### 4.7 The cheapness of padding is not an artifact of the sharding
 
-Holding model, chips and workload fixed and varying only tensor-parallel degree.
-The prediction was registered in the configs before the measurement: per-chip
+Model, chips and workload were held fixed while tensor-parallel degree alone was
+varied. The prediction was registered in the configs before measurement: per-chip
 weight bytes scale as 1/TP, where TP is the tensor-parallel degree — the number
 of chips a single model's weights are sharded across — so the level should scale
 with 1/TP and the shape should be preserved.
@@ -673,13 +679,14 @@ with 1/TP and the shape should be preserved.
 | 2 | 1.63× | 2.00× | 2.41× |
 | 1 | 2.86× | **4.00×** | **1.83×** |
 
-**Both halves of the prediction missed.** The level scales *sub*-proportionally,
+**Both halves of the prediction were wrong.** The level scales
+*sub*-proportionally,
 which the roofline cannot explain because it does not model the inter-chip
 collectives the higher-TP arms pay. And the shape is not preserved: the curve
 gets **flatter** with less sharding, which is what a larger per-chip weight floor
 implies — more of the step is floor, so batch size moves it less.
 
-**The two misses are one omitted term.** Fitting `T(TP) = W/TP + F` — a weight
+**Both errors follow from a single omitted term.** Fitting `T(TP) = W/TP + F` — a weight
 load that shards, plus a fixed cost that does not — to the three levels gives
 
     T(TP) = 2.48/TP + 0.38     (normalised to the TP=4 step)
@@ -698,16 +705,15 @@ flattening of the curve.
 communication: collectives are
 zero at TP=1 and largest at TP=4, so they scale *with* TP while `F` by
 construction does not. That a TP-invariant constant fits to 0.01 is evidence the
-term is dispatch and host overhead rather than communication — which connects
-directly to the per-dispatch floor §4.5 retracts, and is the more interesting
-reading. We have not partitioned `F` into device and host time; an operator
+term is dispatch and host overhead rather than communication — which connects directly to
+the per-dispatch floor §4.5 retracts. We have not partitioned `F` into device and host time; an operator
 profile at TP=1 and TP=2 would do it, and if the ~13.4% collective share does not
 fall toward zero at TP=1 then one of the two measurements is wrong. Note also
 that with `T(4)=1` by normalisation this is one free parameter against two
 informative points, so the fit quality is weaker evidence than "0.01 across three
 points" suggests. What was reported as a failed prediction is better read
 as a calibrated two-term cost model, and it independently bounds the per-step
-fixed overhead that §4.5's retracted microbenchmark was groping for.
+fixed overhead that §4.5's retracted microbenchmark failed to isolate.
 
 Both misses point the same way, and together they answer the objection. If
 request-dimension padding were cheap only because that dimension is not the
@@ -741,8 +747,8 @@ above are *prefill* (§4.3) — applying it to them is the domain error §6 clas
 as our twelfth, and we report the numbers as measurements with the explanation
 withdrawn. And the intensity argument explains why model size should not move the
 paid share, not why it moved *down*; the likely reason is that non-weight fixed
-costs are a larger fraction of a 0.55 GB model's step, leaving more slack for
-padding to hide in.
+costs form a larger fraction of a 0.55 GB model's step, so a greater share of the
+step is insensitive to padding.
 
 **Dtype is the lever that should move it, on the token dimension.** W8 weights
 halve bytes and leave FLOPs alone, doubling intensity per token, so the crossing
@@ -815,8 +821,7 @@ It is not: the requirement persists through three successive reductions, and onl
 the fourth permits the server to start.
 
 **The mechanism is not steady-state competition between executables and cache**,
-which the identical capacities rule out. Every failed boot *logs a KV cache size
-before it dies* — 358,144 tokens at 0.90, 348,928 at 0.88 — so the cache is sized
+which the identical capacities rule out. Every failed boot records a KV cache size before terminating — 358,144 tokens at 0.90, 348,928 at 0.88 — so the cache is sized
 to fill the fraction first and compilation then asks for scratch against what is
 left. Shape coverage is charged to transient compilation headroom that the sizing
 step does not reserve, which is why the price appears as a boot cliff rather than
@@ -862,10 +867,10 @@ costs 8.8% of capacity and 53% more startup.
 The recommendation this supports is therefore not "compile more shapes" but
 **"compile the shapes your prompt distribution straddles."** Cardinality is what
 the stack charges for; placement is what serving latency responds to. A ladder
-chosen against a workload dominates a uniformly finer one on both axes at once,
-and the mechanism says why: padding is arithmetic (§4.3), a well-placed boundary
-removes it, and a badly-placed boundary is an executable the compiler pays for and
-the scheduler never benefits from.
+chosen against a workload dominates a uniformly finer one on both axes
+simultaneously, and the mechanism accounts for this: padding is arithmetic (§4.3),
+a well-placed boundary removes it, and a badly-placed boundary is an executable
+that the compiler pays to produce and the scheduler never uses.
 
 Scope. Two prompt lengths on one model, and the placement that helps here was
 chosen by knowing the prompts in advance. Choosing a ladder from a measured
@@ -921,8 +926,8 @@ ladders differ precisely inside the bin. The histogram establishes that packed
 steps land where the ladders differ; it cannot say by how much. Resolving the
 tension needs per-step token counts, not a bucketed distribution.
 
-**A design defect, stated because it bounds the result.** Prompt 300 was intended
-as a placebo at every concurrency, on the reasoning that it pads to 512 on both
+**One design defect bounds these results and is stated here for that reason.**
+Prompt 300 was intended as a placebo at every concurrency, on the reasoning that it pads to 512 on both
 ladders. The step histogram shows that is true only while each request prefills
 in its own dispatch — at n≥4 the packed step lands where the ladders differ, so
 the cell is treated, not inert. Its measured difference is correspondingly
@@ -976,8 +981,9 @@ Both ladders knee between 8 and 12 req/s and saturate near 14. **The registered
 prediction was half right.** Sustained goodput does rise — 14.03 to 14.40 req/s,
 **+2.6%** — so the padding removed was not pure slack. But 2.6% is far short of
 what "padded tokens are real arithmetic" implies for a 25% cut in the prefill
-shape, and it is not where the effect lives. The effect lives just below the knee:
-at 8 req/s the placement ladder is **46% faster at p50 and 39% at p95**.
+shape, and it is not where the effect is concentrated. The effect is
+concentrated just below the knee: at 8 req/s the placement ladder is **46% faster
+at p50 and 39% at p95**.
 
 That shape is what §4.3 predicts, and it repairs part of the tension §4.10 leaves
 open. A saturated server packs prefills to the `max_num_batched_tokens` budget, so
@@ -991,11 +997,11 @@ the same nominal rate; the two are not in conflict once the regime is named.
 So the conversion is: **a well-placed ladder is a latency optimisation for
 under-saturated serving, and only marginally a capacity one.** For the fourteen-
 shape ladder this is an easy trade, since it costs no KV capacity at all (§4.9) —
-four extra compiled shapes buy up to 46% of tail latency in the regime most
-interactive deployments actually run in. For the twenty-one-shape ladder, which
-costs 8.8% of capacity, the same arithmetic is a warning: 8.8% less cache against
-2.6% more goodput is a bad exchange at saturation, and that arm is not the one we
-recommend.
+four extra compiled shapes reduce tail latency by up to 46% in the regime most
+interactive deployments run in. For the twenty-one-shape ladder, which costs 8.8%
+of capacity, the same arithmetic argues against it: surrendering 8.8% of the cache to
+gain 2.6% in sustained throughput is an unfavourable exchange at saturation, and that
+configuration is not the one we recommend.
 
 ### 4.12 Prefix caching moves the target, and the recommendation must follow it
 
@@ -1114,8 +1120,8 @@ The one that works is the one aimed at the single dimension the measurements lef
 open. Three of the four rejected optimisations target the request dimension or
 per-request length padding, and §4.1 and §4.4 show neither carries cost; the
 fourth restructures work the stack already packs. The token dimension is the only
-place the premise survived contact with measurement, and it is the only place an
-intervention paid — though not for the reason we expected, since we predicted the
+place where the premise was not refuted by measurement, and the only place where
+an intervention produced a gain — though not for the reason we expected, since we predicted the
 payoff would be confined to low concurrency and it was not (§4.10).
 
 A second positive measurement — release timing saving 26% of TPU time against
@@ -1144,8 +1150,8 @@ of our own driver.** The harness scrapes `/metrics` around every batch, adding a
 inflates *stock's* p95 from roughly 24 ms to 86 ms and hides the delay the waiting
 policy introduces on purpose. Measured under that harness the cost looked like
 +14.8% p95 (p=0.570); simulated on an efficiently driven server the same policy
-costs about **+188% p95** at 25 req/s. What survives is narrower and still worth
-saying: the hybrid policy reaches nearly all of wait-to-fill's saving — 30.2%
+costs about **+188% p95** at 25 req/s. The defensible statement is narrower: the hybrid policy reaches nearly all of
+wait-to-fill's saving — 30.2%
 against 31.9% — for a small fraction of its latency cost, +188% against +1461%.
 The result is a point on a cost–latency trade-off curve, and should not be
 presented as a saving obtained without cost.
@@ -1158,7 +1164,7 @@ not catch an error constant across them, which is what this sweep was for. The
 simulated policy numbers are internally consistent predictions that do not
 transfer to unseen load, and we report them as that and nothing more.
 
-Bucket-aligned packing deserves its own note. The second implementation measured
+Bucket-aligned packing requires a separate note. The second implementation measured
 **−29% TPU time and −49% p99**; the correctness gate then showed 4 of 48 greedy
 completions differed, every one at a prompt length just above a bucket boundary.
 The patch was silently dropping prompt tokens. Trimming `num_scheduled_tokens`
@@ -1187,8 +1193,8 @@ quantities measured at different batch sizes"* would not have caught the
 because batch size is not a top-level field — it lives inside experiment-specific
 structures. The working form diffs **every** config key across a claim's source
 runs, exempts only free text, and requires each difference to be named. It
-flagged five claims already believed correct and has since killed two of our own
-headline numbers: a crossover point and a recoverable-headroom figure.
+flagged five claims already believed correct, and has since invalidated two of
+our own headline numbers: a crossover point and a recoverable-headroom figure.
 
 **Its coverage is the set of *registered* claims, not the set of claims made.**
 The headroom figure evaded it for three drafts by living in prose, and was caught
@@ -1227,7 +1233,7 @@ one. Both would have fired before hardware was provisioned.
 
 Fourteen entries above are inferences from numbers. Counting them alone hides
 something the project's history makes obvious: **the measurements have survived
-three rounds of external review largely intact, and the explanations have not.**
+four rounds of external review largely intact, and the explanations have not.**
 
 Every headline measurement in §4 still stands as measured. What has been
 withdrawn, in order, is a crossover rule, a recoverable-headroom figure, a
@@ -1250,13 +1256,13 @@ have to a fix, and its record is instructive: both predictions **failed**, and
 both failures were more informative than the successes would have been — one
 became a calibrated two-term cost model, the other established that the regime
 map is independent of parameter count. A mechanism that never generates a
-falsifiable number is not doing work, and this project shipped three of them.
+falsifiable number does no work, and this work published three such mechanisms
+before withdrawing them.
 
 We report this as a finding rather than as a methodological remark, and §1 states
-it before any result for that reason. A reader who accepts it will assign
-different levels of confidence to the measurements of §4 and to its explanations,
-which is the response the evidence warrants. A reader should trust §4's numbers considerably more
-than §4's explanations, and we would rather say so than have it discovered.
+it before any result for that reason. A reader who accepts it will assign greater
+confidence to the measurements of §4 than to its explanations, which is the
+response the evidence warrants.
 
 ---
 
@@ -1265,7 +1271,7 @@ than §4's explanations, and we would rather say so than have it discovered.
 **One TPU slice, one GPU, one primary model.** v5litepod-4 with a 4B model, and a
 single L4 for the control. The sharding objection we can answer — a TP=1/2/4
 ablation (§4.7) finds request padding cheap at every sharding — but model scale
-and multi-host topology are unmeasured, and both change what padding hides under.
+and multi-host topology are unmeasured, and both change the fixed costs within which padding can be absorbed.
 §4.8 argues analytically that the regime map is a function of batch size and
 dtype rather than parameter count, for dense weight-stationary decode only.
 
@@ -1296,9 +1302,9 @@ sample is 7–11 dispatches per arm.
 
 **The n=4 convergence is unexplained and is not an operator effect.** An
 operator-level profile shows every category of device time moving smoothly
-through n=4. We also no longer claim three independent observations converge
-there: LENS's failure and the paid-share drop are the same quantity described
-twice (§4.3).
+through n=4. The three observations that appear to converge there are not
+independent: LENS's failure and the paid-share drop are the same quantity
+described twice (§4.3).
 
 **The GPU control is one point, not a curve.** We measured startup at vLLM's
 default capture set and did not vary the number of captured shapes — which is
@@ -1388,8 +1394,8 @@ up front, and neither pays materially for it per step.**
 
 **Where, then, do the reported gains come from?** If the padding premise is false
 on both architectures, systems reporting end-to-end improvements from bucketing
-are improving something else, and §5 supplies a candidate from our own data: the
-a positive measurement in this work — release timing saving 26% of TPU time at
+are improving something else, and §5 supplies a candidate from our own data. A
+positive measurement in this work — release timing saving 26% of TPU time at
 25 req/s (p=0.001, six paired seeds) — is **dynamic batching**, an
 arrival-and-composition effect, not a shape effect. Bucketing schemes change
 which requests occupy a step together, and that is worth something independent of
@@ -1414,8 +1420,8 @@ Two accelerator families reach the same design by different routes — XLA compi
 a ladder of shapes, CUDA captures a graph per batch size — and both round every
 step up to the nearest entry. The optimisation literature treats that rounding as
 a cost to be recovered. **It is not, on either.** A batch just above an entry
-costs what the entry below costs; the padding rides inside work the step was
-doing anyway, because a ragged attention kernel does almost no work for slots
+costs what the entry below costs; the padding is absorbed into work the step was
+already performing, because a ragged attention kernel does almost no work for slots
 holding no KV blocks — under 0.7 µs per slot, against 27.5 µs if it were paid and a captured graph does not care that some of its batch is unused.
 
 What shape coverage costs is **warmup**. Enabling CUDA-graph capture costs 108

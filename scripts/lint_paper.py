@@ -62,13 +62,23 @@ SELF_ADDRESSED = [
 REGISTER = [
     r"free lunch", r"a hair of", r"\bthe tell\b", r"flourish", r"lopsided",
     r"least comfortable", r"whatever the batch", r"this kind of work",
-    r"survives? contact with", r"\bslack the server had anyway\b",
+    r"surviv\w* contact with", r"\bslack the server had anyway\b",
     r"\bnice\b", r"\bcool\b", r"\bhuge\b", r"\bawesome\b",
+    # classes found in the full-paper scan
+    r"groping", r"hides under", r"\bshipped\b", r"deserves its own",
+    r"\bkilled\b", r"wrong way round", r"want re-measuring", r"rides? inside",
+    r"tempting argument", r"honest caveat", r"worth saying", r"\bdies\b",
+    r"is a warning", r"the effect lives", r"says why", r"prediction missed",
+    r"\bpathology\b", r"hide in", r"no longer claim", r"no longer describe",
 ]
 # A percentage belongs to a change in a quantity, not to the quantity itself.
 # "46% of p50 latency" is not English; "reduces p50 latency by 46%" is.
 UNITS_MISUSE = [
-    r"\d+(?:\.\d+)?% of (?:p50|p95|p99|median|end-to-end|e2e|goodput|throughput)",
+    # Only latency/throughput metrics: "8.8% of KV capacity" is a correct
+    # statement about a fraction of a resource, whereas "46% of p50 latency"
+    # means a reduction and is not English.
+    r"\d+(?:\.\d+)?% of (?:p50|p95|p99|median|end-to-end|e2e|goodput|throughput|"
+    r"tail latency)",
 ]
 # Single-clause dramatic declaratives. Kept as an explicit list rather than a
 # pattern, because a general rule for "short sentence" flags correct prose.
