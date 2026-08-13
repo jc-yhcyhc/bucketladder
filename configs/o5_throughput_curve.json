@@ -1,0 +1,41 @@
+{
+  "experiment": "o5_throughput_curve",
+  "dimension": "D2",
+  "description": "The throughput side of the ladder trade. Every ladder result in this paper is latency at fixed concurrency, and the cost of a longer ladder is denominated in KV cache tokens; the two are never converted, so a reader cannot judge whether trading capacity for latency is a good deal. This sweeps offered load against both ladders and reports goodput with latency, in one currency.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "serve_extra_args": "--gpu-memory-utilization 0.92",
+  "note_memory": "0.92 -- the STOCK fraction -- on both arms, which is possible only because the arms compared here are the ten-shape default and the fourteen-shape gap-1024 ladder, and S4.9 measured that the fourteen-shape ladder boots at 0.92 with the full 367,360 tokens. The twenty-one-shape ladder cannot be run at 0.92 at all, which is itself the reason it is not the arm under test: comparing it here would require dropping to 0.85 on one side and would reintroduce the memory fraction as a confound, which is failure 14 in S6.",
+  "independent_vars": {
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder placement IS the experiment: unset gives ten exponential shapes, 1024 gives fourteen with an entry at 3072 that the default lacks. Varying it is the point."
+  },
+  "arrival_rates": [
+    2,
+    4,
+    8,
+    12,
+    16,
+    24
+  ],
+  "prompt_len": 3000,
+  "output_len": 32,
+  "requests_per_rate": 60,
+  "note_prompt_len": "3000 only. This is the length where the two ladders differ (4096 against 3072), so it is the length whose padding the placement removes. A rate sweep at 1200, where both ladders pad to 2048, would measure nothing and cost the same money.",
+  "note_prediction": "REGISTERED. Padded tokens are real arithmetic (S4.3), so removing 1024 padded tokens per prefill step should raise the load at which the server saturates, not merely lower latency at fixed load. Concretely: the gap-1024 arm should sustain a higher request rate before p95 latency knees, and its goodput at the knee should exceed the default's. If instead the two curves coincide and only the low-load latencies differ, then the padding saved is slack the server had anyway, the benefit does not convert into capacity, and the recommendation must be stated as a latency-only one.",
+  "prediction_mechanism": "Target: sustained goodput (completed requests/s) and p95 end-to-end latency against offered rate. Lever: ladder placement, which changes padded tokens per prefill step by 1024 out of 4096 while leaving real tokens fixed. Padded tokens consume MXU time that would otherwise serve queued work, so d(goodput)/d(lever) is nonzero under the established mechanism and zero under the hypothesis that padding rides inside slack.",
+  "note_saturation": "Rates are chosen to bracket the knee rather than to sit under it. S4.4's earlier rate sweep ran at a single 8 req/s, which is the defect this design exists to avoid: a single load point cannot distinguish a large effect near saturation from a modest one in the linear regime."
+}

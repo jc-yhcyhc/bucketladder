@@ -57,6 +57,25 @@ def token_ids(n: int, seed: int = 0, vocab_lo: int = 1000, vocab_hi: int = 20000
     return [rng.randint(vocab_lo, vocab_hi) for _ in range(n)]
 
 
+def shared_prefix_ids(prefix_len: int, suffix_len: int, seed: int = 0,
+                      prefix_seed: int = 777) -> list[int]:
+    """A prompt that begins with a prefix every request shares.
+
+    `token_ids` gives a different sequence for every seed, so a workload built
+    from it has nothing in common between requests and a prefix cache can never
+    hit. Measuring prefix caching against such a workload would show it doing
+    nothing, and would say nothing about production, where the shared span is the
+    entire point: a system prompt, a few-shot preamble, a conversation so far.
+
+    The prefix is fixed across requests (one `prefix_seed`); only the suffix
+    varies. With caching on, the server should prefill roughly `suffix_len`
+    tokens instead of `prefix_len + suffix_len`, which changes which compiled
+    shape the step lands on -- and that is what makes ladder placement depend on
+    whether caching is enabled.
+    """
+    return token_ids(prefix_len, seed=prefix_seed) + token_ids(suffix_len, seed=seed)
+
+
 # ---------------------------------------------------------------------------
 # Real client
 # ---------------------------------------------------------------------------
@@ -68,17 +87,28 @@ def complete(
     output_len: int = 1,
     seed: int = 0,
     timeout: float = 600.0,
+    prefix_len: int = 0,
 ) -> Sample:
     """One streaming completion of an exactly-`prompt_len`-token prompt.
 
     output_len defaults to 1: for prefill-cost measurement we want TTFT to
     dominate and decode to contribute as little as possible.
+
+    `prefix_len > 0` makes the first `prefix_len` tokens identical across every
+    request, so a prefix cache has something to hit; the total length is still
+    exactly `prompt_len`. See `shared_prefix_ids`.
     """
     url = base_url.rstrip("/") + "/v1/completions"
+    if prefix_len:
+        if prefix_len >= prompt_len:
+            raise ValueError(f"prefix_len {prefix_len} must be < prompt_len {prompt_len}")
+        prompt = shared_prefix_ids(prefix_len, prompt_len - prefix_len, seed=seed)
+    else:
+        prompt = token_ids(prompt_len, seed=seed)
     body = json.dumps(
         {
             "model": model,
-            "prompt": token_ids(prompt_len, seed=seed),
+            "prompt": prompt,
             "max_tokens": output_len,
             "temperature": 0.0,
             "stream": True,

@@ -50,8 +50,17 @@ twenty-one-shape ladder, by contrast, will not start above `gpu_memory_utilizati
 0.85 against a 0.92 default — compilation asks for scratch after the cache is
 already sized — which costs **8.8% of KV capacity** and 53% more startup. Every
 cost we measured scales with cardinality; the benefit tracks only whether a
-boundary falls between the prompt and the next entry. **Compile the shapes your
-prompt distribution straddles, not more of them.**
+boundary falls between the prompt and the next entry.
+
+Two measurements bound what that win is worth. Swept against offered load it is
+**46% of p50 latency just below the knee but only 2.6% of goodput at saturation**
+— a latency optimisation for under-saturated serving, not a capacity one, because
+a saturated server packs prefills to its token budget and padding amortises. And
+with prefix caching enabled, as production vLLM ships it, the same placement buys
+**1.7% rather than 12.3%**: caching shortens the prefill onto a different compiled
+entry, so the entry chosen for the prompt length is no longer the entry the step
+uses. **Compile the shapes your workload's uncached prefills straddle, not more of
+them.**
 
 We predicted this benefit would decay with concurrency and vanish by batch 16,
 following our own paid-share curve, and **registered that prediction before
@@ -426,7 +435,10 @@ batch size. The two quantities are reported separately and not multiplied.
 
 Per-request *length* padding does not exist. Holding batch size and total tokens
 fixed and varying only the spread of request lengths, the batch-padding model is
-rejected by **44–618%**; cost tracks packed tokens. Uniform controls, where all
+rejected in every ragged cell, by **at least 44%** (the range runs to 618%, but a
+span of more than an order of magnitude is a directional refutation rather than a
+measured effect size, so the minimum is the number that carries the claim); cost
+tracks packed tokens. Uniform controls, where all
 candidate models agree, match to 1.9%. **This is not chunked prefill**: with
 `--no-enable-chunked-prefill` the result is unchanged (packed wins 8/10 ragged
 cells, batch padding rejected by 75–579%).
@@ -461,10 +473,21 @@ so padded slots ride inside a floor batch size cannot move. That account predict
 utilisation climbing toward the compute roof past the arithmetic-intensity ridge
 near 240 FLOP/byte, reaching **MFU ≈49% at n=256**. Measured:
 
-| n | 1 | 8 | 32 | 64 | 256 |
+| n | 1 | 8 | 32 | 64 | 256 † |
 |---|---|---|---|---|---|
 | MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
 | HBM BW utilisation | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
+
+† Queue-contaminated, as flagged above: at n=256 the requests are not all
+resident. The column is kept because it is the batch size the prediction names,
+and the refutation is stated below at n=64, where the queue is 0.1 ms.
+
+**MFU here is `2 × parameters × tokens` against the chip's 197 TFLOP/s bf16 peak,
+with attention FLOPs excluded** — the same dense weight-stationary accounting used
+for the intensity argument above, so the two are consistent. Two honest caveats:
+MFU during memory-bound decode is close to a tautology, since it restates step
+time against a fixed numerator, and it is used here only to falsify a prediction
+that was made in the same units, not as a figure of merit.
 
 A memory-bound step is one whose achieved bandwidth sits near the roof. Ours
 falls monotonically to **21.4% by n=64**, where the queue is 0.1 ms and the
@@ -673,10 +696,13 @@ paid share, not why it moved *down*; the likely reason is that non-weight fixed
 costs are a larger fraction of a 0.55 GB model's step, leaving more slack for
 padding to hide in.
 
-**Dtype is the lever that does move it, on the token dimension.** W8 weights halve
-bytes and leave FLOPs alone, doubling intensity per token, so the crossing moves
-from batch ≈ 240 to ≈ 120. **Registered prediction: under W8, the token-dimension
-paid share at a fixed boundary rises.** We have not run it.
+**Dtype is the lever that should move it, on the token dimension.** W8 weights
+halve bytes and leave FLOPs alone, doubling intensity per token, so the crossing
+moves from batch ≈ 240 to ≈ 120. That yields a registered prediction — under W8
+the token-dimension paid share at a fixed boundary rises — which **we have not
+run**. It is stated here because the arithmetic that generates it belongs with the
+intensity argument; as an untested prediction it is future work, not a result, and
+nothing in §4.9 or §4.10 depends on it.
 
 ### 4.9 A finer ladder does pay — and the price is startup, not capacity
 
@@ -879,13 +905,104 @@ earns its startup at low concurrency, and does not reverse anywhere up to n=16.*
 The low-concurrency claim carries an interval; the rest carries a direction only.
 Where the benefit stops we cannot say, because within 1→16 it does not.
 
+### 4.11 What the placement win converts into: latency below the knee, not capacity
+
+Every ladder number above is latency at a fixed, small concurrency, and the cost
+of a longer ladder is denominated in KV cache tokens. Those are different
+currencies, and a deployment deciding whether to spend memory on shapes needs the
+conversion. Sweeping offered load open-loop against both ladders, at the stock
+0.92 fraction where both boot, 60 requests per rate at prompt 3000:
+
+| offered req/s | goodput (default → gap1024) | p50 ms | p95 ms |
+|---|---|---|---|
+| 2 | 2.30 → 2.30 | 286 → 246 | 504 → 318 |
+| 4 | 4.59 → 4.59 | 326 → 256 | 758 → 496 |
+| 8 | 9.03 → 9.08 | **974 → 529** | **1622 → 996** |
+| 12 | 12.45 → 12.68 | 2088 → 1895 | 3471 → 3093 |
+| 16 | 13.45 → 13.84 | 2571 → 2275 | 3570 → 3418 |
+| 24 | **14.03 → 14.40** | 3026 → 2921 | 3881 → 3727 |
+
+Both ladders knee between 8 and 12 req/s and saturate near 14. **The registered
+prediction was half right.** Sustained goodput does rise — 14.03 to 14.40 req/s,
+**+2.6%** — so the padding removed was not pure slack. But 2.6% is far short of
+what "padded tokens are real arithmetic" implies for a 25% cut in the prefill
+shape, and it is not where the effect lives. The effect lives just below the knee:
+at 8 req/s the placement ladder is **46% faster at p50 and 39% at p95**.
+
+That shape is what §4.3 predicts, and it repairs part of the tension §4.10 leaves
+open. A saturated server packs prefills to the `max_num_batched_tokens` budget, so
+padding amortises across a full step and the ladder barely matters — the paid
+share falls with batch, exactly as §4.3 measured. Below saturation the steps are
+small and closer to per-request, and the ladder entry is most of what the step
+costs. §4.10's persistent benefit was measured under burst arrival at fixed
+concurrency, which loads the server differently from a steady arrival process at
+the same nominal rate; the two are not in conflict once the regime is named.
+
+So the conversion is: **a well-placed ladder is a latency optimisation for
+under-saturated serving, and only marginally a capacity one.** For the fourteen-
+shape ladder this is an easy trade, since it costs no KV capacity at all (§4.9) —
+four extra compiled shapes buy up to 46% of tail latency in the regime most
+interactive deployments actually run in. For the twenty-one-shape ladder, which
+costs 8.8% of capacity, the same arithmetic is a warning: 8.8% less cache against
+2.6% more goodput is a bad exchange at saturation, and that arm is not the one we
+recommend.
+
+### 4.12 Prefix caching moves the target, and the recommendation must follow it
+
+Prefix caching is off and asserted everywhere else in this work, and production
+vLLM enables it by default. It removes already-computed prefix tokens from the
+prefill, so the step lands on a different compiled shape than the request's length
+implies — which bears directly on a recommendation about where to place entries.
+
+Testing it needs a workload with something to cache: requests built from
+independent token sequences share nothing, a cache cannot hit them, and an
+experiment run against that workload would report caching doing nothing while
+saying nothing about production. Every request here shares a fixed 2048-token
+prefix and varies only its 952-token tail, which is the shape of a system prompt
+or a few-shot preamble. Prompt 3000, two concurrent requests, both ladders:
+
+| ladder | caching | e2e | prompt tokens cached |
+|---|---|---|---|
+| default (10) | off | 292.5 ms | 0 |
+| gap 1024 (14) | off | 256.6 ms | 0 |
+| default (10) | **on** | 181.5 ms | +43,008 |
+| gap 1024 (14) | **on** | 178.5 ms | +43,008 |
+
+**The placement benefit collapses from 35.9 ms (−12.3%) to 3.0 ms (−1.7%).** The
+registered prediction said it would, and for the stated reason: with 2048 tokens
+cached the server prefills about 952, which pads to 1024 on *both* ladders, and
+the two ladders differ only at 3072 against 4096. The entry chosen in §4.9 is
+simply not the entry the step uses any more. The cached-token counter is the arm's
+own evidence that the treatment applied — 43,008 tokens is exactly 21 × 2048, so
+twenty-one of twenty-two requests hit the prefix and the first populated it.
+
+Two consequences, and the second is the one a practitioner needs.
+
+The mechanism is unchanged; the operating point moved. Caching does not make
+padded tokens cheap, it removes tokens from the prefill, and a ladder placed
+against prompt length is then placed against the wrong distribution.
+
+**So the recommendation is: place compiled entries against the distribution of
+*uncached prefill lengths*, not of prompt lengths.** Under production defaults
+those differ by however much prefix sharing the workload has, and here that is the
+difference between an entry at 3072 buying 12.3% and buying nothing. This also
+bounds the scope of §4.9 and §4.11 honestly: they are measured with caching off,
+so they describe workloads with little prefix reuse — a fresh-document or
+single-turn regime — and they overstate the available win for a workload with a
+long shared system prompt.
+
+Caching is also, on this workload, worth far more than the ladder: 292.5 → 181.5
+ms on the default ladder, a 38% reduction, against the 12.3% the best placement
+buys without it. Where both apply, the ordering of effort is clear.
+
+
 ---
 
 ## 5. Five optimisations, four rejected and one that works
 
 | | outcome |
 |---|---|
-| **ladder placed against the workload** | **works: −12.1% end-to-end at n=2 at full memory; a uniformly finer ladder buys the same and costs 8.8% of KV (§4.9, §4.10)** |
+| **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; −1.7% once prefix caching is on (§4.9–§4.12)** |
 | bucket-aware admission control | premise false (§4.4) |
 | ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
@@ -1022,9 +1139,17 @@ has no valid placebo, because the scheduler packs requests into shared steps tha
 straddle ladder entries, so those rows are floors on the effect rather than
 unbiased estimates.
 
+**Prefix caching is measured but not swept.** §4.12 tests it at one prefix
+length (2048 of 3000 tokens) on one workload shape, which is enough to show the
+placement target moves and not enough to say where it lands for a given amount of
+prefix reuse. Everything outside §4.12 is measured with caching off, so those
+sections describe workloads with little prefix sharing.
+
 **No production trace.** §4.4's four length distributions are parametric families
 and were not matched on offered tokens, which is why we withdraw the range they
-produced rather than report it.
+produced rather than report it. No measurement here says how much padding a real
+workload executes; §4.12 shows why that number would be workload-specific even if
+we had it.
 
 **Prefill step cost above n=16 is still not isolable**, and at n=16 the clean
 sample is 7–11 dispatches per arm.

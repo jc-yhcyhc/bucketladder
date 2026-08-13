@@ -1,0 +1,39 @@
+{
+  "experiment": "o6_prefix_caching",
+  "dimension": "D2",
+  "description": "Does §4.9's ladder-placement recommendation survive prefix caching, which production vLLM enables by default and this work disables everywhere else? Caching removes already-computed prefix tokens from the prefill, so the step lands on a different compiled shape than the request length implies -- which would mean entries must be placed against the uncached prefill length, not the prompt length.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "serve_extra_args": "--gpu-memory-utilization 0.92 (+ --enable-prefix-caching on the _apc_on arms)",
+  "independent_vars": {
+    "enable_prefix_caching": "THE experiment. Every other section in this paper pins it off and asserts it; production vLLM defaults it on, and it changes which compiled shape a prompt's prefill lands on. Varying it is the only way to say whether the ladder recommendation holds in a production configuration.",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The second factor: ten exponential shapes unset against fourteen with an entry at 3072 when 1024. The design is a 2x2 because the question is whether caching and placement interact, not whether either has a main effect."
+  },
+  "prompt_lens": [
+    3000
+  ],
+  "prefix_len": 2048,
+  "concurrency": 2,
+  "output_len": 32,
+  "repeats": 9,
+  "warmup_discard": 2,
+  "note_prompt_lens": "3000 only, and 3000 is the length where the two ladders differ (4096 against 3072). It is also long enough to carry a 2048-token shared prefix and still leave a 952-token tail, which is the arithmetic the prediction turns on.",
+  "note_prefix": "2048 tokens shared by every request, 952 varying. Requests built from token_ids alone share nothing and a prefix cache cannot hit them, so an APC arm measured against that workload would show caching doing nothing and would say nothing about production. The shared span here stands in for a system prompt or few-shot preamble.",
+  "note_prediction": "REGISTERED. With caching on, a 2048-token prefix should leave roughly 952 tokens to prefill, which pads to 1024 on BOTH ladders -- they differ only at 3072 against 4096. So §4.9's placement benefit at this length should largely VANISH under caching, not because the mechanism is wrong but because caching moves the step off the entry the placement was chosen for. If the benefit survives intact, the prefill is not being shortened the way cache-hit accounting implies and §4.9's mechanism needs re-examining.",
+  "prediction_mechanism": "Target: end-to-end latency difference between the two ladders at prompt 3000. Lever: prefix caching, which changes the number of tokens actually prefilled from 3000 to about 952 and therefore which compiled shape the step rounds up to. The ladders differ at 3072/4096 and agree at 1024, so d(ladder difference)/d(caching) is large and signed, and the two hypotheses predict opposite outcomes.",
+  "note_validation": "Each arm records vllm:prompt_tokens_cached before and after its cells. An 'APC on' arm that silently failed to enable caching would otherwise be indistinguishable from a true null, and that counter is the arm's own proof the treatment was applied."
+}
