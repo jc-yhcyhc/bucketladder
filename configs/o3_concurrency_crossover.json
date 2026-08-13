@@ -1,0 +1,44 @@
+{
+  "experiment": "o3_concurrency_crossover",
+  "dimension": "D2",
+  "description": "Where the finer token ladder stops paying. S4.9 measured a 21-shape ladder beating a 10-shape ladder by 8.7-12.5% at two concurrent requests; this sweeps concurrency 1-16 to locate the crossing, which is what turns a directional recommendation into one a deployment can apply.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.8,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "serve_extra_args": "--gpu-memory-utilization 0.80",
+  "note_memory": "0.80 on BOTH arms, not a free choice: at vLLM 0.25.0's default of 0.92 the 21-shape ladder does not boot at all (RESOURCE_EXHAUSTED, 32.50M requested against 12.40M free, reproduced byte-identically on two independently provisioned v5e-4 hosts). Matching the arms at 0.80 is what makes them comparable; see configs/o1_ladder_cost.json.",
+  "independent_vars": {
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder granularity IS the experiment: unset compiles 10 token shapes, 512 compiles 21. Varying it is the point, exactly as in o1_ladder_cost."
+  },
+  "prompt_lens": [
+    300,
+    1200,
+    3000
+  ],
+  "concurrency_levels": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "output_len": 32,
+  "repeats": 7,
+  "warmup_discard": 2,
+  "note_prompt_lens": "300 is the PLACEBO: it pads to 512 on both ladders, so its difference at any concurrency is that concurrency's arm-level offset, and the treated cells are read against it. 1200 and 3000 are the treated lengths from S4.9, where the fine ladder pads to 1536 and 3072 against 2048 and 4096. Swept at every concurrency rather than measured once, because above n=2 chunked prefill packs requests into a shared step and the per-request ladder mapping stops being exact -- the placebo is then the only thing separating arm from artefact.",
+  "note_prediction": "REGISTERED. The gap512-minus-default difference is negative at n=1-2, shrinks monotonically in magnitude, and crosses zero between n=4 and n=16, tracking the paid-share curve of S4.3 (23.1% of nominal at batch 4, indistinguishable from zero by 16). Benefit persisting at n=16 would put this measurement in conflict with that curve. Benefit already absent at n=4 would narrow the S4.9 recommendation to near-serial traffic.",
+  "prediction_mechanism": "Target: end-to-end latency difference between ladders at fixed prompt length. Lever: concurrency, which changes how many real tokens share a compiled step and therefore what fraction of the step is padding. Padded tokens are real arithmetic (S4.3), so as concurrency packs more real tokens into the same compiled shape the padded fraction falls and the ladder difference must fall with it -- d(effect)/d(concurrency) is nonzero and signed by an established mechanism rather than assumed."
+}

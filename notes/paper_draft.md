@@ -37,20 +37,28 @@ reject it. **Token padding is different**: it is real arithmetic, paid at 23.1% 
 nominal at batch 4 falling to indistinguishable from zero at 16, and it is the
 one dimension where bucketing could pay.
 
-**At low batch it does pay, and we quantify the trade.** Doubling the token
-ladder from ten compiled shapes to twenty-one cuts end-to-end latency by
-**8.7% and 12.5%** at two concurrent requests for prompts that straddle ladder
-entries, while prompts that pad identically on both ladders move by 0.5 ms — a
-placebo built into the design. The two treated cells agree on cost per padded
+**On that dimension an intervention does pay, and we quantify the trade.**
+Doubling the token ladder from ten compiled shapes to twenty-one cuts end-to-end
+latency by **8.7% and 12.5%** at two concurrent requests for prompts that straddle
+ladder entries, while prompts that pad identically on both ladders move by 0.5 ms
+— a placebo built into the design. The two treated cells agree on cost per padded
 token to 1% (34.9 and 35.3 µs). The price is **+53% cold startup** and, decisively,
 **15.0% of KV cache capacity**: at the stack's default memory fraction the finer
 ladder does not boot at all, because compiled executables and the KV cache compete
-for the same high-bandwidth memory. Padding is paid where capacity is slack and
-free where capacity binds, so the trade is directional rather than universal.
+for the same high-bandwidth memory.
+
+We predicted this benefit would decay with concurrency and vanish by batch 16,
+following our own paid-share curve, and **registered that prediction before
+measuring it. It is wrong.** Across concurrency 1→16 in both arm orders the
+benefit persists at 3.5–12% of end-to-end latency with no crossing, because under
+chunked prefill the scheduler packs requests into steps sized to a token budget
+rather than to a compiled shape — so padding migrates from per-request to
+per-packed-step instead of dissolving. That leaves a tension with the paid-share
+curve which we report rather than resolve.
 
 We also reproduce a published latency predictor and find its length term earns
 its place at no batch size tested; report five optimisations, four rejected and
-one that works; and catalogue twelve invalid inferences of our own in four
+one that works; and catalogue thirteen invalid inferences of our own in four
 classes, three of which now have mechanical checks.
 
 ---
@@ -97,7 +105,7 @@ shape coverage is a warmup charge that neither literature measures.
    per-bucket linear form is beaten by a constant at the batch size where it
    matters, so its reported accuracy is a property of within-bucket flatness
    rather than of the model.
-6. **Four optimisations measured and rejected** (§5), and **twelve invalid
+6. **Four optimisations measured and rejected** (§5), and **thirteen invalid
    inferences of our own** in four classes (§6), three now blocked mechanically.
 
 **Scope.** This is a measurement study. It characterises what shape quantization
@@ -703,20 +711,71 @@ high-bandwidth memory the KV cache is sized to fill, so the ladder and the cache
 are in direct competition, and buying the finer ladder means selling 15% of
 concurrent capacity.
 
-That trade is coherent rather than merely unfortunate. Padding is paid at small
-batch and free at large (§4.3); KV capacity binds at large batch and is slack at
-small. The finer ladder therefore costs capacity exactly where padding was
-already free, and buys latency exactly where capacity is not the constraint. The
-recommendation is conditional and directional: **a deployment that is
-latency-sensitive at low concurrency should compile a finer token ladder and pay
-for it in KV capacity and startup; a deployment that is throughput-bound should
-not, and should instead compile as coarse a ladder as its tail tolerates.**
+### 4.10 The benefit does not decay with concurrency, and the prediction that it would was wrong
 
-Scope. One model, one topology, one concurrency level, and prompt lengths chosen
-to straddle ladder entries — the most favourable case for a finer ladder, by
-construction. The warmup figures are cold; a persistent compilation cache
-amortises them across restarts, and the warm boots we measured (165–315 s) reflect
-cache reuse rather than ladder size.
+§4.9's trade looks like it should be conditional on load. Padding is paid at small
+batch and free at large (§4.3); KV capacity binds at large batch and is slack at
+small. That reasoning predicts a crossing, and we registered it before measuring:
+the difference should shrink monotonically and reach zero between n=4 and n=16,
+tracking §4.3's paid-share curve. Sweeping concurrency 1→16 on both ladders, in
+both arm orders, refutes it. Placebo-corrected difference, in ms, negative where
+the finer ladder is faster:
+
+| prompt | n=1 | n=2 | n=4 | n=8 | n=16 |
+|---|---|---|---|---|---|
+| 1200 | −9.9 | −18.0 | −8.9 | −16.2 | −23.0 |
+| 3000 | −18.7 | −37.3 | −21.5 | −50.4 | −37.0 |
+
+There is no crossing. The benefit is 3.5–12% of end-to-end latency at every
+concurrency sampled, it is non-monotone rather than decaying, and at n=16 it is
+larger in absolute terms than at n=1. The treated cells reproduce across arm
+orders to within a few ms at n=4 and n=16.
+
+**Why the prediction failed is visible in what the stack executes.** The
+prediction reasoned about a *request's* padding shrinking as more requests share
+a step. Under chunked prefill the scheduler does not work that way: it admits
+requests in waves and packs them, and the size of the packed step — not any
+request's length — selects the compiled shape. Snapshotting vLLM's
+`iteration_tokens_total` histogram around one n=16 cell shows a single repeat
+costing about three prefill steps, landing in (256,512], (512,1024] and
+(2048,4096], alongside 93 decode steps of at most 16 tokens; the two arms produce
+near-identical step distributions, differing only in which compiled shape those
+steps round up to. Padding does not dissolve as concurrency rises. It migrates
+from per-request to per-packed-step, and packed steps go on straddling ladder
+entries, because the scheduler is packing to a token budget rather than to a
+compiled shape.
+
+**This sits in tension with §4.3**, which finds the paid share of token padding
+falling to indistinguishable from zero by batch 16. We report the tension rather
+than resolve it. The two measurements differ in what is held fixed: §4.3 varies
+batch size at a fixed boundary and attributes padding per request, while this
+sweep varies offered concurrency and lets the scheduler choose step composition.
+If both are right, the reconciliation is that per-request padding does vanish
+while per-step padding does not, and the quantity a ladder acts on is the second.
+We have not measured that directly, and say so.
+
+**A design defect, stated because it bounds the result.** Prompt 300 was intended
+as a placebo at every concurrency, on the reasoning that it pads to 512 on both
+ladders. The step histogram shows that is true only while each request prefills
+in its own dispatch — at n≥4 the packed step lands where the ladders differ, so
+the cell is treated, not inert. Its measured difference is correspondingly
+unstable across arm orders at n=8 and n=16 (−6.0 against −27.7 ms, −1.5 against
+−17.2 ms) where the treated cells are stable. The correction is therefore applied
+with a negative offset at those levels, which shrinks the reported benefit: the
+n≥4 figures above are **floors on the effect, not unbiased estimates of it**, and
+arm order is the only control they carry. The n=1 and n=2 rows are unaffected.
+
+Scope. One model, one topology, and prompt lengths chosen to straddle ladder
+entries — the most favourable case for a finer ladder, by construction. The
+warmup figures in §4.9 are cold; a persistent compilation cache amortises them
+across restarts, and the warm boots we measured (165–315 s) reflect cache reuse
+rather than ladder size.
+
+The recommendation that survives is therefore simpler and broader than the
+conditional one we expected to write: **where prompt lengths straddle a coarse
+ladder's entries, a finer token ladder is worth its startup and its KV capacity
+across the whole concurrency range we tested, not only at low load.** What we
+cannot say is where it stops, because within 1→16 it does not.
 
 ---
 
@@ -724,7 +783,7 @@ cache reuse rather than ladder size.
 
 | | outcome |
 |---|---|
-| **finer token ladder at low batch** | **works: −8.7% and −12.5% end-to-end, at −15.0% KV capacity (§4.9)** |
+| **finer token ladder** | **works: −8.7% and −12.5% end-to-end at n=2, persisting 1→16, at −15.0% KV capacity (§4.9, §4.10)** |
 | bucket-aware admission control | premise false (§4.4) |
 | ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
@@ -733,9 +792,10 @@ cache reuse rather than ladder size.
 The one that works is the one aimed at the single dimension the measurements left
 open. Three of the four rejected optimisations target the request dimension or
 per-request length padding, and §4.1 and §4.4 show neither carries cost; the
-fourth restructures work the stack already packs. The token dimension at small
-batch is the only place the premise survived contact with measurement, and it is
-the only place an intervention paid.
+fourth restructures work the stack already packs. The token dimension is the only
+place the premise survived contact with measurement, and it is the only place an
+intervention paid — though not for the reason we expected, since we predicted the
+payoff would be confined to low concurrency and it was not (§4.10).
 
 A second positive measurement — release timing saving 26% of TPU time against
 stock at 25 req/s (p=0.001, six paired seeds) — is **dynamic batching**, not a
@@ -752,16 +812,16 @@ less work.
 
 ---
 
-## 6. Twelve failures, one taxonomy
+## 6. Thirteen failures, one taxonomy
 
-Twelve invalid inferences were made and caught during this work. The full
+Thirteen invalid inferences were made and caught during this work. The full
 catalogue is in the artifact; what matters here is that they fall into four
 classes, and that the guardrails cover only the first.
 
 | class | count | what it is | covered? |
 |---|---|---|---|
 | **provenance** | 7 | a quantity measured under one configuration, used under another | **yes** — config-diff over registered claims |
-| **instrument definition** | 3 | an analysis that measures something other than the target | no |
+| **instrument definition** | 4 | an analysis that measures something other than the target | no |
 | **lever validity** | 1 | a lever that cannot move the quantity claimed | **yes** — `prediction_mechanism` |
 | **dimension** | 1 | a result in one quantized dimension licensing a claim in another | **yes** — required `dimension` field |
 
@@ -778,13 +838,24 @@ headline numbers: a crossover point and a recoverable-headroom figure.
 The headroom figure evaded it for three drafts by living in prose, and was caught
 only when we registered it in order to check it.
 
-**The three instrument-definition errors are not covered by anything.** A
+**The four instrument-definition errors are not covered by anything.** A
 step-count criterion that could never pass; a boundary experiment that pooled
 split dispatches it claimed to exclude; a microbenchmark that timed dispatch
-overhead at 7% of peak bandwidth and called it a weight-load floor. Each was
-caught by a measurement disagreeing with an independent one, which is luck rather
-than method — and one of them, the split pooling, biased upward, the direction
-that manufactures a positive result.
+overhead at 7% of peak bandwidth and called it a weight-load floor; and §4.10's
+placebo, a control cell chosen to be inert that stops being inert above n=2 once
+the scheduler packs requests into shared steps. Each was caught by a measurement
+disagreeing with an independent one, which is luck rather than method — and one
+of them, the split pooling, biased upward, the direction that manufactures a
+positive result.
+
+The placebo failure is the clearest instance of the class, because the reasoning
+behind it was checkable and never checked. "Prompt 300 pads to 512 on both
+ladders" is a statement about what the stack executes, and the stack exports what
+it executes: one histogram scrape settled it in under a minute, after the arms had
+already been run. Nothing in our machinery asks whether a control is a control.
+The check that would have fired is cheap and we did not have it — **assert the
+executed shape distribution matches the one the design assumes, before treating a
+cell as inert** — and it is the one guardrail this work still owes.
 
 The last two classes each produced a mechanical check, and both checks are cheap:
 state the target as a formula in the lever and show the derivative is nonzero;
@@ -793,7 +864,7 @@ one. Both would have fired before hardware was provisioned.
 
 ### The pattern the failure list does not show
 
-Twelve entries above are inferences from numbers. Counting them alone hides
+Thirteen entries above are inferences from numbers. Counting them alone hides
 something the project's history makes obvious: **the measurements have survived
 three rounds of external review largely intact, and the explanations have not.**
 
@@ -835,12 +906,14 @@ and multi-host topology are unmeasured, and both change what padding hides under
 §4.8 argues analytically that the regime map is a function of batch size and
 dtype rather than parameter count, for dense weight-stationary decode only.
 
-**The low-batch token regime is measured at one concurrency only.** The ~85% paid
-share at n≤2 still rests on one boundary with no interval (§4.3). §4.9 tests the
-regime directly and finds a finer ladder pays there, but at n=2 alone: we do not
-locate the concurrency at which the benefit crosses zero, and that crossing is
-what decides which of the two ladder recommendations applies to a given
-deployment. A sweep over n is the cheapest experiment left.
+**The token-ladder benefit has no measured upper bound in concurrency.** §4.10
+sweeps 1→16 and finds no crossing, so we cannot say where a finer ladder stops
+paying — only that it has not stopped by 16. The ~85% paid share at n≤2 still
+rests on one boundary with no interval (§4.3), and §4.10's finding sits in tension
+with that curve's decay to zero by batch 16, unresolved. Above n=4 the experiment
+has no valid placebo, because the scheduler packs requests into shared steps that
+straddle ladder entries, so those rows are floors on the effect rather than
+unbiased estimates.
 
 **No production trace.** §4.4's four length distributions are parametric families
 and were not matched on offered tokens, which is why we withdraw the range they
@@ -973,11 +1046,17 @@ is the one place where making the ladder finer buys something. Twenty-one compil
 token shapes instead of ten cut end-to-end latency 8.7% and 12.5% at two
 concurrent requests, at a cost of 53% more cold startup and 15.0% of KV cache
 capacity, the latter binding hard enough that the finer ladder will not boot at
-the stack's default memory fraction (§4.9). So the rule is not that shape coverage
-should always be minimised, but that **the ladder should be as coarse as the
-tail tolerates wherever capacity is the constraint, and finer than the default
-wherever latency at low concurrency is** — the two regimes want opposite things,
-and they do not overlap, because padding is free exactly where capacity is scarce.
+the stack's default memory fraction (§4.9).
+
+We expected that benefit to be confined to low concurrency and predicted, in
+advance, that it would vanish by batch 16. It does not: it holds at 3.5–12% across
+1→16 with no crossing (§4.10), because the scheduler packs to a token budget
+rather than to a compiled shape, so padding moves from per-request to
+per-packed-step instead of disappearing. So the rule is not that shape coverage
+should always be minimised, and not the load-conditional rule the paid-share curve
+implies either: **where prompt lengths straddle a coarse ladder's entries, a finer token
+ladder earns its startup and its capacity across the whole load range we tested.**
+Where it stops earning them, we do not know.
 
 Three things we got wrong are worth carrying forward as much as the results. We
 explained free request padding with a memory-bandwidth argument, published it,
