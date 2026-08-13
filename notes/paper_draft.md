@@ -44,11 +44,13 @@ latency by **8.7% and 12.5%** at two concurrent requests for prompts that stradd
 ladder entries, while prompts that pad identically on both ladders move by 0.5 ms
 — a placebo built into the design. The two treated cells agree on cost per padded
 token to 1% (34.9 and 35.3 µs). The price is **+53% cold startup**, twice the
-resident executables, and a **boot cliff**: at the stack's default memory fraction
-the finer ladder does not start at all, missing by 20 MB, because compilation asks
-for scratch after the KV cache has been sized to fill the budget. At equal memory
-fraction the two ladders have identical KV capacity, so shape count costs startup
-and headroom rather than serving capacity.
+resident executables, and a **boot cliff**: the finer ladder will not start above
+`gpu_memory_utilization` 0.85 against the stack's default of 0.92, because
+compilation asks for scratch after the KV cache has already been sized to fill the
+budget. At equal fraction the two ladders hold identical KV capacity to the token,
+so shape count does not shrink the cache — it caps the fraction you may request,
+and that cap costs **8.8% of KV capacity** (367,360 tokens at 0.92 against 335,104
+at 0.85).
 
 We predicted this benefit would decay with concurrency and vanish by batch 16,
 following our own paid-share curve, and **registered that prediction before
@@ -708,38 +710,45 @@ found, and at this batch size it is arithmetic that is actually executed.
 This is the paper's one optimisation that works, and it is not free. Measured
 against the same stack with the compiled-shape cache cleared before each boot:
 
-| | 10 shapes | 21 shapes | change |
-|---|---|---|---|
-| cold warmup | 285 s | 436 s | +151 s (+53%) |
-| compiled-shape cache on disk | 43 MB | 92 MB | +114% |
-| KV cache at 0.80 | 312,320 tokens | 312,320 tokens | **none** |
-| boots at the 0.92 default? | yes (367,360 tokens) | **no** | — |
+| | 10 shapes | 21 shapes |
+|---|---|---|
+| cold warmup | 285 s | 436 s (+53%) |
+| compiled-shape cache on disk | 43 MB | 92 MB |
+| highest memory fraction that boots | 0.92 (the default) | **0.85** |
+| KV cache at 0.92 | 367,360 tokens | *does not boot* |
+| KV cache at 0.85 | 335,104 tokens | 335,104 tokens |
 
-**The two ladders have identical KV capacity at equal memory fraction.** That is
-the row that matters, and it is the one a natural reading of these measurements
-gets wrong. Differencing the ten-shape ladder's 367,360 tokens at the 0.92 default
-against 312,320 at 0.80 yields −15.0% and attributes it to shape count; the two
-numbers come from different memory fractions, so the difference is the fraction,
-not the ladder. That is a provenance error of exactly the class §6 names as this
-project's most common, and it is recorded there as the fourteenth. The corrected
-statement is that at 0.80 both ladders report the same 312,320 tokens — the same
-figure to the token, which also bounds the effect: capacity is block-quantized, a
-49 MB executable delta would be roughly 1,300 tokens or 81 blocks, and that would
-have been visible.
+**Shape count does not move KV capacity; it moves the memory fraction you are
+allowed to ask for.** At 0.85 the two ladders report the same 335,104 tokens — the
+same figure to the token, which also bounds any residual effect, since capacity is
+block-quantized and the 49 MB executable difference would be roughly 1,300 tokens
+or 81 blocks and would have shown. What the finer ladder actually costs is the
+backoff it forces: the ten-shape ladder runs at the 0.92 default for 367,360
+tokens, the twenty-one-shape ladder does not start above 0.85, and **the
+difference between those two operating points is 32,256 tokens, or 8.8% of KV
+capacity.**
 
-What is real is a **boot cliff**. At vLLM 0.25.0's default `gpu_memory_utilization`
-of 0.92 the twenty-one-shape ladder does not start: it compiles its shapes and
-then dies with `RESOURCE_EXHAUSTED`, requesting 32.50 MB against 12.40 MB free —
-byte-identical on two independently provisioned v5e-4 hosts, while the ten-shape
-ladder boots and serves on the same host, script, model and topology.
+Reaching that number required measuring the cliff rather than assuming it. The
+long ladder fails at 0.92, 0.90 and 0.88, and boots at 0.85; each failure is a
+`RESOURCE_EXHAUSTED` in warmup, at 0.92 requesting 32.50 MB against 12.40 MB free,
+byte-identical on two independently provisioned v5e-4 hosts. A 20 MB miss invites
+the inference that a hair of headroom would fix it. It does not: the requirement
+survives three successive backoffs, and only the fourth clears it.
 
-The mechanism is not steady-state competition between executables and cache,
-which the identical capacities rule out. It is that **compilation needs transient
-headroom the KV sizing does not reserve**: vLLM profiles, sizes the cache to fill
-the fraction, and then compiles, so a longer ladder asks for scratch after the
-budget is already committed. That predicts the cliff is narrow and the remedy
-small — the failure misses by 20 MB, not by 2 GB — rather than costing a seventh
-of serving capacity.
+**The mechanism is not steady-state competition between executables and cache**,
+which the identical capacities rule out. Every failed boot *logs a KV cache size
+before it dies* — 358,144 tokens at 0.90, 348,928 at 0.88 — so the cache is sized
+to fill the fraction first and compilation then asks for scratch against what is
+left. Shape coverage is charged to transient compilation headroom that the sizing
+step does not reserve, which is why the price appears as a boot cliff rather than
+as a smaller cache.
+
+One earlier version of this table reported the cost as 15.0%, differencing the
+ten-shape ladder's 367,360 tokens at 0.92 against 312,320 at 0.80 and attributing
+the gap to shape count. Those two numbers come from different memory fractions,
+and 0.80 was a coarse guess rather than the measured requirement, so the figure
+was both misattributed and too large. It is a provenance error of the class §6
+names as this project's most common, recorded there as the fourteenth.
 
 ### 4.10 The benefit does not decay with concurrency, and the prediction that it would was wrong
 

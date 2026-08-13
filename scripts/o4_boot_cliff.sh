@@ -41,34 +41,83 @@ FRACTIONS="${FRACTIONS:-0.92 0.91 0.90 0.88 0.85}"
 OUT="${OUT:-/tmp/o4_boot_cliff.tsv}"
 : > "$OUT"
 
+# Stop, and PROVE it stopped. serve_remote.sh's stop reads /tmp/vllm.pgid; when
+# that file is stale the stop is a no-op and exits quietly, the next start
+# refuses with "a server is already healthy on port 8000", and the poll loop then
+# reads the OLD server's 200 as this arm's success -- every fraction "booting"
+# in 0 s with no log. Health must go dark before a boot means anything.
+hard_stop() {
+  local i
+  bash infra/serve_remote.sh stop >/dev/null 2>&1
+  for i in $(seq 1 12); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health 2>/dev/null)" != "200" ]] && return 0
+    sleep 5
+    (( i == 4 )) && pkill -f "vllm serve" 2>/dev/null
+    (( i == 8 )) && pkill -9 -f "vllm serve" 2>/dev/null
+  done
+  echo "WARNING: port 8000 still healthy after hard_stop" >&2
+  return 1
+}
+
 boot_once() {           # $1 = gap ("" for default ladder), $2 = fraction
-  local gap="$1" frac="$2" code="" i kv shapes
-  bash infra/serve_remote.sh stop >/dev/null 2>&1; sleep 8
+  local gap="$1" frac="$2" code="" i kv shapes t0
+  hard_stop; sleep 5
+
+  # THE LOG MUST BE THIS BOOT'S LOG. serve_remote.sh rotates the previous warmup
+  # log when it starts, but the server is launched in the background and polling
+  # begins immediately, so the first iterations can still read the PREVIOUS
+  # boot's file. The first version of this script did exactly that: after a
+  # genuine RESOURCE_EXHAUSTED at 0.92, every lower fraction matched the stale
+  # OOM within seconds and was recorded as a failure, producing "does not boot at
+  # any fraction" -- which contradicts the same ladder booting at 0.80 in an
+  # earlier session. Remove the file up front and refuse to read anything until
+  # a new one exists.
+  rm -f /tmp/vllm_warmup.log
   if [[ -n "$gap" ]]; then export VLLM_TPU_BUCKET_PADDING_GAP="$gap"
   else unset VLLM_TPU_BUCKET_PADDING_GAP; fi
   export EXTRA_SERVE_ARGS="--gpu-memory-utilization $frac"
+  t0=$(date +%s)
   (TP_SIZE=4 nohup bash infra/serve_remote.sh start "$MODEL" \
       > "/tmp/o4_${gap:-def}_$frac.log" 2>&1 &)
-  for i in $(seq 1 60); do
+  for i in $(seq 1 80); do
     code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null)
     [[ "$code" == "200" ]] && break
-    grep -q "RESOURCE_EXHAUSTED" /tmp/vllm_warmup.log 2>/dev/null && { code="OOM"; break; }
+    if [[ -f /tmp/vllm_warmup.log ]]; then
+      grep -q "RESOURCE_EXHAUSTED" /tmp/vllm_warmup.log && { code="OOM"; break; }
+    fi
     sleep 15
   done
-  kv=$(grep -oE "GPU KV cache size: [0-9,]+" /tmp/vllm_warmup.log 2>/dev/null | tail -1 | grep -oE "[0-9,]+$")
-  shapes=$(grep -oE "Prepared token paddings: \[[^]]*\]" /tmp/vllm_warmup.log 2>/dev/null | tail -1 | tr -cd ',' | wc -c)
-  [[ -n "$shapes" ]] && shapes=$((shapes + 1))
-  printf '%s\t%s\t%s\t%s\t%s\n' "${gap:-default}" "$frac" "${code:-none}" "${kv:-NA}" "${shapes:-NA}" \
-      | tee -a "$OUT"
+
+  # A 200 with no warmup log of our own is not a boot -- it is the previous
+  # server answering. Downgrade it to STALE so it can never be read as a result.
+  if [[ "$code" == "200" && ! -f /tmp/vllm_warmup.log ]]; then
+    code="STALE"
+  fi
+
+  kv=NA; shapes=NA
+  if [[ -f /tmp/vllm_warmup.log ]]; then
+    kv=$(grep -oE "GPU KV cache size: [0-9,]+" /tmp/vllm_warmup.log | tail -1 | grep -oE "[0-9,]+$")
+    local lad
+    lad=$(grep -oE "Prepared token paddings: \[[^]]*\]" /tmp/vllm_warmup.log | tail -1)
+    # An empty ladder line must read NA, not 1. The previous form piped nothing
+    # into `tr -cd , | wc -c` and added one, so "no log" and "one shape" were
+    # indistinguishable in the output table.
+    [[ -n "$lad" ]] && shapes=$(( $(printf '%s' "$lad" | tr -cd ',' | wc -c) + 1 ))
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%ss\n' "${gap:-default}" "$frac" "${code:-none}" \
+      "${kv:-NA}" "$shapes" "$(( $(date +%s) - t0 ))" | tee -a "$OUT"
 }
 
-echo -e "ladder\tfraction\tboot\tkv_tokens\tn_shapes" | tee -a "$OUT"
+echo -e "ladder\tfraction\tboot\tkv_tokens\tn_shapes\tsecs" | tee -a "$OUT"
 
 # 1. Descend until the LONG ladder boots.
 CLIFF=""
 for f in $FRACTIONS; do
   line=$(boot_once 512 "$f")
-  if [[ "$(echo "$line" | cut -f3)" == "200" ]]; then CLIFF="$f"; break; fi
+  case "$(echo "$line" | cut -f3)" in
+    200)   CLIFF="$f"; break ;;
+    STALE) echo "ABORT: could not get a clean server for fraction $f" >&2; exit 1 ;;
+  esac
 done
 
 # 2. Same-fraction control: the SHORT ladder at the fraction the long one needed,
