@@ -14,11 +14,13 @@ up means paying for the shape you rounded up to. We measure what is actually pai
 on a production TPU stack and, with the same serving framework and the same
 instrument, on a GPU.
 
-**The premise is largely false, and it is false on both architectures.** A batch
-placed just above a compiled entry costs about what the entry *below* costs: on
-TPU it sits 3–5% *under* the lower entry, and on GPU padding a batch from 8 up to
-a captured 16 costs **67 µs — 0.6% of the step**, isolated by differencing
-against an eager arm whose constant launch overhead cancels to 9 µs. What is
+**The premise is largely false.** A batch placed just above a compiled entry
+costs about what the entry *below* costs: on TPU it sits 3–5% *under* the lower
+entry, and on GPU padding a batch from 8 up to a captured 16 costs **67 µs —
+0.6% of the step**, isolated by differencing against an eager arm whose constant
+launch overhead cancels to 9 µs. The GPU arm varies batch size, so what it
+establishes is that **request**-dimension padding is close to free on both
+architectures; the token dimension is measured on TPU only. What is
 paid is **shape coverage itself, once, at warmup**: enabling CUDA-graph capture
 costs **+108 s** of startup, and XLA compiles a TPU ladder in 5–30 minutes for the
 first bucket; neither is a per-step or high-bandwidth-memory (HBM) cost. Work that reduces the number of compiled or captured shapes buys
@@ -59,7 +61,7 @@ curve which we report rather than resolve.
 
 We also reproduce a published latency predictor and find its length term
 contributes negligibly where errors are already below 1% and turns actively
-harmful at batch 4; report five optimisations, four rejected and one that works; and catalogue thirteen invalid inferences of our own in four
+harmful at batch 4; report five optimisations, four rejected and one that works; and catalogue fourteen invalid inferences of our own in four
 classes, three of which now have mechanical checks.
 
 ---
@@ -88,16 +90,17 @@ shape coverage is a warmup charge that neither literature measures.
 
 **Contributions.**
 
-1. **The premise, measured on both architectures** (§4.3, §4.5, §8). Padding a
-   batch up to a compiled or captured entry is close to free on a TPU ladder and
-   on CUDA-graph capture alike; what shape coverage costs is warmup.
+1. **The premise, measured** (§4.3, §4.5, §8). Padding a batch up to a compiled
+   or captured entry is close to free on a TPU ladder and on CUDA-graph capture
+   alike; what shape coverage costs is warmup. The GPU comparison covers the
+   request dimension, which is what graph capture quantizes.
 2. **The request ladder a TPU stack reports is not the one it executes** (§4.1).
    Readable from source, confirmed by a paired hardware experiment, and visible
    in the compiler-emitted kernel name — and absent from the Ragged Paged
    Attention (RPA) paper, from LENS, and from vendor documentation.
 3. **A mechanism for why request padding is free** (§4.5): the ragged kernel does
-   no work for padded slots, established by cutting the compiled slot count 32×
-   for a −0.9% change. We also test and reject the memory-bandwidth explanation
+   under 0.7 µs of work per padded slot against 27.5 µs if it were paid,
+   established by cutting the compiled slot count 32× for a −0.9% change. We also test and reject the memory-bandwidth explanation
    the same section's data invites.
 4. **The dimension where bucketing does pay** (§4.3, §4.9, §4.10): token padding
    is real arithmetic, its paid share is high at batch ≤2, and a finer compiled
@@ -107,7 +110,7 @@ shape coverage is a warmup charge that neither literature measures.
    1%, and is beaten by one at batch 4, so its reported accuracy is a property of
    within-bucket flatness rather than of the model form.
 6. **Five optimisations, four rejected and one that works** (§5), and
-   **thirteen invalid inferences of our own** in four classes (§6), three now
+   **fourteen invalid inferences of our own** in four classes (§6), three now
    blocked mechanically.
 
 **Scope.** This is primarily a measurement study: it characterises what shape
@@ -779,7 +782,13 @@ batch size at a fixed boundary and attributes padding per request, while this
 sweep varies offered concurrency and lets the scheduler choose step composition.
 If both are right, the reconciliation is that per-request padding does vanish
 while per-step padding does not, and the quantity a ladder acts on is the second.
-We have not measured that directly, and say so.
+Testing that needs padded tokens per packed step, and the obvious instrument does
+not supply them: `iteration_tokens_total` bins on powers of two, which is coarser
+than the ladder spacing being compared — a step recorded in (2048,4096] pads to
+2048, 2560, 3072, 3584 or 4096 depending where in that bin it fell, and the two
+ladders differ precisely inside the bin. The histogram establishes that packed
+steps land where the ladders differ; it cannot say by how much. Resolving the
+tension needs per-step token counts, not a bucketed distribution.
 
 **A design defect, stated because it bounds the result.** Prompt 300 was intended
 as a placebo at every concurrency, on the reasoning that it pads to 512 on both
@@ -792,17 +801,28 @@ with a negative offset at those levels, which shrinks the reported benefit: the
 n≥4 figures above are **floors on the effect, not unbiased estimates of it**, and
 arm order is the only control they carry. The n=1 and n=2 rows are unaffected.
 
+**The sign survives this; the magnitude does not.** The placebo's own spread
+across arm orders at n=8 and n=16 is about 20 ms, comparable to several treated
+differences in the same table, so no n≥4 magnitude here is resolvable at interval
+level. What is resolvable is direction: the raw differences at n=16 are −32.2 and
+−46.3 ms, and subtracting even the most extreme placebo estimate observed (−27.7
+ms) leaves both negative in both arm orders. So "the benefit does not reverse by
+n=16" is supported, while "it is 23.0 ms at n=16" is not. The absence of a
+crossing is established only at n=1 and n=2, where the placebo is valid; above
+that it is an observation with a floor, not a measurement with an interval.
+
 Scope. One model, one topology, and prompt lengths chosen to straddle ladder
 entries — the most favourable case for a finer ladder, by construction. The
 warmup figures in §4.9 are cold; a persistent compilation cache amortises them
 across restarts, and the warm boots we measured (165–315 s) reflect cache reuse
 rather than ladder size.
 
-The recommendation that survives is therefore simpler and broader than the
-conditional one we expected to write: **where prompt lengths straddle a coarse
-ladder's entries, a finer token ladder is worth its startup and its memory
-headroom across the whole concurrency range we tested, not only at low load.** What we
-cannot say is where it stops, because within 1→16 it does not.
+The recommendation that survives is therefore simpler than the load-conditional
+one the paid-share curve implies, and weaker than the sweep alone suggests:
+**where prompt lengths straddle a coarse ladder's entries, a finer token ladder
+earns its startup at low concurrency, and does not reverse anywhere up to n=16.**
+The low-concurrency claim carries an interval; the rest carries a direction only.
+Where the benefit stops we cannot say, because within 1→16 it does not.
 
 ---
 
@@ -839,15 +859,15 @@ less work.
 
 ---
 
-## 6. Thirteen failures, one taxonomy
+## 6. Fourteen failures, one taxonomy
 
-Thirteen invalid inferences were made and caught during this work. The full
+Fourteen invalid inferences were made and caught during this work. The full
 catalogue is in the artifact; what matters here is that they fall into four
 classes, and that the guardrails cover only the first.
 
 | class | count | what it is | covered? |
 |---|---|---|---|
-| **provenance** | 7 | a quantity measured under one configuration, used under another | **yes** — config-diff over registered claims |
+| **provenance** | 8 | a quantity measured under one configuration, used under another | **yes** — config-diff over registered claims |
 | **instrument definition** | 4 | an analysis that measures something other than the target | no |
 | **lever validity** | 1 | a lever that cannot move the quantity claimed | **yes** — `prediction_mechanism` |
 | **dimension** | 1 | a result in one quantized dimension licensing a claim in another | **yes** — required `dimension` field |
@@ -863,7 +883,12 @@ headline numbers: a crossover point and a recoverable-headroom figure.
 
 **Its coverage is the set of *registered* claims, not the set of claims made.**
 The headroom figure evaded it for three drafts by living in prose, and was caught
-only when we registered it in order to check it.
+only when we registered it in order to check it. §4.9's KV-capacity price — the
+eighth provenance failure and the most recent — evaded it the same way: capacity
+at memory fraction 0.92 was differenced against capacity at 0.80 and the gap
+attributed to ladder length, in a table assembled by hand from two servers' boot
+logs rather than by a script over registered runs. Boot-time facts are exactly
+the quantities that do not flow through `save_table`, and nothing checks them.
 
 **The four instrument-definition errors are not covered by anything.** A
 step-count criterion that could never pass; a boundary experiment that pooled
@@ -891,7 +916,7 @@ one. Both would have fired before hardware was provisioned.
 
 ### The pattern the failure list does not show
 
-Thirteen entries above are inferences from numbers. Counting them alone hides
+Fourteen entries above are inferences from numbers. Counting them alone hides
 something the project's history makes obvious: **the measurements have survived
 three rounds of external review largely intact, and the explanations have not.**
 
@@ -1010,6 +1035,18 @@ about 67 µs** — the 0.283 ms increment with graphs against 0.215 ms without.
 That is **0.6% of a 10.9 ms step, or 4.0% of the nominal padding** implied by
 rounding 9 up to 16. Run-time batch padding is close to free on GPU as well as
 on TPU.
+
+**This tests one of the three dimensions, and it is the one already least in
+doubt.** vLLM's CUDA path captures a graph per batch size, so what the arms above
+vary is the request dimension — D3, the dimension the TPU results explain away
+with a data-structure argument (§4.5) and where no proposed optimisation was
+going to pay. The token dimension, D2, is where this paper locates the only
+surviving effect, and these measurements do not reach it: no arm here varies
+tokens per step at fixed batch. The cross-architecture statement this table
+supports is therefore **"request-dimension padding is close to free on both
+architectures"**, not "the premise is false on both". Whether a GPU stack pays
+for token padding the way a TPU stack does is untested here, and it is the
+experiment that would make the cross-architecture claim general.
 
 **We state the cross-architecture comparison as a bound, not an equality.** §4.1's
 TPU statistic carries intervals of roughly ±50 percentage points, so this table
