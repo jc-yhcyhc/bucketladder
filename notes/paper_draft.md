@@ -659,7 +659,7 @@ bytes and leave FLOPs alone, doubling intensity per token, so the crossing moves
 from batch ≈ 240 to ≈ 120. **Registered prediction: under W8, the token-dimension
 paid share at a fixed boundary rises.** We have not run it.
 
-### 4.9 At low batch, a finer ladder does pay — and the price is KV capacity
+### 4.9 A finer ladder does pay — and the price is KV capacity
 
 Every result above says token padding is paid at small batch and vanishes as
 batch grows (§4.3, §4.4). That is a claim about where bucketing's premise could
