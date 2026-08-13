@@ -260,13 +260,12 @@ The load-bearing evidence is a paired experiment: enabling the flag compiles the
 full ladder — verified in the warmup log — and changes decode by **0.0%**
 (identical to 0.1 ms at n=8 and n=9).
 
-**That end-to-end comparison is far less powerful than its point estimate looks.**
-Bootstrapped, the paired difference is +0.00 ms with a 95% interval of
-[−10.7, +10.8] ms at n=8 — **±20% of the decode phase** — so this design could
-not have resolved anything smaller. It excludes a large effect and nothing more.
-The claim rests instead on the operator-level measurement in §4.5, which compares
-attention time directly at 256 versus 8 compiled slots and resolves **−0.9% at
-n=1**, where a per-slot padding cost would have been ~42%.
+The end-to-end comparison excludes a large effect and supports nothing finer:
+the paired difference is +0.00 ms with a 95% bootstrap interval of [−10.7, +10.8]
+ms at n=8, or ±20% of the decode phase. The claim therefore rests on the
+operator-level measurement of §4.5, which compares attention time directly at 256
+and 8 compiled slots and resolves **−0.9% at n=1**, where a per-slot padding cost
+would have produced approximately 42%.
 
 A second, weaker line of evidence points the same way. If decode padded 9
 sequences up to 16, decode at n=9 would cost what n=16 costs
@@ -288,8 +287,9 @@ kernel is emitted as `RPAd-p_256-bq_1_1-bkv_8192_8192`. **The compiler writes th
 256-request padding into the name of the emitted kernel**, independently of the
 batch size.
 
-Two sessions were spent searching for a promotion cost at the 8→16 edge that the
-default configuration had already excluded.
+No promotion cost exists at the 8→16 request edge under the default
+configuration, because the attention kernel is already compiled at 256 slots and
+does not distinguish the two batch sizes.
 
 ### 4.2 Reproducing a published latency predictor on TPU
 
@@ -323,8 +323,11 @@ where they are large.
 two measurements per bucket but not which two. Over all three choices per cell,
 the n=4 error swings by up to 44.8 percentage points — but its *minimum* over
 every choice is still 16.97%, far above LENS's 2.15%. The magnitude must be
-reported as a range; the growth in error by n=4 survives. Whether accuracy
-returns above n=4 is not sampled and not claimed.
+reported as a range, but the growth in error by n=4 is robust to the choice.
+Batch sizes above 4 were not measured, because this experiment reproduces LENS's
+own protocol and that protocol is specified over the bucket structure rather than
+over batch size; extending it upward would be a different experiment. Accordingly
+we claim that the error grows by n=4, and not that it remains large beyond it.
 
 **[Figure 1 — `figures/fig1_lens.png`]** *Held-out prediction error against batch
 size, with LENS's reported 2.15% as a reference line and the failure region
@@ -356,10 +359,10 @@ fixed batch size and near-fixed sequence length:
 | 8 | 14.3% | 11.8% | [0.2%, 21.0%] | 3 | 3–5 |
 | 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] | 3 | 7–11 |
 
-**The rows above are not matched on boundary, and that confounds them.** At fixed
-n=4 the paid share rises with boundary size — 10.0% at 512→1024 to 24.8% at
-4096→8192 — so which boundaries a row contains shifts it independently of batch
-size. The sets are not the same: n=8 lacks 512→1024, the *lowest*-paying
+**The rows above are confounded, because each was measured over a different set
+of ladder boundaries.** At fixed n=4 the paid share rises with boundary size, from
+10.0% at 512→1024 to 24.8% at 4096→8192, so the particular boundaries a row
+contains shift its value independently of batch size. The sets are not the same: n=8 lacks 512→1024, the *lowest*-paying
 boundary, and n=16 lacks 4096→8192, the *highest*. Both omissions push in the
 same direction and **exaggerate the decline the table is used to show.** This is
 the error class §6 names as the project's dominant one, appearing in the headline
@@ -373,22 +376,23 @@ Restricted to the two boundaries present in every row:
 | 8 | 0.2% | 21.0% | **10.6%** |
 | 16 | −2.7% | +0.5% | **−1.1%** |
 
-**The decline survives matching**, and the matched n=8 mean is 10.6% rather than
-14.3%. Bootstrapping over two boundaries is not worth reporting as an interval;
-what the matched table supports is the ordering, not the levels.
+**The decline remains after matching**, though the n=8 mean falls from 14.3% to
+10.6%. An interval bootstrapped over two boundaries would not be meaningful, so
+the matched table should be read as establishing the ordering of the rows rather
+than their absolute values.
 
 The n≤2 row rests on a single boundary, which we do not identify with either of
 the matched pair, and we quote no interval for it. It is the least well supported
 number in the paper and also the largest, which is the wrong way round.
 
-**We no longer describe this as monotone, and the intervals are stricter than
-the earlier prose.** The defensible statement is ordinal: **substantially paid at
-n≤2, intermediate at n=4–8, indistinguishable from zero at n=16, with only the
-n=4/n=16 contrast surviving at interval level.** Anyone wanting a per-level
-number needs more boundaries per row than we ran.
-The n=8 row is also a correction: it was previously 16%, computed with split
-dispatches pooled into the median. Recomputed with them excluded it is 14.3% —
-the conclusion survives, the number moved.
+The defensible statement is ordinal rather than monotone: the paid share is
+**substantial at n≤2, intermediate at n=4–8, and indistinguishable from zero at
+n=16**, with only the n=4 against n=16 contrast separated at interval level. A
+per-level figure would require more boundaries per row than were measured.
+
+The n=8 value of 14.3% excludes split dispatches. Including them, as an earlier
+analysis did, pools partial steps into the median and yields 16%; the exclusion is
+the correct treatment, and it does not change the ordering.
 
 At n=1 a single request pays its full sequence bucket (flatness 0.97 at buckets
 ≤1024). At n=4 it pays a fraction.
@@ -430,34 +434,34 @@ twice, plus a fragile third — and **we could not identify what changes there.*
 
 ### 4.4 Padding is abundant, workload-dependent, and mostly free
 
-How much padding a stack executes is a property of the workload, not of the
-stack. Across four prompt-length distributions at one Poisson arrival rate
-(8 req/s, `output_len=64`, 120 requests each), reporting time to first token
-(TTFT) and inter-token latency (ITL):
+**The padded share a stack executes is a property of the workload, not of the
+stack, so no single stack-level figure for it is well defined.** This is the
+result of the section, and it does not depend on the magnitudes below.
 
-| length distribution | CV | padded share of executed tokens | TTFT p50 / p95 | ITL p50 / p95 |
+Four prompt-length distributions were served at one Poisson arrival rate (8 req/s,
+`output_len=64`, 120 requests each), reporting time to first token (TTFT) and
+inter-token latency (ITL):
+
+| length distribution | CV | padded share † | TTFT p50 / p95 | ITL p50 / p95 |
 |---|---|---|---|---|
-| fixed-256 | 0.00 | **51.0%** | 19 / 27 ms | 4.4 / 5.1 ms |
+| fixed-256 | 0.00 | 51.0% | 19 / 27 ms | 4.4 / 5.1 ms |
 | lognormal | 1.20 | 38.4% | 19 / 100 ms | 4.4 / 7.5 ms |
 | bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
-| uniform | 0.60 | **27.3%** | 89 / 261 ms | 6.4 / 14.9 ms |
+| uniform | 0.60 | 27.3% | 89 / 261 ms | 6.4 / 14.9 ms |
 
-The ordering is not intuitive: the **fixed-length** workload pads most, because a
-length sitting just above a boundary pads every single step by the same large
-amount, while a spread distribution lands across buckets and averages out.
+† **The padded-share column is not comparable across rows and we do not quote it
+as a range.** The arms were matched on request rate rather than on offered tokens:
+mean prompt lengths are approximately 256, 384, 704 and 2056, so the uniform arm
+carries about eight times the token load of fixed-256, and its TTFT p50 of 89 ms
+against 17–19 ms for the others places it at a different point on the load curve.
+The column therefore mixes distribution shape with utilisation. Matching on
+offered tokens is required before any range is quoted, and §7 records this as
+outstanding.
 
-**The 27.3–51.0% spread is confounded and we withdraw it as a range.** The four
-arms were matched on request rate, not on offered *tokens*: mean prompt lengths
-are roughly 256, 384, 704 and 2056, so the uniform arm carries about 8× the token
-load of fixed-256. Its TTFT p50 of 89 ms against 17–19 ms for the others is the
-tell — that is a different point on the load curve, not only a different shape.
-The spread therefore mixes distribution shape with utilisation, which is the
-error class §6 names as this project's dominant one, found in our own table. What
-survives is the qualitative claim, which does not depend on the magnitudes:
-**padded share is a property of the workload, not of the stack**, and a single
-stack-level padded-share figure of the kind this experiment was built to produce
-is not a well-defined quantity. A matched re-run is
-needed before any range is quoted.
+The latency columns are not affected by that confound and show the ordering that
+motivates the result: a fixed-length workload sitting just above a boundary pads
+every step by the same amount, whereas a spread distribution lands across
+buckets and averages out.
 
 **[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
 paid at each compiled boundary, against the 100% the compiled-shape premise

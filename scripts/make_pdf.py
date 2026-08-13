@@ -152,18 +152,48 @@ def convert(md: str) -> str:
             head, data = rows[0], rows[2:]
             ncol = max(len(r) for r in rows)
             spec = "l" + "r" * (ncol - 1)
-            # \resizebox so a wide table shrinks to the column instead of
-            # overflowing it. Without this, columns past the text width are
-            # silently CLIPPED -- the flag-on column of the mechanism table
-            # vanished from the first rendered PDF and only a digit count
-            # against the source caught it.
-            t = ["\\begin{center}\\resizebox{\\columnwidth}{!}{%",
-                 "\\small\\begin{tabular}{" + spec + "}\\hline"]
+            # Wide tables must stay READABLE, not merely fit. Shrinking every
+            # table to one column width with \resizebox made a seven-column
+            # table render at perhaps five point -- legible to a script checking
+            # that the cells survived, and not to a reader. The rule now:
+            #
+            #   narrow  -> one column, \small, no scaling
+            #   wide    -> a table* float spanning both columns at \footnotesize
+            #
+            # \resizebox is kept only as a last resort for a table too wide even
+            # for the full text width, because the alternative is silent
+            # clipping: the flag-on column of the mechanism table vanished from
+            # the first rendered PDF and only a digit count against the source
+            # caught it.
+            widest = max(sum(len(c) for c in r) + 3 * ncol for r in rows)
+            longest_cell = max(len(c) for r in rows for c in r)
+            if longest_cell > 34:
+                # A genuinely long prose cell must WRAP, and tabularx gives the
+                # last column the slack. This branch is valid ONLY when the other
+                # columns are short: if the fixed columns already fill the line,
+                # X is allotted negative width and its contents are clipped
+                # without any LaTeX error. That silently removed the p95 column
+                # of the throughput table -- the row's other cells rendered, so
+                # nothing looked wrong except a missing number.
+                xspec = ("l" * (ncol - 1)) + "X" if ncol > 1 else "X"
+                t = ["\\begin{center}\\small",
+                     "\\begin{tabularx}{\\columnwidth}{" + xspec + "}\\hline"]
+                close = "\\hline\\end{tabularx}\\end{center}"
+            elif ncol >= 6 or widest > 48:
+                # Short cells, too many for one column: span the page at a
+                # readable size rather than scaling the whole table down.
+                t = ["\\begin{table*}[tbp]\\centering\\footnotesize",
+                     "\\begin{tabular}{" + spec + "}\\hline"]
+                close = "\\hline\\end{tabular}\\end{table*}"
+            else:
+                t = ["\\begin{center}\\small",
+                     "\\begin{tabular}{" + spec + "}\\hline"]
+                close = "\\hline\\end{tabular}\\end{center}"
             t.append(" & ".join(f"\\textbf{{{inline(c)}}}" for c in head) + r" \\ \hline")
             for r in data:
                 r = r + [""] * (ncol - len(r))
                 t.append(" & ".join(inline(c) for c in r) + r" \\")
-            t.append("\\hline\\end{tabular}}\\end{center}")
+            t.append(close)
             body.append("\n".join(t)); continue
 
         if re.match(r"^\s*[-*]\s+", ln):
@@ -216,7 +246,7 @@ PREAMBLE = r"""\documentclass[10pt,twocolumn]{article}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage[utf8]{inputenc}
-\usepackage{textcomp,amsmath,amssymb,listings,parskip,graphicx}
+\usepackage{textcomp,amsmath,amssymb,listings,parskip,graphicx,tabularx}
 \lstset{basicstyle=\ttfamily\scriptsize,breaklines=true,frame=single,
         columns=fullflexible,xleftmargin=2pt}
 \setlength{\columnsep}{18pt}
