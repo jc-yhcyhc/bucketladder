@@ -432,59 +432,61 @@ dropped" are two descriptions of one measured quantity. The slope rests on a
 single measurement by our own account. What remains is one observation, seen
 twice, plus a fragile third — and **we could not identify what changes there.**
 
-### 4.4 Padding is abundant, workload-dependent, and mostly free
+### 4.4 What padding costs at each boundary, and why per-request length padding does not exist
 
-**The padded share a stack executes is a property of the workload, not of the
-stack, so no single stack-level figure for it is well defined.** This is the
-result of the section, and it does not depend on the magnitudes below.
+Two results, and one experiment that does not support the result it was built for.
 
-Four prompt-length distributions were served at one Poisson arrival rate (8 req/s,
-`output_len=64`, 120 requests each), reporting time to first token (TTFT) and
-inter-token latency (ITL):
+**The share of nominal padding actually paid rises with the size of the
+boundary.** At fixed n=4, it is 10.0% at 512→1024, 22.1% at 1024→2048, 24.0% at
+2048→4096 and 24.8% at 4096→8192. Batch size is held constant across these
+figures, so the comparison is between boundaries and not between load points.
 
-| length distribution | CV | padded share † | TTFT p50 / p95 | ITL p50 / p95 |
+**[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
+paid at each compiled boundary, against the 100% the compiled-shape premise
+predicts.*
+
+**Per-request length padding does not exist.** Holding batch size and total tokens
+fixed and varying only the spread of request lengths, the batch-padding model is
+rejected in every ragged cell by at least 44%; cost tracks packed tokens instead.
+The rejection range extends to 618%, but a span of more than an order of magnitude
+is a directional refutation rather than a measured effect size, so the minimum is
+the figure that carries the claim. Uniform controls, in which all candidate models
+agree, match to 1.9%. This is not an artefact of chunked prefill: with
+`--no-enable-chunked-prefill` the result is unchanged, the packed model winning
+8 of 10 ragged cells and batch padding being rejected by 75–579%.
+
+**The experiment intended to measure how much padding a realistic workload
+executes does not support a cross-workload comparison.** Four prompt-length
+distributions were served at one Poisson arrival rate (8 req/s, `output_len=64`,
+120 requests each), reporting time to first token (TTFT) and inter-token latency
+(ITL):
+
+| length distribution | CV | padded share | TTFT p50 / p95 | ITL p50 / p95 |
 |---|---|---|---|---|
 | fixed-256 | 0.00 | 51.0% | 19 / 27 ms | 4.4 / 5.1 ms |
 | lognormal | 1.20 | 38.4% | 19 / 100 ms | 4.4 / 7.5 ms |
 | bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
 | uniform | 0.60 | 27.3% | 89 / 261 ms | 6.4 / 14.9 ms |
 
-† **The padded-share column is not comparable across rows and we do not quote it
-as a range.** The arms were matched on request rate rather than on offered tokens:
-mean prompt lengths are approximately 256, 384, 704 and 2056, so the uniform arm
-carries about eight times the token load of fixed-256, and its TTFT p50 of 89 ms
-against 17–19 ms for the others places it at a different point on the load curve.
-The column therefore mixes distribution shape with utilisation. Matching on
-offered tokens is required before any range is quoted, and §7 records this as
+The arms were matched on request rate rather than on offered tokens. Mean prompt
+lengths are approximately 256, 384, 704 and 2056, so the uniform arm carries about
+eight times the token load of fixed-256, and its TTFT p50 of 89 ms against 17–19
+ms for the others places it at a different point on the load curve. **No column
+here is comparable across rows**, the latency columns included, and the rows are
+therefore reported as four separate descriptions rather than as a comparison. The
+quantity this experiment was built to produce — how much padding a realistic
+workload executes — is not established by it, and §7 records the matched re-run as
 outstanding.
 
-The latency columns are not affected by that confound and show the ordering that
-motivates the result: a fixed-length workload sitting just above a boundary pads
-every step by the same amount, whereas a spread distribution lands across
-buckets and averages out.
-
-**[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually
-paid at each compiled boundary, against the 100% the compiled-shape premise
-predicts.*
-
-The share paid rises with the boundary: 10.0% at 512→1024, 22.1% at 1024→2048,
-24.0% at 2048→4096, 24.8% at 4096→8192, all at n=4.
-
-**We do not report a single recoverable-headroom figure.** Multiplying a padded
-share measured under one workload by a paid share measured at one batch size —
-which yields "~4–9% of execution" — is the derivation §6 classes as this work's
-dominant error, because §4.3's finding is precisely that the paid share moves with
-batch size. The two quantities are reported separately and not multiplied.
-
-Per-request *length* padding does not exist. Holding batch size and total tokens
-fixed and varying only the spread of request lengths, the batch-padding model is
-rejected in every ragged cell, by **at least 44%** (the range runs to 618%, but a
-span of more than an order of magnitude is a directional refutation rather than a
-measured effect size, so the minimum is the number that carries the claim); cost
-tracks packed tokens. Uniform controls, where all
-candidate models agree, match to 1.9%. **This is not chunked prefill**: with
-`--no-enable-chunked-prefill` the result is unchanged (packed wins 8/10 ragged
-cells, batch padding rejected by 75–579%).
+**Instead of a recoverable-headroom figure, we report its two factors
+separately.** Those are the padded share of executed tokens, which is a property
+of a specific workload and is not established above, and the paid share at a given
+batch size, which §4.3 reports with intervals at n=4, 8 and 16. Multiplying them
+yields a headroom figure of roughly 4–9% of execution, and that product is invalid
+here: §4.3's finding is that the paid share moves with batch size, so a product
+formed from one workload's padded share and one batch size's paid share describes
+no configuration that was run. The two are reported separately and are not
+multiplied.
 
 ### 4.5 Decode is well-behaved, and the reason is not bandwidth
 
@@ -1282,11 +1284,12 @@ placement target moves and not enough to say where it lands for a given amount o
 prefix reuse. Everything outside §4.12 is measured with caching off, so those
 sections describe workloads with little prefix sharing.
 
-**No production trace.** §4.4's four length distributions are parametric families
-and were not matched on offered tokens, which is why we withdraw the range they
-produced rather than report it. No measurement here says how much padding a real
-workload executes; §4.12 shows why that number would be workload-specific even if
-we had it.
+**No production trace, and no figure for the padding a real workload executes.**
+§4.4's four length distributions are parametric families, and the arms were
+matched on request rate rather than on offered tokens, so no column of that table
+is comparable across rows. The matched re-run required to produce the figure was
+not run. §4.12 further shows that any such figure would depend on how much prefix
+reuse the workload has, since caching changes the length actually prefilled.
 
 **Prefill step cost above n=16 is still not isolable**, and at n=16 the clean
 sample is 7–11 dispatches per arm.
