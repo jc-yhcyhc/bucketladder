@@ -424,30 +424,53 @@ candidate models agree, match to 1.9%. This is not an artefact of chunked prefil
 with `--no-enable-chunked-prefill` the result is unchanged, the packed model winning
 8 of 10 ragged cells and batch padding being rejected by 75–579%.
 
-**One experiment does not support the result it was designed for.** Four
-prompt-length distributions were served at a single Poisson arrival rate (8 req/s,
-`output_len=64`, 120 requests each), reporting time to first token (TTFT) and
-inter-token latency (ITL):
+**Padded share is governed by where a distribution's mass falls relative to the
+compiled boundaries, and not by its dispersion.** Four prompt-length distributions
+were served at a single Poisson arrival rate (8 req/s, `output_len=64`, 120
+requests each), reporting time to first token (TTFT) and inter-token latency (ITL).
+Their parameters were solved so that every family has the same mean length of 1000
+tokens, so equal request rate means equal offered tokens and distribution shape is
+the only quantity that differs:
 
-Table: Four prompt-length distributions at one arrival rate. The arms are matched on request rate rather than offered tokens, so no column is comparable across rows. {#tab:dists}
+Table: Padded share under four prompt-length distributions matched on mean length, so that offered tokens are equal across arms. {#tab:dists}
 | length distribution | CV | padded share | TTFT p50 / p95 | ITL p50 / p95 |
 |---|---|---|---|---|
-| fixed-256 | 0.00 | 51.0% | 19 / 27 ms | 4.4 / 5.1 ms |
-| lognormal | 1.20 | 38.4% | 19 / 100 ms | 4.4 / 7.5 ms |
-| bimodal | 1.30 | 32.7% | 17 / 108 ms | 4.8 / 7.5 ms |
-| uniform | 0.60 | 27.3% | 89 / 261 ms | 6.4 / 14.9 ms |
+| fixed-1000 | 0.00 | **8.5%** | 30.0 / 147.5 ms | 4.9 / 9.0 ms |
+| uniform | 0.58 | 27.4% | 45.6 / 74.7 ms | 5.3 / 7.0 ms |
+| lognormal | 0.91 | **33.3%** | 43.6 / 253.3 ms | 5.1 / 10.2 ms |
+| bimodal | 1.51 | 28.0% | 17.1 / 114.2 ms | 4.6 / 7.2 ms |
 
-The arms were matched on request rate rather than on offered tokens. Mean prompt
-lengths are approximately 256, 384, 704 and 2056, so the uniform arm carries about
-eight times the token load of fixed-256, and its TTFT p50 of 89 ms against 17–19 ms
-for the others places it at a different point on the load curve. No column here is
-comparable across rows, the latency columns included. The quantity this experiment
-was built to produce — how much padding a realistic workload executes — is not
-established by it, and §7 records the matched re-run as outstanding.
+The padded share spans 8.5% to 33.3%, a factor of four, at equal offered tokens.
+**Coefficient of variation does not order it.** The three dispersed families run CV
+0.58, 0.91 and 1.51 against padded shares of 27.4%, 33.3% and 28.0%, which is not
+monotone. Raggedness is therefore not the variable that governs padding, which is
+the assumption the bucketing literature rests on. What governs it is where the
+distribution's mass sits relative to the compiled boundaries: the fixed-length arm
+pads least because 1000 tokens sits just below the 1024 entry, so little is rounded
+away, and the same family would pad far more at 1100.
+
+**A prediction registered before this measurement was wrong, and its failure
+retracts the explanation that motivated it.** The same four families measured
+without matching offered tokens — mean lengths of 256, 384, 704 and 2056, so the
+uniform arm carried about eight times the tokens of the fixed arm — placed the
+fixed-length family highest, at 51.0% against 27.3% for uniform. The explanation
+offered for that ordering was that a fixed length just above a boundary pads every
+step by the same large amount while a spread distribution averages across buckets,
+and the prediction registered here was that the ordering would survive matching. It
+does not: at equal offered tokens the fixed family pads least of the four. The
+ordering followed from unequal token load, and the explanation built on it does not
+stand.
+
+This is the conclusion of §4.3 reached from the other direction. There, ladder
+*placement* rather than shape count determines what a ladder buys; here,
+distribution *position* rather than dispersion determines what a workload pays.
+Both identify the same governing quantity: where lengths fall relative to
+boundaries.
 
 **In place of a recoverable-headroom figure we report its two factors separately.**
-Those are the padded share of executed tokens, which is a property of a specific
-workload and is not established above, and the paid share at a given batch size,
+Those are the padded share of executed tokens, which the table above establishes
+for four synthetic families and which remains workload-specific, and the paid share
+at a given batch size,
 reported with intervals earlier in this section. Multiplying them yields a headroom
 figure of roughly 4–9% of execution, and that product is invalid: the paid share
 moves with batch size, so a product formed from one workload's padded share and one
@@ -1065,11 +1088,13 @@ placement target moves and not enough to say where it lands for a given amount o
 prefix reuse. Everything outside §4.6 is measured with caching disabled and so
 describes workloads with little prefix sharing.
 
-**No production trace, and no figure for the padding a real workload executes.**
-§4.2's four length distributions are parametric families, and the arms were matched
-on request rate rather than on offered tokens, so no column of that table is
-comparable across rows. The matched re-run was not performed. §4.6 further shows
-that any such figure would depend on how much prefix reuse the workload has.
+**No production trace.** §4.2's four length distributions are parametric families
+matched on mean length, not a trace of real traffic. They establish that padded
+share varies by a factor of four with distribution shape at equal offered tokens,
+and that dispersion does not order it, but the figures belong to those families
+rather than to any deployment. §4.6 further shows that any such figure depends on
+how much prefix reuse a workload has, since caching changes the length actually
+prefilled.
 
 **The ladder benefit has no measured upper bound in concurrency.** §4.4 sweeps 1 to
 16 and finds no crossing, so we cannot say where a finer ladder ceases to pay, only
