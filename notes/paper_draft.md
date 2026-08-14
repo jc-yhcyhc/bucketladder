@@ -1,8 +1,7 @@
 # Shape Coverage Is a Warmup Cost: Compiled-Shape Padding in Production TPU and GPU Serving
 
-Stack: vLLM 0.25.0 on `v5litepod-4` (`tpu-inference` 0.25.0, JAX 0.10.2,
-tensor-parallel degree TP=4) and on an NVIDIA L4. Twenty-nine hardware sessions,
-approximately $108 of accelerator time.
+Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
+(JAX 0.10.2, tensor-parallel degree TP=4), with an NVIDIA L4 for the GPU control.
 
 ---
 
