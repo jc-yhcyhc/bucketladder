@@ -1,0 +1,49 @@
+{
+  "experiment": "m11_trace_matched",
+  "description": "The token-matched re-run S4.2 records as outstanding. The earlier arms were matched on request rate but not on offered tokens, so mean prompt lengths ran 256 to 2056 and the padded-share column mixed distribution shape with utilisation. Here every family has the same mean length, so equal request rate means equal token load and shape is the only variable.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "seed": 20260811,
+  "output_len": 64,
+  "requests_per_arm": 120,
+  "arrival_rate_rps": 8.0,
+  "max_inflight": 64,
+  "note_output_len": "64, not 1. Review M5(ii): output_len=1 leaves no decode steady state, so decode results were measured under a workload that barely decodes. 64 gives every request a decode phase long enough for an inter-token latency to mean something.",
+  "note_rate": "8 rps is below the saturation point measured in earlier sessions, so the arms compare packing rather than compare queueing collapse. Poisson, not closed-loop: a closed loop cannot produce the queueing that decides how steps pack.",
+  "distributions": [
+    "fixed",
+    "lognormal",
+    "uniform",
+    "bimodal"
+  ],
+  "lengths": {
+    "min_len": 16,
+    "max_len": 4096,
+    "fixed_len": 1000,
+    "median_len": 698,
+    "sigma": 0.9,
+    "uniform_lo": 16,
+    "uniform_hi": 1984,
+    "short_len": 128,
+    "long_len": 3045,
+    "short_frac": 0.7
+  },
+  "note_lengths": "Parameters solved offline so that all four clamped families have mean 1000 tokens (measured 1000, 1000, 996, 1000 over 20,000 draws) while CV spans 0.00, 0.90, 0.57 and 1.37. Distribution shape is therefore the only quantity that differs between arms.",
+  "dimension": "D2",
+  "note_prediction": "REGISTERED. S4.2 found the fixed-length arm padding most and attributed it to a length sitting just above a boundary padding every step by the same amount, while a spread distribution lands across buckets and averages out. That ordering was confounded by token load. If it survives matching, fixed-256 remains the highest padded share and the ordering by CV holds. If it inverts or flattens, the earlier ordering was an artefact of offered tokens and the paper should say so.",
+  "prediction_mechanism": "Target: padded share of executed tokens per arm. Lever: the shape of the prompt-length distribution at fixed mean, which changes where lengths fall relative to compiled boundaries while leaving total offered tokens unchanged. Padded tokens are real arithmetic (S4.2), so d(padded share)/d(shape) is nonzero, and holding the mean fixed removes utilisation as the competing explanation."
+}

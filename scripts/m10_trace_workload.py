@@ -79,7 +79,9 @@ def draw_lengths(kind: str, k: int, p: dict[str, Any], rng: random.Random) -> li
         elif kind == "lognormal":
             v = int(math.exp(rng.gauss(math.log(p["median_len"]), p["sigma"])))
         elif kind == "uniform":
-            v = rng.randint(lo, hi)
+            # Its own bounds, so a uniform arm can be centred on the same mean as
+            # the others without forcing the global clamp down for every family.
+            v = rng.randint(p.get("uniform_lo", lo), p.get("uniform_hi", hi))
         elif kind == "bimodal":
             v = (int(rng.gauss(p["short_len"], p["short_len"] * 0.2)) if rng.random() < p["short_frac"]
                  else int(rng.gauss(p["long_len"], p["long_len"] * 0.2)))
