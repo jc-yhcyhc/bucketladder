@@ -56,6 +56,12 @@ def esc(t: str) -> str:
     return "".join(out)
 
 
+# A value and its unit must not be split across a line break. siunitx would do
+# this and much else; a non-breaking space is the part that affects the reader.
+UNIT_RE = re.compile(r"(?<=\d)[ ](?=(?:µs|ms|ns|s|MB|GB|KB|TFLOP/s|GB/s|req/s|"
+                     r"tokens|FLOP/byte)\b)")
+
+
 def inline(t: str) -> str:
     """Inline markup.
 
@@ -74,10 +80,13 @@ def inline(t: str) -> str:
 
     t = re.sub(r"`([^`]+)`", stash, t)
     t = esc(t)
+    # [tab:slug] -> a real cross-reference, so prose can name a table by number
+    t = re.sub(r"\[(tab:[\w-]+)\]", r"Table~\\ref{\1}", t)
     t = re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", t)
     t = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"\\emph{\1}", t)
     for i, c in enumerate(holds):
         t = t.replace(f"\x00{i}\x00", r"\texttt{" + esc(c) + "}")
+    t = UNIT_RE.sub("~", t)
     return t
 
 
@@ -91,9 +100,20 @@ FIGRE = re.compile(r"^\*\*\[Figure (\d+)[^\]]*?`?([\w./-]+\.png)`?\]\*\*\s*(.*)$
 def convert(md: str) -> str:
     lines = md.split("\n")
     body: list[str] = []
+    pending_caption: tuple[str, str] | None = None
     i = 0
     while i < len(lines):
         ln = lines[i]
+
+        # A table caption, captured here rather than after paragraph processing.
+        # Read from `body` it has already been through inline(), which escapes
+        # "{#tab:x}" into "\\{\\#tab:x\\}" -- so the label never matched and the
+        # escaped text leaked into the caption instead.
+        mcap = re.match(r"^Table:\s*(.*?)\s*(?:\{#(tab:[\w-]+)\})?\s*$", ln)
+        if mcap and ln.startswith("Table:"):
+            pending_caption = (mcap.group(1), mcap.group(2) or "")
+            i += 1
+            continue
 
         # A figure line: emit an actual float, not the literal markdown.
         mfig = FIGRE.match(ln)
@@ -145,6 +165,26 @@ def convert(md: str) -> str:
 
         # pipe table: a header row followed by a |---| separator
         if ln.startswith("|") and i + 1 < len(lines) and re.match(r"^\|[\s:|-]+\|\s*$", lines[i + 1]):
+            # A caption line may sit immediately above the table:
+            #   Table: what it shows {#tab:slug}
+            # Without one a table renders bare, which is what a reviewer objected
+            # to: no number, no caption, and nothing prose can refer to.
+            caption = label = ""
+            if pending_caption:
+                caption, label = pending_caption
+                pending_caption = None
+            elif body and isinstance(body[-1], str):
+                raw_cap = body[-1].strip()
+                # Try the labelled form first. A single optional group lets the
+                # non-greedy caption swallow "{#tab:x}" and silently drop every
+                # label, which is what happened: 24 captions, 0 labels.
+                mcap = re.match(r"^Table:\s*(.*?)\s*\{#(tab:[\w-]+)\}\s*$", raw_cap)
+                if mcap:
+                    caption, label = mcap.group(1), mcap.group(2)
+                    body.pop()
+                elif raw_cap.startswith("Table:"):
+                    caption, label = raw_cap[6:].strip(), ""
+                    body.pop()
             rows = []
             while i < len(lines) and lines[i].startswith("|"):
                 rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
@@ -167,28 +207,62 @@ def convert(md: str) -> str:
             # caught it.
             widest = max(sum(len(c) for c in r) + 3 * ncol for r in rows)
             longest_cell = max(len(c) for r in rows for c in r)
+            cap_tex = ""
+            if caption:
+                cap_tex = ("\\caption{" + inline(caption) + "}"
+                           + ("\\label{" + label + "}" if label else ""))
             if longest_cell > 34:
-                # A genuinely long prose cell must WRAP, and tabularx gives the
-                # last column the slack. This branch is valid ONLY when the other
-                # columns are short: if the fixed columns already fill the line,
-                # X is allotted negative width and its contents are clipped
-                # without any LaTeX error. That silently removed the p95 column
-                # of the throughput table -- the row's other cells rendered, so
-                # nothing looked wrong except a missing number.
-                xspec = ("l" * (ncol - 1)) + "X" if ncol > 1 else "X"
-                t = ["\\begin{center}\\small",
-                     "\\begin{tabularx}{\\columnwidth}{" + xspec + "}\\hline"]
-                close = "\\hline\\end{tabularx}\\end{center}"
+                # Long prose cells must WRAP. tabularx does that, but only for
+                # the columns declared X, and the wide column is NOT always the
+                # last one: in the failure taxonomy it is the third of four, so
+                # putting X last gave it negative width and clipped it silently
+                # ("what it isprovenance", "used under another" -> "one confi").
+                # Declare X for EVERY column that carries long text, so the slack
+                # is distributed among the columns that actually need it.
+                colmax = [max(len(r[c]) if c < len(r) else 0 for r in rows)
+                          for c in range(ncol)]
+                wide = [c for c, w in enumerate(colmax) if w > 20]
+                if not wide:
+                    wide = [ncol - 1]
+                # Equal X columns split the line evenly, which is wrong when one
+                # column carries three times the text of another: the taxonomy
+                # table gave "class" as much width as "what it is". Weight each
+                # X column by its own content length, normalised so the weights
+                # sum to the number of X columns, which is what tabularx expects.
+                tot = sum(colmax[c] for c in wide) or 1
+                parts = []
+                for c in range(ncol):
+                    if c in wide:
+                        w = len(wide) * colmax[c] / tot
+                        parts.append(f">{{\\hsize={w:.2f}\\hsize}}X")
+                    else:
+                        parts.append("l")
+                xspec = "".join(parts)
+                # Wrapping is not enough when the whole table is wide: four prose
+                # columns squeezed into one text column leave each a few
+                # characters across. Give those the full page width as well.
+                if widest > 85:
+                    t = ["\\begin{table*}[tbp]\\centering\\small",
+                         cap_tex,
+                         "\\begin{tabularx}{\\textwidth}{" + xspec + "}\\hline"]
+                    close = "\\hline\\end{tabularx}\\end{table*}"
+                else:
+                    t = ["\\begin{table}[tbp]\\centering\\small",
+                         cap_tex,
+                         "\\begin{tabularx}{\\columnwidth}{" + xspec + "}\\hline"]
+                    close = "\\hline\\end{tabularx}\\end{table}"
             elif ncol >= 6 or widest > 48:
                 # Short cells, too many for one column: span the page at a
                 # readable size rather than scaling the whole table down.
                 t = ["\\begin{table*}[tbp]\\centering\\footnotesize",
+                     cap_tex,
                      "\\begin{tabular}{" + spec + "}\\hline"]
                 close = "\\hline\\end{tabular}\\end{table*}"
             else:
-                t = ["\\begin{center}\\small",
+                t = ["\\begin{table}[tbp]\\centering\\small",
+                     cap_tex,
                      "\\begin{tabular}{" + spec + "}\\hline"]
-                close = "\\hline\\end{tabular}\\end{center}"
+                close = "\\hline\\end{tabular}\\end{table}"
             t.append(" & ".join(f"\\textbf{{{inline(c)}}}" for c in head) + r" \\ \hline")
             for r in data:
                 r = r + [""] * (ncol - len(r))

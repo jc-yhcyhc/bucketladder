@@ -24,7 +24,8 @@ Checks, each named after the failure that motivated it:
   NOTEBOOK-VOICE first-person narration of the research process
   SELF-ADDRESSED editorial notes to self ("stated once", "note to self")
   ACRONYM        an acronym used before it is expanded
-  XREF           a section cross-reference pointing at a section that is gone
+  XREF           a cross-reference pointing at a section or table that is gone
+  TABLE-UNCAPTIONED  a table with no caption, so it cannot be numbered or cited
 
 Exit non-zero on any finding, so `reproduce_all.sh` fails closed.
 
@@ -174,6 +175,22 @@ def main(argv: list[str] | None = None) -> int:
         exp = flatmd.find(re.sub(r"\s+", " ", expansion).lower())
         if exp < 0 or exp > first_flat:
             flag("ACRONYM", f"{ac} used at char {uses[0]} before {expansion!r} appears")
+
+    # Every table needs a caption, so it can be numbered and referred to. A bare
+    # table was the state of all twenty-four before a reviewer said so.
+    md_lines = md.split("\n")
+    for i, l in enumerate(md_lines):
+        if i + 1 < len(md_lines) and re.match(r"^\|[\s:|-]+\|\s*$", md_lines[i + 1]) \
+                and l.startswith("|"):
+            prev = md_lines[i - 1].strip() if i else ""
+            if not prev.startswith("Table:"):
+                flag("TABLE-UNCAPTIONED",
+                     f"table at line {i + 1} has no 'Table:' caption line: {l[:60]!r}")
+    # A cross-reference must point at a label that exists.
+    labels = set(re.findall(r"\{#(tab:[\w-]+)\}", md))
+    for m in re.finditer(r"\[(tab:[\w-]+)\]", md):
+        if m.group(1) not in labels:
+            flag("XREF", f"[{m.group(1)}] referenced but no table carries that label")
 
     # Cross-references must point at sections that exist.
     heads = set()
