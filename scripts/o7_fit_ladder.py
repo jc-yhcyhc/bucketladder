@@ -91,22 +91,37 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True, type=pathlib.Path)
     ap.add_argument("--gap", required=True,
-                    help="'none' for the default exponential ladder, else the gap")
+                    help="'none' for the default exponential ladder, an integer "
+                         "gap, or 'explicit' when --ladder supplies the entries")
+    ap.add_argument("--ladder", default=None,
+                    help="comma-separated explicit ladder, compiled via the "
+                         "BUCKETLADDER_TOKEN_LADDER patch. The arm still verifies "
+                         "the server's printed ladder against this.")
+    ap.add_argument("--arm-name", default=None,
+                    help="label for the arm, since two explicit ladders differ "
+                         "by their objective rather than by any gap value")
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--results-root", type=pathlib.Path, default=None)
     args = ap.parse_args(argv)
 
-    gap = None if args.gap.lower() in ("none", "null", "") else int(args.gap)
+    explicit = None
+    if args.ladder:
+        explicit = sorted({int(x) for x in args.ladder.split(",") if x.strip()})
+    gap = (None if args.gap.lower() in ("none", "null", "explicit", "")
+           else int(args.gap))
     cfg = dict(load_config(args.config))
-    cfg["arm"] = f"gap{gap}" if gap else "default"
+    cfg["arm"] = args.arm_name or (f"gap{gap}" if gap else "default")
+    if explicit:
+        cfg["explicit_ladder"] = args.ladder
     cfg["controlled"] = dict(cfg["controlled"])
-    cfg["controlled"]["VLLM_TPU_BUCKET_PADDING_GAP"] = str(gap) if gap else ""
+    cfg["controlled"]["VLLM_TPU_BUCKET_PADDING_GAP"] = (
+        "explicit" if explicit else (str(gap) if gap else ""))
 
     if not metrics_available(args.base_url):
         print(f"[o7] no /metrics at {args.base_url}", file=sys.stderr)
         return 1
 
-    want = predicted_ladder(gap)
+    want = explicit if explicit else predicted_ladder(gap)
     got = actual_ladder(pathlib.Path(cfg["warmup_log_path"]))
     if not got:
         print("[o7] could not read the compiled ladder from the warmup log; "

@@ -45,7 +45,10 @@ against a 0.92 default, which costs 8.8% of cache capacity and 53% more startup
 time. Every cost measured scales with the number of compiled shapes; the benefit
 depends only on whether a boundary falls between the prompt length and the next
 entry. A ladder can be chosen offline: expected padding computed from a length
-distribution predicted the measured reduction to within 5%.
+distribution predicted the measured reduction to within 5%, and a ladder chosen
+this way is 1.61 ms faster than one chosen by BucketServe's published objective at
+equal shape count, because that objective minimizes relative rather than absolute
+padding.
 
 Two measurements bound what that reduction is worth in deployment. Swept against
 offered load, it reduces median latency by 46% just below saturation but increases
@@ -678,6 +681,44 @@ at n=8 and n=16 (−6.0 against −27.7 ms, and −1.5 against −17.2 ms) where
 treated cells are stable. The n≥4 figures above are therefore floors on the effect
 rather than unbiased estimates, and arm order is their only control.
 
+##### An isolated-dispatch control
+
+The defect above is that concurrency does two things at once: it makes the regime
+realistic, and it lets the scheduler co-schedule prefills. Only the second breaks
+the control. Releasing requests on a 120 ms stagger separates them: a 3000-token
+prefill takes roughly 90 ms here, so each prefill runs alone in its step, while a
+32-token decode takes about 160 ms, so requests still overlap in decode and the
+concurrency is real.
+
+Isolation was verified rather than assumed. Scraping the step-size histogram
+around eight staggered requests at prompt 300 shows **eight separate prefill steps,
+all in the (256, 512] bin**; the same eight released as a burst produce three
+steps, in (256,512], (512,1024] and (1024,2048]. The stagger therefore restores
+the per-request ladder mapping the control depends on.
+
+Table: Ladder difference with prefills isolated by a 120 ms arrival stagger. Prompt 300 pads to 512 on both ladders and measures the offset between server instances; 1200 pads to 2048 on both and should show no effect. {#tab:isolated}
+| n | prompt 300 (offset) | prompt 1200, corrected | prompt 3000, corrected |
+|---|---|---|---|
+| 4 | −11.2 ms | +8.2 ms | **−65.8 ms** |
+| 8 | −9.7 ms | +1.2 ms | **−108.1 ms** |
+| 16 | −4.5 ms | +2.7 ms | **−98.1 ms** |
+
+A registered prediction that the control cell would return to zero was wrong: it
+shows a stable offset of 4 to 11 ms. Because 300 tokens pads to 512 on both
+ladders once prefills are isolated, and the histogram confirms they are, no ladder
+effect can reach that cell, so the offset is a difference between server instances
+and is exactly the quantity a control exists to measure. Subtracting it, prompt
+1200 sits at zero as the ladders predict, since both pad it to 2048, and prompt
+3000 carries a large reduction that does not decay through n=16. Intervals here are
+±0.7 ms rather than floors.
+
+The effect under isolation is substantially larger than under burst arrival, at 66
+to 108 ms against the 18 to 50 ms of the table above. That is the same mechanism
+seen from the other side: a packed step amortizes one padding charge across several
+requests, while an isolated prefill pays its own in full. **The claim that the
+benefit does not decay through n=16 therefore holds at interval level under
+isolated dispatch, and as a floor under burst arrival.**
+
 The sign survives this; the magnitude does not. The placebo's spread across arm
 orders at n=8 and n=16 is approximately 20 ms, comparable to several treated
 differences in the same table, so no n≥4 magnitude is resolvable at interval level.
@@ -811,6 +852,53 @@ against 4.94 MB free) than the 21-shape one (32.50 MB against 12.40 MB). The
 feasible set here was {10, 14} and the answer was 14. The configuration rule is to select the
 greatest shape density that satisfies the memory constraint, with entries placed
 against the length distribution.
+
+##### Comparison against BucketServe's ladder objective
+
+The procedure above minimizes expected padded tokens. BucketServe specifies a
+different objective for the same decision, minimizing expected relative waste,
+`E[1 - S/U_b]`, and derives the condition that a bucket's upper bound should equal
+the conditional expectation of lengths within it. That condition is the Lloyd-Max
+centroid condition, and their paper declines to compute it, describing it as
+computationally expensive in practice. It is a local condition; we instead solve
+their objective globally by dynamic programming over a discretized length axis,
+which is `O(K N^2)` and takes milliseconds, so their objective is given a better
+solution than their own formulation proposes.
+
+Neither ladder is expressible through `VLLM_TPU_BUCKET_PADDING_GAP`, whose family
+is "double while the doubling step is no larger than the gap, then step linearly".
+Both were compiled by patching `get_token_paddings` to accept an explicit ladder,
+which leaves the function unchanged when the variable is unset. Both ladders also
+carry fixed entries at 16, 32, 64 and 128: BucketServe's boundaries are derived
+from prompt lengths and begin at 208, and a ladder without small entries pads a
+two-token decode step to 208. Both arms therefore spend the same number of shapes,
+fourteen, and differ only in where the ten free entries sit.
+
+Table: Two ladder-design objectives at equal shape count, on the same replayed workload. Their objective minimizes relative waste; ours minimizes absolute padded tokens. {#tab:objectives}
+| ladder | shapes | padded tok/req | mean e2e |
+|---|---|---|---|
+| stock | 10 | 602 | 226.2 ms |
+| gap 1024 | 14 | 389 | 215.6 ms |
+| BucketServe objective | 14 | 328 | 209.0 ms |
+| padded-token objective | 14 | **248** | **207.4 ms** |
+
+**The padded-token objective is faster by 1.61 ms, with a 95% interval of
+[1.04, 2.17] and p < 0.001** over nine replays per arm. Both ladder-design
+objectives beat the stock ladder by roughly 15 ms, so the disagreement between
+them is small next to the decision to design a ladder at all. The direction is
+what the cost model predicts: relative waste treats a 10-token overshoot on a
+100-token request as equal to a 1000-token overshoot on a 10,000-token request,
+whereas §4.3 prices a padded token at a constant, so absolute padding is the
+quantity that converts to time.
+
+Two honest qualifications. At three replays the same comparison gave
+[-5.39, +1.83] and did not resolve, and the arms were an order of magnitude
+noisier; the effect is real but small enough to need the replays. And the measured
+gap is about half the 2.8 ms the linear model predicts from 80 padded tokens,
+implying roughly 20 µs per token here against the 34.9–35.3 µs of §4.3. The
+per-token cost is therefore not constant across the range: the model is accurate
+where padding is large, which is where ladder design is decided, and overestimates
+the marginal value of removing padding once little remains.
 
 ##### Applying the procedure under traffic drift
 
@@ -1001,7 +1089,7 @@ It is future work rather than a result, and nothing above depends on it.
 Table: Five optimizations designed against these measurements, and their outcomes. {#tab:opts}
 | | outcome |
 |---|---|
-| **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; −1.7% once prefix caching is on (§4.3–§4.7)** |
+| **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; beats BucketServe's objective by 1.61 ms at equal shape count; −1.7% once prefix caching is on (§4.3–§4.7)** |
 | bucket-aware admission control | premise false (§4.2) |
 | ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
@@ -1192,6 +1280,18 @@ interface, but the operational advice is pinned to this version. §4.7's rule
 mitigates this only partly: it states which ladder to want, while the flags are how
 one currently asks for it.
 
+**Mixture-of-experts models could not be measured on this hardware.** The
+attempt is reported because its obstacle is specific rather than a matter of
+budget. Of the mixture-of-experts architectures `tpu-inference` supports natively,
+`gpt-oss-20b` fails to initialize at TP=4 with a JAX `IndivisibleError`: a
+parameter axis of size 6 cannot be partitioned across four chips. Sharding it at
+TP=2 would divide cleanly but would change a controlled variable that §4.8 shows
+moves the fixed cost by 38%, so the comparison would be confounded rather than
+informative. The other native option, `llama4`, is 109B parameters and exceeds the
+slice. The prediction we would test is that the paid share is roughly unchanged,
+since it is a ratio and padded tokens route to experts exactly as real tokens do,
+but that remains untested.
+
 **The GPU control is inference-tier hardware.** The L4 has neither the compute
 throughput nor the memory bandwidth of the accelerators most production serving
 runs on, and the arithmetic-intensity ridge sits at a different point there than at
@@ -1245,8 +1345,17 @@ build with explicit optimization profiles. Nothing here is measured on either, a
 the claims should be read as applying to vLLM-style designs, in which shapes are
 compiled or captured from a ladder the serving loop rounds up to.
 
-**BucketServe** and **LAPS** manage length-bucketing overhead on GPU, and we
-measured the comparison rather than asserting it. Same vLLM 0.25.0, same instrument,
+**BucketServe** and **LAPS** manage length-bucketing overhead on GPU. §4.7 runs
+BucketServe's own ladder-design objective on this stack rather than arguing
+against it: solved globally and given the same shape budget, its ladder is 1.61 ms
+slower than one chosen to minimize absolute padded tokens, and both are about
+15 ms faster than the stock ladder. Their ladder design is therefore effective,
+and our disagreement with these systems is narrower than a premise-level
+objection. It concerns which dimension the padding occupies — the request
+dimension is free (§4.1) and per-request length padding does not exist (§4.2) —
+and, for the token dimension where it is real, which objective converts to time.
+
+We also measured the cross-architecture comparison rather than asserting it. Same vLLM 0.25.0, same instrument,
 an L4 (23 GB, TP=1) in place of the v5e:
 
 Table: GPU control on an L4: CUDA-graph capture against eager execution. The increments are the measurement; the levels differ by a constant launch overhead. {#tab:gpu}

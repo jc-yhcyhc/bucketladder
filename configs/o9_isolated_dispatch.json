@@ -1,0 +1,42 @@
+{
+  "experiment": "o9_isolated_dispatch",
+  "dimension": "D2",
+  "description": "A valid placebo above n=2. S4.4's control cell stops being inert once the scheduler packs requests into shared steps, leaving its n>=4 rows as floors rather than estimates. Staggering arrivals by more than a prefill's duration keeps each prefill alone in its step while decodes overlap, which restores the per-request ladder mapping the control depends on.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "serve_extra_args": "--gpu-memory-utilization 0.92",
+  "independent_vars": {
+    "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder is the experiment: unset gives ten exponential shapes, 1024 gives fourteen with an entry at 3072. Varying it is the comparison."
+  },
+  "prompt_lens": [
+    300,
+    1200,
+    3000
+  ],
+  "concurrency_levels": [
+    4,
+    8,
+    16
+  ],
+  "stagger_ms": 120,
+  "output_len": 32,
+  "repeats": 7,
+  "warmup_discard": 2,
+  "note_stagger": "120 ms between releases. A 3000-token prefill takes roughly 90 ms on this stack and a 300-token one far less, so a 120 ms spacing leaves each prefill alone in its step. Decode of 32 tokens takes about 160 ms, so requests still overlap in decode and the concurrency is real rather than nominal.",
+  "note_prediction": "REGISTERED. With prefills isolated the prompt-300 cell should return to a difference indistinguishable from zero at every concurrency, which is what makes it a control again, while 1200 and 3000 keep reductions near those S4.3 measured at n=2. If the placebo still moves, isolation was not achieved and the stagger is too short; the executed step-size distribution shows that directly.",
+  "prediction_mechanism": "Target: the difference between ladders at prompt 300. Lever: arrival spacing, which determines whether a step carries one request's tokens or several. At 300 tokens a lone prefill pads to 512 on both ladders, so the ladder cannot move it; packed with three others it reaches 1200 tokens and the ladders differ. Spacing therefore acts directly on whether the control is a control."
+}
