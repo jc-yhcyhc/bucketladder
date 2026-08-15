@@ -65,9 +65,9 @@ individual requests to the packed step rather than being eliminated.
 
 A final result concerns methodology, and it is a caution about how to read this
 paper. Fourteen invalid inferences were made and caught during the work, and they
-fall unevenly: across four rounds of external review no reported measurement was
-withdrawn, while four of the five most recent retractions were *explanations* for
-measurements that still stand. Every number here passes a contract that aborts a
+fall unevenly: no reported measurement has been withdrawn during the work, while
+four of the five most recent retractions were *explanations* for measurements that
+still stand. Every number here passes a contract that aborts a
 run when a controlled variable is unstated, and is recomputed by a script that
 fails on disagreement; an explanation is a sentence, and nothing in that pipeline
 can execute a sentence. Readers should trust this paper's measurements more than
@@ -99,9 +99,8 @@ warmup charge that neither system measures.
 
 We additionally document how the experimental methodology evolved to enforce
 falsifiability, because that evolution shaped what was measured. Our measurements
-have proved durable and our explanations have not: over four rounds of
-external review, no headline number was withdrawn, while four of the last five
-retractions were claims about mechanism. This asymmetry is structural rather than
+have proved durable and our explanations have not: no reported number has been
+withdrawn, while four of the last five retractions were claims about mechanism. This asymmetry is structural rather than
 accidental. Numbers here pass through a contract that aborts on an unstated
 variable and a script that recomputes them, whereas a mechanism is prose and
 nothing in the pipeline can reject it. §4.1 carries an instance. The finding that
@@ -1213,8 +1212,7 @@ would have fired before hardware was provisioned.
 ### 6.1 Measurements outlast explanations
 
 Counting the fourteen entries alone conceals a pattern: **the measurements have
-survived four rounds of external review largely intact, and the explanations have
-not.** Every headline measurement in §4 still stands as measured. What has been
+survived revision intact and the explanations have not.** Every headline measurement in §4 still stands as measured. What has been
 withdrawn, in order, is a crossover rule, a recoverable-headroom figure, a
 microbenchmark and the mechanism it claimed to isolate, a memory-bandwidth account
 of free request padding, and the frontier bound derived from that account. Four of
@@ -1226,8 +1224,8 @@ contract that aborts on an unstated variable, is tied to a run identifier, and i
 recomputed from captured data by a script that exits non-zero on disagreement. **No
 comparable machinery exists for explanations.** A mechanism is prose: it can be
 written, accepted, cited by later sections, and carried across drafts without ever
-being evaluated. The bandwidth account survived four sessions and two reviews not
-because evidence supported it but because nothing in the pipeline could reject it.
+being evaluated. The bandwidth account survived four sessions of work not because
+evidence supported it but because nothing in the pipeline could reject it.
 
 The registered-prediction discipline is the closest available remedy, and its
 record is instructive. Three predictions failed — the sharding ablation, the model-
@@ -1464,10 +1462,10 @@ prefill onto a different compiled entry, so entries must be placed against uncac
 prefill lengths rather than prompt lengths.
 
 Three predictions registered before measurement failed, and each failure was worth
-more than a confirmation. That record is the paper's methodological result: across
-four rounds of review every headline measurement survived and four of the last five
-retractions were claims about mechanism, because a measurement passes through
-machinery that can reject it and an explanation does not. The remedy adopted here is
+more than a confirmation. That record is the paper's methodological result: every reported measurement has
+survived revision while four of the last five retractions were claims about
+mechanism, because a measurement passes through machinery that can reject it and
+an explanation does not. The remedy adopted here is
 to require that a mechanism emit a falsifiable number before hardware is
 provisioned. It is cheap, and it is the practice we would most recommend carrying
 into other measurement work.

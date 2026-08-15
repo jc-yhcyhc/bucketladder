@@ -27,6 +27,7 @@ Checks, each named after the failure that motivated it:
   XREF           a cross-reference pointing at a section or table that is gone
   TABLE-UNCAPTIONED  a table with no caption, so it cannot be numbered or cited
   DIALECT        British spelling in a paper standardized on American
+  PROVENANCE-CLAIM  a claim about review history the artifact cannot substantiate
 
 Exit non-zero on any finding, so `reproduce_all.sh` fails closed.
 
@@ -52,6 +53,15 @@ NOTEBOOK_VOICE = [
     r"we set out to", r"six sessions in", r"it turned out that we",
     r"we then realised", r"we spent \w+ sessions", r"our first attempt",
     r"we had assumed", r"we were wrong about",
+]
+# Claims about review or peer scrutiny that the repository cannot substantiate.
+# The paper asserted "four rounds of external review"; nothing on disk records an
+# external review, and the feedback it referred to arrived through conversation of
+# unknown provenance. A paper may not describe its own review history unless that
+# history is in the artifact.
+UNSUPPORTED_PROVENANCE = [
+    r"external review", r"peer[- ]review(?:ed)?\b", r"rounds? of review",
+    r"\breviewers? (?:said|asked|noted|found)\b", r"two reviews",
 ]
 SELF_ADDRESSED = [
     r"stated once", r"note to self", r"TODO", r"FIXME", r"XXX",
@@ -160,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         for m in re.finditer(pat, md, re.I):
             flag("DIALECT", f"British spelling in an American-English paper: "
                             f"{md[max(0, m.start() - 25):m.start() + 30]!r}")
+    for pat in UNSUPPORTED_PROVENANCE:
+        for m in re.finditer(pat, md, re.I):
+            flag("PROVENANCE-CLAIM",
+                 f"claim about review history that the repo cannot support: "
+                 f"{md[max(0, m.start() - 35):m.start() + 45]!r}")
     for pat in REGISTER:
         for m in re.finditer(pat, md, re.I):
             flag("REGISTER", f"{pat!r}: {md[max(0, m.start() - 35):m.start() + 45]!r}")
