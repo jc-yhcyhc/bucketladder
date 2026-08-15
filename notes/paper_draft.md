@@ -226,8 +226,10 @@ Prepared request paddings:      [8, 16, 32, 64, 128, 256]
 Prepared attn request paddings: [256]
 ```
 
-**The attention kernel therefore executes at a fixed size of 256 request slots,
-independently of the batch size.** Three measurements establish that this padding
+##### Executed request-slot count
+
+The attention kernel therefore executes at a fixed size of 256 request slots,
+independently of the batch size. Three measurements establish that this padding
 carries negligible cost.
 
 First, a paired experiment: enabling the flag compiles the full ladder, verified in
@@ -271,8 +273,10 @@ amount to 27.5 µs per padded slot. The table is equally consistent with padded
 slots being skipped and with a fixed cost being paid for all 256, and so cannot
 establish either.
 
-**The discriminating experiment reduces the compiled slot count and observes the
-fixed term.** Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots
+##### Discriminating experiment: reducing the slot count
+
+The discriminating experiment reduces the compiled slot count and observes the
+fixed term. Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots
 rather than 256, a 32-fold reduction, profiled in both arms at the same real batch
 size:
 
@@ -299,7 +303,9 @@ attention time; at n=1 it would be 42%, and at n=1 the measured difference is
 −0.9%. The 0.0% result was not a low-power test concealing an effect, because the
 effect is absent where it would have been largest.
 
-**The memory-bandwidth explanation is tested and rejected.** A natural account of
+##### Testing the memory-bandwidth account
+
+The memory-bandwidth explanation is tested and rejected. A natural account of
 free request padding is that the step reads the whole weight set regardless of
 batch, so padded slots are absorbed into a fixed cost that batch size does not
 change. That account predicts utilisation climbing toward the compute roof past the
@@ -332,7 +338,9 @@ remains valid, namely byte accounting: the step reads 2.01 GB of weights regardl
 of batch size. Achieved bandwidth, however, is computed as bytes divided by
 measured time, and therefore restates the step time from which it is derived.
 
-**No promotion cost exists at the 8→16 request edge** under the default
+##### Promotion cost at the 8-to-16 request edge
+
+No promotion cost exists at the 8→16 request edge under the default
 configuration, because the attention kernel is already compiled at 256 slots and
 does not distinguish the two batch sizes.
 
@@ -354,8 +362,10 @@ Table: Share of nominal token padding paid, by batch size. Rows are confounded: 
 | 8 | 14.3% | 11.8% | [0.2%, 21.0%] | 3 | 3–5 |
 | 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] | 3 | 7–11 |
 
-**These rows are confounded, because each was measured over a different set of
-ladder boundaries.** At fixed n=4 the paid share rises with boundary size, from
+##### Confounding across ladder boundaries
+
+These rows are confounded, because each was measured over a different set of
+ladder boundaries. At fixed n=4 the paid share rises with boundary size, from
 10.0% at 512→1024 to 24.8% at 4096→8192, so the particular boundaries a row
 contains shift its value independently of batch size. The sets differ: n=8 lacks
 512→1024, the lowest-paying boundary, and n=16 lacks 4096→8192, the highest. Both
@@ -385,8 +395,10 @@ least well supported. The n=8 value of 14.3% excludes split dispatches; includin
 them pools partial steps into the median and yields 16%, and the exclusion is the
 correct treatment.
 
-**The upper limit of what can be measured was partly a property of the measurement
-apparatus.** A naive launcher makes this quantity appear unmeasurable above n=8,
+##### Measurable range and the request launcher
+
+The upper limit of what can be measured was partly a property of the measurement
+apparatus. A naive launcher makes this quantity appear unmeasurable above n=8,
 because the scheduler splits every dispatch. Splitting tracks request count rather
 than token count — a dispatch of 8192 tokens at `max_num_batched_tokens=8192` never
 splits, while one of approximately 1024 tokens at n=8 splits half the time — which
@@ -406,7 +418,9 @@ The real barrier lies between 16 and 32 rather than at 8. Under a synchronised
 launch n=16 becomes measurable, and the paid share there is indistinguishable from
 zero across three boundaries that each double the padded token count.
 
-**The share paid rises with the size of the boundary.** At fixed n=4 it is 10.0% at
+##### Paid share against boundary size
+
+The share paid rises with the size of the boundary. At fixed n=4 it is 10.0% at
 512→1024, 22.1% at 1024→2048, 24.0% at 2048→4096 and 24.8% at 4096→8192. Batch size
 is held constant across these figures, so the comparison is between boundaries and
 not between load points.
@@ -414,7 +428,9 @@ not between load points.
 **[Figure 2 — `figures/fig2_padding.png`]** *Share of nominal padding actually paid
 at each compiled boundary, against the 100% the compiled-shape premise predicts.*
 
-**Per-request length padding does not exist.** Holding batch size and total tokens
+##### Per-request length padding
+
+Per-request length padding does not exist. Holding batch size and total tokens
 fixed and varying only the spread of request lengths, the batch-padding model is
 rejected in every ragged cell by at least 44%, and cost tracks packed tokens
 instead. The rejection range extends to 618%, but a span of more than an order of
@@ -424,8 +440,10 @@ candidate models agree, match to 1.9%. This is not an artefact of chunked prefil
 with `--no-enable-chunked-prefill` the result is unchanged, the packed model winning
 8 of 10 ragged cells and batch padding being rejected by 75–579%.
 
-**Padded share is governed by where a distribution's mass falls relative to the
-compiled boundaries, and not by its dispersion.** Four prompt-length distributions
+##### Padded share under four length distributions
+
+Padded share is governed by where a distribution's mass falls relative to the
+compiled boundaries, and not by its dispersion. Four prompt-length distributions
 were served at a single Poisson arrival rate (8 req/s, `output_len=64`, 120
 requests each), reporting time to first token (TTFT) and inter-token latency (ITL).
 Their parameters were solved so that every family has the same mean length of 1000
@@ -441,7 +459,10 @@ Table: Padded share under four prompt-length distributions matched on mean lengt
 | bimodal | 1.51 | 28.0% | 17.1 / 114.2 ms | 4.6 / 7.2 ms |
 
 The padded share spans 8.5% to 33.3%, a factor of four, at equal offered tokens.
-**Coefficient of variation does not order it.** The three dispersed families run CV
+
+##### Dispersion as a predictor of padding
+
+Coefficient of variation does not order it. The three dispersed families run CV
 0.58, 0.91 and 1.51 against padded shares of 27.4%, 33.3% and 28.0%, which is not
 monotone. Raggedness is therefore not the variable that governs padding, which is
 the assumption the bucketing literature rests on. What governs it is where the
@@ -449,8 +470,10 @@ distribution's mass sits relative to the compiled boundaries: the fixed-length a
 pads least because 1000 tokens sits just below the 1024 entry, so little is rounded
 away, and the same family would pad far more at 1100.
 
-**A prediction registered before this measurement was wrong, and its failure
-retracts the explanation that motivated it.** The same four families measured
+##### A retracted ordering
+
+A prediction registered before this measurement was wrong, and its failure
+retracts the explanation that motivated it. The same four families measured
 without matching offered tokens — mean lengths of 256, 384, 704 and 2056, so the
 uniform arm carried about eight times the tokens of the fixed arm — placed the
 fixed-length family highest, at 51.0% against 27.3% for uniform. The explanation
@@ -467,7 +490,9 @@ distribution *position* rather than dispersion determines what a workload pays.
 Both identify the same governing quantity: where lengths fall relative to
 boundaries.
 
-**In place of a recoverable-headroom figure we report its two factors separately.**
+##### Recoverable headroom, reported as two factors
+
+In place of a recoverable-headroom figure we report its two factors separately.
 Those are the padded share of executed tokens, which the table above establishes
 for four synthetic families and which remains workload-specific, and the paid share
 at a given batch size,
@@ -510,8 +535,10 @@ so at two concurrent requests a padded token costs about three quarters of a rea
 one. Expressed as percentages, the twenty-one-shape ladder reduces end-to-end
 latency by 8.7% at prompt 1200 and 12.5% at prompt 3000.
 
-**The cost of the finer ladder is startup and memory headroom, not cache
-capacity.** Measured with the compiled-shape cache cleared before each boot:
+##### Cost of the finer ladder
+
+The cost of the finer ladder is startup and memory headroom, not cache
+capacity. Measured with the compiled-shape cache cleared before each boot:
 
 Table: What the finer ladder costs: startup, resident executables, and the memory fraction at which the server will start. {#tab:laddercost}
 | | 10 shapes | 21 shapes |
@@ -550,7 +577,9 @@ what remains. Shape coverage is charged to transient compilation headroom that t
 sizing step does not reserve, which is why the cost appears as a boot cliff rather
 than as a smaller cache.
 
-**The benefit, however, is bought by a different variable than the cost.** The
+##### Separating placement from cardinality
+
+The benefit, however, is bought by a different variable than the cost. The
 padding-gap lever changes the spacing law and the shape count together, so the
 measurements above attribute a benefit and a price to the same parameter without
 separating them. Every cost scales with cardinality: warmup, resident executables,
@@ -573,7 +602,9 @@ eleven-shape ladder places nothing new near either prompt and tracks the default
 both. Shape count ranges from 10 to 21 across these arms while the benefit depends
 only on whether a boundary falls between the prompt and the next default entry.
 
-**The fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens**, the same
+##### Feasibility at the default memory fraction
+
+The fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens, the same
 capacity as the default. The 8.8% is therefore the price of the twenty-one-shape
 ladder rather than of the optimisation: a 12.1% reduction at prompt 3000 is
 available at full memory, for the warmup of four additional shapes. The
@@ -604,7 +635,9 @@ There is no crossing. End-to-end latency is 3.5% to 12% lower at every concurren
 sampled, the effect is non-monotone rather than decaying, and at n=16 it is larger
 in absolute terms than at n=1.
 
-**The reason the prediction failed is visible in what the stack executes.** The
+##### Why the prediction failed
+
+The reason the prediction failed is visible in what the stack executes. The
 prediction reasoned about an individual request's padding shrinking as more
 requests share a step. Under chunked prefill the scheduler admits requests in waves
 and packs them, and the size of the packed step, rather than any request's length,
@@ -615,7 +648,9 @@ most 16 tokens. The two arms produce near-identical step distributions, differin
 only in which compiled shape those steps round up to. Padding is therefore
 transferred from individual requests to the packed step rather than eliminated.
 
-**This is in tension with §4.2**, which finds the paid share falling to
+##### Tension with the paid-share curve
+
+This is in tension with §4.2, which finds the paid share falling to
 indistinguishable from zero by batch 16. The two measurements differ in what is
 held fixed: §4.2 varies batch size at a fixed boundary and attributes padding per
 request, while this sweep varies offered concurrency and allows the scheduler to
@@ -627,7 +662,9 @@ which is coarser than the ladder spacing under comparison. A step recorded in
 (2048,4096] pads to 2048, 2560, 3072, 3584 or 4096 depending on where in that bin
 it falls, and the two ladders differ precisely inside the bin.
 
-**One design defect bounds these results.** Prompt 300 was intended as a placebo at
+##### A defect in the control cell
+
+One design defect bounds these results. Prompt 300 was intended as a placebo at
 every concurrency, on the reasoning that it pads to 512 on both ladders. The step
 histogram shows this holds only while each request prefills in its own dispatch: at
 n≥4 the packed step lands where the ladders differ, so the cell is treated rather
@@ -706,7 +743,9 @@ Table: Ladder placement with and without prefix caching, over a workload sharing
 | default (10) | **on** | 181.5 ms | +43,008 |
 | gap 1024 (14) | **on** | 178.5 ms | +43,008 |
 
-**The placement benefit falls from 35.9 ms, or 12.3%, to 3.0 ms, or 1.7%.** A
+##### Effect of prefix caching on the placement benefit
+
+The placement benefit falls from 35.9 ms, or 12.3%, to 3.0 ms, or 1.7%. A
 prediction registered before measurement anticipated this, and for the stated
 reason: with 2048 tokens cached the server prefills approximately 952, which pads
 to 1024 on both ladders, while the two ladders differ only at 3072 against 4096.
@@ -743,7 +782,9 @@ Table: Ladders selected offline from a lognormal length distribution, with predi
 | gap 512 | 21 | — | −16.2 ms | *does not boot* | **no** |
 | gap 256 | 35 | — | — | *does not boot* | **no** |
 
-**The offline model predicted the measured result to within 5%**: 7.5 ms predicted
+##### Predictive accuracy of the offline model
+
+The offline model predicted the measured result to within 5%: 7.5 ms predicted
 against 7.1 ms measured. Inverting it gives 33.3 µs per padded token against the
 34.9–35.3 µs of §4.3, and the two workloads share nothing, since §4.3 used two
 fixed lengths straddling known entries and this a heavy-tailed mixture over the
@@ -754,8 +795,10 @@ Ladder design therefore does not require a hardware sweep: sample the length
 distribution, compute expected padding per candidate ladder, and multiply by the
 per-token cost.
 
-**The objective must be constrained, and the unconstrained objective is the premise
-this paper refutes.** Expected padding falls monotonically with shape count, so
+##### Constraining the objective
+
+The objective must be constrained, and the unconstrained objective is the premise
+this paper refutes. Expected padding falls monotonically with shape count, so
 minimising it alone drives the ladder toward the finest the stack can compile,
 which §4.3 shows the stack cannot afford. Both finer arms failed to boot at the
 stock memory fraction, the 35-shape ladder more decisively (23.75 MB requested
@@ -773,7 +816,9 @@ corrected rule, and each arm re-reads the ladder its server printed.
 
 ### 4.8 Supporting ablations and controls
 
-**A published latency predictor, reproduced and scoped.** LENS predicts NPU
+##### A published latency predictor
+
+A published latency predictor, reproduced and scoped. LENS predicts NPU
 inference latency to 2.15% mean absolute percentage error (MAPE) using a per-bucket
 `intercept + slope × length` fitted from two end-to-end measurements per bucket.
 Reproducing its protocol on TPU across 5 buckets × 3 batch sizes, with 7 repeats
@@ -804,7 +849,9 @@ The claim is not that the predictor is inaccurate; it is that the error grows
 sharply by n=4. Batch sizes 1, 2 and 4 are sampled, with the failure at the
 endpoint, so these data cannot say whether accuracy returns above 4.*
 
-**Decode cost against batch size.** With `prompt_len=256` and `output_len=64`,
+##### Decode cost against batch size
+
+Decode cost against batch size. With `prompt_len=256` and `output_len=64`,
 measured across the full compiled request ladder:
 
 Table: Decode cost against batch size across the compiled request ladder. {#tab:decode}
@@ -824,7 +871,9 @@ doublings, and per-sequence cost flattens at roughly 200 µs. Queue time at n=12
 and n=256 means those columns are not clean wide batches and no claim depends on
 them.
 
-**Where device time is spent.** An operator profile is a direct observation, which
+##### Distribution of device time
+
+Where device time is spent. An operator profile is a direct observation, which
 the roofline is not. Share of TPU device time:
 
 Table: Share of TPU device time by operator category. {#tab:ops}
@@ -838,7 +887,9 @@ Matmuls dominate at low batch and give way to attention as key–value state gro
 while collectives hold a flat 13.4% whose latency component no roofline models.
 Nothing moves discontinuously at n=4.
 
-**One microbenchmark does not measure the quantity it appears to.** An isolated
+##### An invalid microbenchmark
+
+One microbenchmark does not measure the quantity it appears to. An isolated
 matmul at the model's real sharded shapes returns 142.9 µs at M=1 and 143.6 µs at
 M=256, a flatness that can be read as the weight-load floor with confounds removed.
 The qkv projection holds 7.86 MB per chip, so the bandwidth floor is 9.6 µs: the
@@ -847,7 +898,9 @@ overhead. Amortising over a loop reports 1250% of peak because XLA hoists the
 loop-invariant matmul; chaining iterations is physically valid at 79% of peak but
 streams weights from HBM every iteration and remains bandwidth-bound.
 
-**Per-dispatch variance is a prefill phenomenon.** Over 9 repeats on the same
+##### Per-dispatch variance
+
+Per-dispatch variance is a prefill phenomenon. Over 9 repeats on the same
 server, decode spread is 1.00–1.04× at most batch sizes, while prefill is 1.00–1.03×
 at n≤4 and 1.18–1.26× at n≥8. Variance appears exactly where the scheduler begins
 splitting dispatches, and decode, which makes no chunking decision, never exhibits
@@ -856,7 +909,9 @@ describe every cell: bootstrapping the decode cells §4.1 depends on gives 95%
 interval widths of 38.7% at n=8 and 28.2% at n=9 over 21 repeats, wider than
 several differences a reader might otherwise treat as signal.
 
-**Free request padding is not an artefact of the sharding.** Model, chips and
+##### Sharding ablation
+
+Free request padding is not an artefact of the sharding. Model, chips and
 workload were held fixed while tensor-parallel degree alone was varied. The
 prediction was registered before measurement: per-chip weight bytes scale as 1/TP,
 so the level should scale with 1/TP and the shape should be preserved.
@@ -887,7 +942,9 @@ if request-dimension padding were cheap only because that dimension is not the
 bottleneck at TP=4, reducing TP would expose it, and instead padding is cheapest at
 TP=1 where the fixed cost is largest.
 
-**Model scale does not move the regime map.** A second registered prediction failed
+##### Model scale, and dtype as the lever
+
+Model scale does not move the regime map. A second registered prediction failed
 here. TinyLlama-1.1B has a 3.6-fold smaller per-chip weight floor than Qwen3-4B, so
 if the mechanism were that floor its paid share should be higher. It is lower, at
 −1.2% and 13.4% at n=4 and −1.1% and 5.9% at n=8. Model size is the wrong lever:

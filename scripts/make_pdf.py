@@ -140,7 +140,7 @@ def convert(md: str) -> str:
         if re.match(r"^---+\s*$", ln):
             body.append(r"\medskip\hrule\medskip"); i += 1; continue
 
-        m = re.match(r"^(#{1,4})\s+(.*)$", ln)
+        m = re.match(r"^(#{1,5})\s+(.*)$", ln)
         if m:
             # LaTeX numbers sections itself, and the markdown heading carries its
             # own number, so "### 4.8 Model scale" rendered as "5.8 4.8 Model
@@ -157,7 +157,11 @@ def convert(md: str) -> str:
             raw = re.sub(r"^\d+(\.\d+)*\.?\s+", "", m.group(2))
             numbered = raw != m.group(2)
             lvl, txt = len(m.group(1)), inline(raw)
-            cmd = {1: "title", 2: "section", 3: "subsection", 4: "subsubsection"}[lvl]
+            # Level 5 is a run-in \paragraph: a topic title for a block of
+            # argument, unnumbered, so a section can be scanned without every
+            # claim being promoted to a numbered subsection.
+            cmd = {1: "title", 2: "section", 3: "subsection",
+                   4: "subsubsection", 5: "paragraph"}[lvl]
             star = "" if numbered else "*"
             body.append(f"\\{cmd}{star}{{{txt}}}" if cmd != "title"
                         else f"\\begin{{center}}\\LARGE\\bfseries {txt}\\end{{center}}")
@@ -303,11 +307,32 @@ def convert(md: str) -> str:
         para = [ln]
         i += 1
         while i < len(lines) and lines[i].strip() and not re.match(
-                r"^(#{1,4}\s|\||```|---+\s*$|\s*[-*]\s)", lines[i]):
+                r"^(#{1,5}\s|\||```|---+\s*$|\s*[-*]\s)", lines[i]):
             para.append(lines[i]); i += 1
         body.append(inline(" ".join(x.strip() for x in para)))
 
-    return "\n\n".join(body)
+    out = "\n\n".join(body)
+
+    # Every authored heading must produce a heading command. A level-5 heading
+    # sitting inside a paragraph block was absorbed as body text and disappeared
+    # from the structure with no error -- 28 authored, 27 emitted -- and it still
+    # appeared in the PDF as prose, so a check for its TEXT could not see it.
+    # Counting the commands is what catches it.
+    # Count headings in the source with fenced blocks removed: a "#####" line
+    # inside a code fence is not a heading, and counting it made this check
+    # report a drop that had not happened.
+    md_nofence = re.sub(r"```.*?```", "", md, flags=re.S)
+    authored = len(re.findall(r"^#{2,5}\s+\S", md_nofence, re.M))
+    emitted = sum(out.count(f"\\{c}") for c in
+                  ("section{", "section*{", "subsection{", "subsection*{",
+                   "subsubsection{", "subsubsection*{", "paragraph{", "paragraph*{"))
+    # \subsection also matches inside \subsubsection, so count precisely instead.
+    emitted = len(re.findall(r"\\(?:sub)*section\*?\{|\\paragraph\*?\{", out))
+    if emitted != authored:
+        raise ValueError(
+            f"{authored} headings authored but {emitted} emitted — one was "
+            "absorbed into a paragraph or list block")
+    return out
 
 
 PREAMBLE = r"""\documentclass[10pt,twocolumn]{article}
