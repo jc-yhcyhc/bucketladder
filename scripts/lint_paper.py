@@ -6,8 +6,8 @@ Every check here exists because the defect reached a reader. Reading the draft
 again is not a control: the figures were missing for fourteen drafts and the
 doubled section numbers survived a reviewer reporting them, because I checked
 with a grep that could not match and then reported "does not reproduce". §6 of
-the paper argues that a pipeline can execute a number and cannot execute prose;
-this is that argument applied to the manuscript itself.
+the paper argues that a program can check a number and cannot check a claim about
+why the number came out that way; this applies that argument to the manuscript.
 
 Checks, each named after the failure that motivated it:
 

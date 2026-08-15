@@ -67,11 +67,12 @@ A final result concerns methodology, and it is a caution about how to read this
 paper. Fourteen invalid inferences were made and caught during the work, and they
 fall unevenly: no reported measurement has been withdrawn during the work, while
 four of the five most recent retractions were *explanations* for measurements that
-still stand. Every number here passes a contract that aborts a
-run when a controlled variable is unstated, and is recomputed by a script that
-fails on disagreement; an explanation is a sentence, and nothing in that pipeline
-can execute a sentence. Readers should trust this paper's measurements more than
-its explanations (§1, §6).
+still stand. The checks that protect this work are programs: one aborts a run
+when a controlled variable is left undeclared, another recomputes every reported
+number from captured data and fails if it disagrees with the text. A program can
+check a number that way. It cannot check whether a stated reason for that number
+is correct, so explanations are never tested by anything. Readers should trust this
+paper's measurements more than its explanations (§1, §6).
 
 ---
 
@@ -101,9 +102,9 @@ We additionally document how the experimental methodology evolved to enforce
 falsifiability, because that evolution shaped what was measured. Our measurements
 have proved durable and our explanations have not: no reported number has been
 withdrawn, while four of the last five retractions were claims about mechanism. This asymmetry is structural rather than
-accidental. Numbers here pass through a contract that aborts on an unstated
-variable and a script that recomputes them, whereas a mechanism is prose and
-nothing in the pipeline can reject it. §4.1 carries an instance. The finding that
+accidental. Numbers here pass through a contract that aborts on an undeclared
+variable and a script that recomputes them, and either can reject a number. A
+proposed mechanism is checked by nothing. §4.1 carries an instance. The finding that
 a padded request slot costs under 0.7 µs has not changed since it was measured;
 the account first given for it — that the step reads the whole weight set
 regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
@@ -1222,9 +1223,9 @@ failed to reproduce.
 The asymmetry is structural rather than careless. Every measurement runs through a
 contract that aborts on an unstated variable, is tied to a run identifier, and is
 recomputed from captured data by a script that exits non-zero on disagreement. **No
-comparable machinery exists for explanations.** A mechanism is prose: it can be
-written, accepted, cited by later sections, and carried across drafts without ever
-being evaluated. The bandwidth account survived four sessions of work not because
+comparable machinery exists for explanations.** A proposed mechanism can be
+written, accepted, cited by later sections, and carried across drafts without any
+step in the process being capable of contradicting it. The bandwidth account survived four sessions of work not because
 evidence supported it but because nothing in the pipeline could reject it.
 
 The registered-prediction discipline is the closest available remedy, and its
