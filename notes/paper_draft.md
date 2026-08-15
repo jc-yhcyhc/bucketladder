@@ -63,14 +63,15 @@ across concurrencies 1 to 16. Under chunked prefill the scheduler assembles step
 against a token budget rather than a compiled shape, so padding moves from
 individual requests to the packed step rather than being eliminated.
 
-A final result concerns methodology rather than TPU serving. This work catalogs
-fourteen invalid inferences of its own, and their distribution is asymmetric:
-across four rounds of external review every headline measurement was retained,
-while four of the five most recent retractions were claims about mechanism. Every
-number reported here passes a configuration contract that aborts on an unstated
-variable and is recomputed by a script that fails on disagreement, whereas no
-equivalent machinery constrains an explanation. Readers should accordingly place
-greater confidence in the measurements than in the mechanisms offered for them.
+A final result concerns methodology, and it is a caution about how to read this
+paper. Fourteen invalid inferences were made and caught during the work, and they
+fall unevenly: across four rounds of external review no reported measurement was
+withdrawn, while four of the five most recent retractions were *explanations* for
+measurements that still stand. Every number here passes a contract that aborts a
+run when a controlled variable is unstated, and is recomputed by a script that
+fails on disagreement; an explanation is a sentence, and nothing in that pipeline
+can execute a sentence. Readers should trust this paper's measurements more than
+its explanations (§1, §6).
 
 ---
 
@@ -103,7 +104,12 @@ external review, no headline number was withdrawn, while four of the last five
 retractions were claims about mechanism. This asymmetry is structural rather than
 accidental. Numbers here pass through a contract that aborts on an unstated
 variable and a script that recomputes them, whereas a mechanism is prose and
-nothing in the pipeline can reject it. The response adopted here is to require that
+nothing in the pipeline can reject it. §4.1 carries an instance. The finding that
+a padded request slot costs under 0.7 µs has not changed since it was measured;
+the account first given for it — that the step reads the whole weight set
+regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
+utilization where 5.1% was measured, and was withdrawn. The number and the story
+came from the same experiment, and only one of them survived. The response adopted here is to require that
 a proposed mechanism emit a falsifiable number before hardware is provisioned.
 Three such registered predictions failed (§4.4, §4.8), and each failure was
 more informative than a confirmation would have been.
