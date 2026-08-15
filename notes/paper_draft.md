@@ -8,7 +8,7 @@ Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
 ## Abstract
 
 Accelerator serving stacks execute a fixed set of compiled or captured shapes and
-round every step up to one of them. A family of proposed optimisations — length
+round every step up to one of them. A family of proposed optimizations — length
 bucketing, shape-aware admission control, ladder design — assumes that rounding up
 means paying for the shape that was rounded up to. This paper measures what is
 actually paid, on a production TPU stack and, using the same serving framework and
@@ -16,9 +16,9 @@ the same instrument, on a GPU.
 
 **This assumption does not hold in the stacks we measured.** A batch placed just
 above a compiled entry costs
-approximately what the entry below it costs: on TPU it falls 3–5% under the lower
-entry, and on GPU, padding a batch from 8 up to a captured 16 costs 67 µs, or 0.6%
-of the step. **The two architectures are compared on the request dimension only.**
+approximately what the entry below it costs. On TPU it falls 3–5% under the lower
+entry. On GPU, padding a batch from 8 up to a captured 16 costs 67 µs, which is
+0.6% of the step. **The two architectures are compared on the request dimension only.**
 CUDA-graph capture quantizes batch size, so the GPU arms vary batch size and
 establish request-padding parity; the token dimension, on which this paper's
 recommendation rests, is measured on TPU alone. Compilation overhead is instead
@@ -28,7 +28,7 @@ compiles a TPU ladder in 5 to 30 minutes for its first bucket. Neither is a
 per-step cost.
 
 The three quantized dimensions behave differently, and separating them is the
-paper's organising claim. Per-request prompt-length padding **does not exist**: the
+paper's organizing claim. Per-request prompt-length padding **does not exist**: the
 stack has no such ladder. Request-slot padding is **free**, at under 0.7 µs per
 padded slot against 27.5 µs if it were paid, because the Ragged Paged Attention
 (RPA) kernel does no work for slots holding no key–value blocks. Token padding is
@@ -49,7 +49,7 @@ distribution predicted the measured reduction to within 5%.
 
 Two measurements bound what that reduction is worth in deployment. Swept against
 offered load, it reduces median latency by 46% just below saturation but increases
-sustained throughput by only 2.6% at saturation, making it a latency optimisation
+sustained throughput by only 2.6% at saturation, making it a latency optimization
 for under-saturated serving rather than a capacity one. With prefix caching
 enabled, as production vLLM ships it, the same placement yields 1.7% instead of
 12.3%, because caching shortens the prefill onto a different compiled entry.
@@ -60,7 +60,7 @@ across concurrencies 1 to 16. Under chunked prefill the scheduler assembles step
 against a token budget rather than a compiled shape, so padding moves from
 individual requests to the packed step rather than being eliminated.
 
-A final result concerns methodology rather than TPU serving. This work catalogues
+A final result concerns methodology rather than TPU serving. This work catalogs
 fourteen invalid inferences of its own, and their distribution is asymmetric:
 across four rounds of external review every headline measurement was retained,
 while four of the five most recent retractions were claims about mechanism. Every
@@ -112,8 +112,9 @@ more informative than a confirmation would have been.
    alike; what shape coverage costs is warmup. The GPU comparison covers the
    request dimension, which is the dimension graph capture quantizes.
 2. **The request ladder reported by the TPU stack differs from the one its
-   attention kernel executes** (§4.1). This is readable from source, confirmed by
-   a paired hardware experiment, and visible in the compiler-emitted kernel name.
+   attention kernel executes** (§4.1). This can be confirmed directly from the
+   source code, by a paired hardware experiment, and from the compiler-emitted
+   kernel name.
    It is absent from the RPA paper, from LENS, and from vendor documentation.
 3. **A mechanism for free request padding** (§4.1): the ragged kernel performs
    under 0.7 µs of work per padded slot, against 27.5 µs if it were paid,
@@ -127,9 +128,9 @@ more informative than a confirmation would have been.
    The choice can be made offline from a length distribution, predicting the
    measured result to within 5%.
 5. **The conditions under which that gain holds** (§4.4, §4.5): it is a latency
-   optimisation below saturation rather than a capacity one, and prefix caching
+   optimization below saturation rather than a capacity one, and prefix caching
    reduces it from 12.3% to 1.7% by moving the prefill onto a different entry.
-6. **Five optimisations, four rejected and one that works** (§5), and **fourteen
+6. **Five optimizations, four rejected and one that works** ([tab:opts], §5), and **fourteen
    invalid inferences of our own** in four classes (§6), three of which now have
    mechanical checks.
 7. **An asymmetry between measurements and explanations** (§6), reported as a
@@ -312,16 +313,16 @@ effect is absent where it would have been largest.
 The memory-bandwidth explanation is tested and rejected. A natural account of
 free request padding is that the step reads the whole weight set regardless of
 batch, so padded slots are absorbed into a fixed cost that batch size does not
-change. That account predicts utilisation climbing toward the compute roof past the
-arithmetic-intensity ridge near 240 FLOP/byte, reaching a model FLOPs utilisation
+change. That account predicts utilization climbing toward the compute roof past the
+arithmetic-intensity ridge near 240 FLOP/byte, reaching a model FLOPs utilization
 (MFU) of approximately 49% at n=256. The measurement, with `prompt_len=256` and
 `output_len=64`:
 
-Table: Utilisation against batch size, testing the memory-bandwidth account of free request padding. The account predicts about 49% MFU at n=256. {#tab:roofline}
+Table: Utilization against batch size, testing the memory-bandwidth account of free request padding. The account predicts about 49% MFU at n=256. {#tab:roofline}
 | n | 1 | 8 | 32 | 64 | 256 |
 |---|---|---|---|---|---|
 | MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
-| high-bandwidth memory (HBM) utilisation | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
+| high-bandwidth memory (HBM) utilization | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
 
 At n=256 the requests are not all resident, so that column is queue-contaminated.
 It is retained because it is the batch size the prediction names, and the
@@ -355,8 +356,8 @@ carries hundreds to thousands of tokens, and padded tokens are real floating-poi
 operations, because the kernel computes them. Token padding is therefore paid
 wherever the step's cost is dominated by arithmetic on those tokens.
 
-[tab:paidraw] reports the share of nominal padding paid, straddling a compiled
-boundary at fixed batch size and near-fixed sequence length:
+[tab:paidraw] reports the share of nominal padding paid at a compiled boundary,
+with batch size fixed and sequence length held near-constant:
 
 Table: Share of nominal token padding paid, by batch size. Rows are confounded: each was measured over a different set of ladder boundaries. {#tab:paidraw}
 | batch size | median | mean | 95% CI over boundaries | boundaries | clean dispatches/arm |
@@ -440,7 +441,7 @@ rejected in every ragged cell by at least 44%, and cost tracks packed tokens
 instead. The rejection range extends to 618%, but a span of more than an order of
 magnitude is a directional refutation rather than a measured effect size, so the
 minimum is the figure that carries the claim. Uniform controls, in which all
-candidate models agree, match to 1.9%. This is not an artefact of chunked prefill:
+candidate models agree, match to 1.9%. This is not an artifact of chunked prefill:
 with `--no-enable-chunked-prefill` the result is unchanged, the packed model winning
 8 of 10 ragged cells and batch padding being rejected by 75–579%.
 
@@ -454,7 +455,7 @@ Their parameters were solved so that every family has the same mean length of 10
 tokens, so equal request rate means equal offered tokens and distribution shape is
 the only quantity that differs:
 
-Table: Padded share under four prompt-length distributions matched on mean length, so that offered tokens are equal across arms. {#tab:dists}
+Table: Padded share under four prompt-length distributions matched on mean length, so that offered tokens are equal across arms. CV is the coefficient of variation of the sampled lengths. {#tab:dists}
 | length distribution | CV | padded share | TTFT p50 / p95 | ITL p50 / p95 |
 |---|---|---|---|---|
 | fixed-1000 | 0.00 | **8.5%** | 30.0 / 147.5 ms | 4.9 / 9.0 ms |
@@ -553,7 +554,7 @@ Table: What the finer ladder costs: startup, resident executables, and the memor
 | KV cache at 0.92 | 367,360 tokens | *does not boot* |
 | KV cache at 0.85 | 335,104 tokens | 335,104 tokens |
 
-The warmup figures are cold. A persistent compilation cache amortises them across
+The warmup figures are cold. A persistent compilation cache amortizes them across
 restarts, and warm boots of the same two ladders measured 165–315 s, reflecting
 cache reuse rather than ladder size.
 
@@ -610,7 +611,7 @@ only on whether a boundary falls between the prompt and the next default entry.
 
 The fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens, the same
 capacity as the default. The 8.8% is therefore the price of the twenty-one-shape
-ladder rather than of the optimisation: a 12.1% reduction at prompt 3000 is
+ladder rather than of the optimization: a 12.1% reduction at prompt 3000 is
 available at full memory, for the warmup of four additional shapes. The
 twenty-one-shape ladder buys a further 8.7% at prompt 1200, and that increment is
 what costs 8.8% of capacity and 53% more startup.
@@ -711,7 +712,7 @@ placement ladder is 46% faster at p50 and 39% faster at p95.
 
 That shape is consistent with §4.2 and repairs part of the tension in §4.4. A
 saturated server packs prefills to the `max_num_batched_tokens` budget, so padding
-is amortised across a full step and the ladder has little influence, which is what
+is amortized across a full step and the ladder has little influence, which is what
 the paid-share curve predicts. Below saturation the steps are smaller and closer to
 per-request, and the ladder entry accounts for most of the step's cost. §4.4's
 persistent benefit was measured under burst arrival at fixed concurrency, which
@@ -773,10 +774,10 @@ the 12.3% the best placement achieves without it.
 existence proof rather than a method. A method begins from a length distribution,
 selects a ladder without reference to latency, and is then correct.
 
-Sampling 120 prompts from a lognormal distribution with median 1200 and σ=0.9,
-replaying the same sampled lengths against every ladder so that arms are paired on
-workload, and predicting each arm's latency from expected padded tokens multiplied
-by the 35 µs per padded token measured in §4.3:
+We sampled 120 prompts from a lognormal distribution (median 1200, σ=0.9) and
+replayed the same lengths against every ladder, pairing the arms on workload. Each
+arm's latency was then predicted from its expected padded-token count multiplied by
+the 35 µs per padded token measured in §4.3:
 
 Table: Ladders selected offline from a lognormal length distribution, with predicted and measured latency. {#tab:fit}
 | ladder | shapes | mean padded tok/req | predicted Δ | measured e2e | boots at 0.92? |
@@ -803,13 +804,32 @@ per-token cost.
 
 The objective must be constrained, and the unconstrained objective is the premise
 this paper refutes. Expected padding falls monotonically with shape count, so
-minimising it alone drives the ladder toward the finest the stack can compile,
+minimizing it alone drives the ladder toward the finest the stack can compile,
 which §4.3 shows the stack cannot afford. Both finer arms failed to boot at the
 stock memory fraction, the 35-shape ladder more decisively (23.75 MB requested
 against 4.94 MB free) than the 21-shape one (32.50 MB against 12.40 MB). The
 feasible set here was {10, 14} and the answer was 14. The configuration rule is to select the
 greatest shape density that satisfies the memory constraint, with entries placed
 against the length distribution.
+
+##### Applying the procedure under traffic drift
+
+The procedure selects a ladder from a length distribution, and a deployment's
+distribution moves. Re-selection is cheap to decide and expensive to apply: the
+decision is arithmetic over a sample of recent lengths, while applying it requires
+a restart and a cold compile, measured here at 285 s for ten shapes. Re-selection
+is therefore a daily or weekly action rather than a continuous control loop.
+
+The signal that should trigger it is already available to the server and costs
+nothing to maintain. A server knows both the compiled shape it selected for a step
+and the real token count in that step, so a running counter of their difference
+gives the realized padded share exactly, without sampling. Re-selection is
+warranted when that realized share exceeds what the offline model predicts for the
+ladder in use by more than the margin that would justify a restart. We note that
+`iteration_tokens_total` is not a substitute for this counter: §4.4 shows its
+power-of-two bins are coarser than the ladder spacing being compared. We have not
+built this controller, and report it as the natural operational form of the result
+rather than as a contribution.
 
 One caveat bounds the model's reach. Predicting padding requires knowing the ladder
 a gap will produce, and the rule is not the obvious one: the stack continues
@@ -841,7 +861,7 @@ At n=1–2 the within-bucket curve is nearly flat, at a flatness of 0.97, so any
 two-point fit is near-perfect. LENS does beat a constant there, at 0.38% against
 0.96%, but the gap is 0.6 percentage points on errors already below 1%, and it is
 not evidence that the model form transfers. At n=4 the length term is actively
-harmful. The failure is not an artefact of which points were fitted: over all three
+harmful. The failure is not an artifact of which points were fitted: over all three
 choices per cell the n=4 error varies by up to 44.8 percentage points, but its
 minimum is still 16.97%, far above LENS's reported 2.15%. Batch sizes above 4 were
 not measured, because this experiment reproduces LENS's own protocol, which is
@@ -898,7 +918,7 @@ matmul at the model's real sharded shapes returns 142.9 µs at M=1 and 143.6 µs
 M=256, a flatness that can be read as the weight-load floor with confounds removed.
 The qkv projection holds 7.86 MB per chip, so the bandwidth floor is 9.6 µs: the
 measurement sits fifteen times above it, at 7% of peak, and is timing per-dispatch
-overhead. Amortising over a loop reports 1250% of peak because XLA hoists the
+overhead. Amortizing over a loop reports 1250% of peak because XLA hoists the
 loop-invariant matmul; chaining iterations is physically valid at 79% of peak but
 streams weights from HBM every iteration and remains bandwidth-bound.
 
@@ -915,7 +935,7 @@ several differences a reader might otherwise treat as signal.
 
 ##### Sharding ablation
 
-Free request padding is not an artefact of the sharding. Model, chips and
+Free request padding is not an artifact of the sharding. Model, chips and
 workload were held fixed while tensor-parallel degree alone was varied. The
 prediction was registered before measurement: per-chip weight bytes scale as 1/TP,
 so the level should scale with 1/TP and the shape should be preserved.
@@ -932,16 +952,17 @@ which the roofline cannot explain because it does not model the inter-chip
 collectives the higher-TP arms pay, and the curve becomes flatter with less
 sharding rather than preserving its shape. Both errors follow from a single omitted
 term. Fitting `T(TP) = W/TP + F`, a weight load that shards plus a fixed cost that
-does not, gives `T(TP) = 2.48/TP + 0.38` normalised to the TP=4 step, with fitted
+does not, gives `T(TP) = 2.48/TP + 0.38` normalized to the TP=4 step, with fitted
 values 1.00, 1.62 and 2.86 against measured 1.00, 1.63 and 2.86. Fixed,
 non-sharding cost is 38% of the TP=4 step, roughly 1.5 ms at n=1, and that single
-term explains both the sub-proportional level and the flattening.
+term explains both the sub-proportional level and the flattening. The fit has two
+free parameters against three points, one of which is fixed by normalization, so it
+carries a single genuine degree of freedom and the residual overstates how much
+evidence it provides.
 
 `F` is not the collectives: a constant term cannot represent inter-chip
 communication, which is zero at TP=1 and largest at TP=4 and therefore scales with
-TP, whereas `F` by construction does not. With `T(4)=1` by normalisation this is
-one free parameter against two informative points, so the fit quality is weaker
-evidence than the residual suggests. The ablation nonetheless answers its question:
+TP, whereas `F` by construction does not. The ablation nonetheless answers its question:
 if request-dimension padding were cheap only because that dimension is not the
 bottleneck at TP=4, reducing TP would expose it, and instead padding is cheapest at
 TP=1 where the fixed cost is largest.
@@ -975,9 +996,9 @@ It is future work rather than a result, and nothing above depends on it.
 
 ---
 
-## 5. Five optimisations, four rejected and one that works
+## 5. Five optimizations, four rejected and one that works
 
-Table: Five optimisations designed against these measurements, and their outcomes. {#tab:opts}
+Table: Five optimizations designed against these measurements, and their outcomes. {#tab:opts}
 | | outcome |
 |---|---|
 | **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; −1.7% once prefix caching is on (§4.3–§4.7)** |
@@ -987,7 +1008,7 @@ Table: Five optimisations designed against these measurements, and their outcome
 | bucket-aligned step packing | implemented twice: inert, then output-corrupting |
 
 The one that works targets the single dimension the measurements left open. Three
-of the four rejected optimisations address the request dimension or per-request
+of the four rejected optimizations address the request dimension or per-request
 length padding, and §4.1 and §4.2 show that neither carries cost; the fourth
 restructures work the stack already packs. The token dimension is the only place
 where the premise was not refuted by measurement, and the only place where an
@@ -1162,6 +1183,22 @@ prefilled.
 that it has not ceased by 16. Above n=4 that experiment has no valid placebo, so
 those rows are floors on the effect rather than unbiased estimates.
 
+**The recommendation is mediated by version-pinned internal flags.**
+`VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to
+vLLM and `tpu-inference` 0.25.0, and a scheduler or compilation refactor upstream
+could change the ladder they produce, or remove them. The measurements would
+survive such a change, since they characterize a mechanism rather than an
+interface, but the operational advice is pinned to this version. §4.7's rule
+mitigates this only partly: it states which ladder to want, while the flags are how
+one currently asks for it.
+
+**The GPU control is inference-tier hardware.** The L4 has neither the compute
+throughput nor the memory bandwidth of the accelerators most production serving
+runs on, and the arithmetic-intensity ridge sits at a different point there than at
+v5e's ~240 FLOP/byte. Since the ridge is what sets the batch size at which token
+padding stops mattering (§4.8), the batch thresholds reported here should not be
+transferred to other hardware without re-measurement.
+
 **Prefill step cost above n=16 is not isolable**, and at n=16 the clean sample is
 7–11 dispatches per arm.
 
@@ -1202,6 +1239,12 @@ prefill phenomenon, and which bounds our advice to co-located deployments.
 **Vidur** established simulator-fidelity validation as the standard for
 simulation-based serving studies; our holdout discipline follows it.
 
+**SGLang** and **TensorRT-LLM** implement their own shape and graph handling, with
+different capture policies and, in TensorRT-LLM's case, an ahead-of-time engine
+build with explicit optimization profiles. Nothing here is measured on either, and
+the claims should be read as applying to vLLM-style designs, in which shapes are
+compiled or captured from a ladder the serving loop rounds up to.
+
 **BucketServe** and **LAPS** manage length-bucketing overhead on GPU, and we
 measured the comparison rather than asserting it. Same vLLM 0.25.0, same instrument,
 an L4 (23 GB, TP=1) in place of the v5e:
@@ -1227,7 +1270,7 @@ rounding 9 up to 16.
 **This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
 CUDA path captures a graph per batch size, so what these arms vary is the request
 dimension, which the TPU results explain with a data-structure argument (§4.1) and
-where no proposed optimisation was going to pay. The token dimension, where this
+where no proposed optimization was going to pay. The token dimension, where this
 paper locates the only surviving effect, is not reached: no arm here varies tokens
 per step at fixed batch. The cross-architecture statement this table supports is
 therefore that **request-dimension padding is close to free on both architectures**,
@@ -1267,7 +1310,7 @@ one** — and it rests on the premise measurements of §4.1 and §4.2.
 
 Two accelerator families reach the same design by different routes: XLA compiles a
 ladder of shapes, and CUDA captures a graph per batch size. Both round every step up
-to the nearest entry, and the optimisation literature treats that rounding as a cost
+to the nearest entry, and the optimization literature treats that rounding as a cost
 to be recovered. It is not, on either. A batch just above an entry costs what the
 entry below costs, because a ragged attention kernel does almost no work for slots
 holding no key–value blocks — under 0.7 µs per slot, against 27.5 µs if it were paid

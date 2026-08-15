@@ -26,6 +26,7 @@ Checks, each named after the failure that motivated it:
   ACRONYM        an acronym used before it is expanded
   XREF           a cross-reference pointing at a section or table that is gone
   TABLE-UNCAPTIONED  a table with no caption, so it cannot be numbered or cited
+  DIALECT        British spelling in a paper standardized on American
 
 Exit non-zero on any finding, so `reproduce_all.sh` fails closed.
 
@@ -87,6 +88,17 @@ DRAMATIC = [
     r"\bIt is wrong\.", r"\bNeither holds\.", r"\bIt does not\.(?= )",
     r"\bIt falls by \d", r"\bThat is that\.", r"\bFull stop\.",
 ]
+# British spellings, in a paper standardized on American. Mixed dialect was the
+# most visible copyediting flag a reviewer raised, and it recurs whenever text is
+# added by hand.
+BRITISH = [
+    r"optimis(?:e|es|ed|ing|ation|ations)\b", r"utilis(?:e|es|ed|ing|ation)\b",
+    r"organis(?:e|es|ed|ing)\b", r"normalis(?:e|es|ed|ing|ation)\b",
+    r"amortis(?:e|es|ed|ing)\b", r"minimis(?:e|es|ed|ing)\b",
+    r"characteris(?:e|es|ed|ing)\b", r"\bartefact", r"\bbehaviour",
+    r"\bmodelling\b", r"\banalyse\b", r"\bcatalogue",
+]
+
 # Acronym -> the expansion that must appear at or before first bare use.
 ACRONYMS = {
     "TP": "tensor-parallel", "RPA": "Ragged Paged Attention",
@@ -144,6 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     for pat in SELF_ADDRESSED:
         for m in re.finditer(pat, md):
             flag("SELF-ADDRESSED", f"{pat!r}: {md[max(0, m.start() - 30):m.start() + 40]!r}")
+    for pat in BRITISH:
+        for m in re.finditer(pat, md, re.I):
+            flag("DIALECT", f"British spelling in an American-English paper: "
+                            f"{md[max(0, m.start() - 25):m.start() + 30]!r}")
     for pat in REGISTER:
         for m in re.finditer(pat, md, re.I):
             flag("REGISTER", f"{pat!r}: {md[max(0, m.start() - 35):m.start() + 45]!r}")
