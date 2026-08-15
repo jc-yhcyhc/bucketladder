@@ -103,7 +103,7 @@ We additionally document how the experimental methodology evolved to enforce
 falsifiability, because that evolution shaped what was measured. Our measurements
 have proved durable and our explanations have not: no reported number has been
 withdrawn, while four of the last five retractions were claims about mechanism. The
-asymmetry follows from the verification procedure rather than from carelessness.
+asymmetry follows from the verification procedure.
 Reported quantities are validated automatically, by a configuration contract that
 aborts on an undeclared variable and by a script that recomputes them from captured
 data, and either can reject a number. The mechanisms proposed to account for those
@@ -114,8 +114,12 @@ regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
 utilization where 5.1% was measured, and was withdrawn. The number and the story
 came from the same experiment, and only one of them survived. The response adopted here is to require that
 a proposed mechanism emit a falsifiable number before hardware is provisioned.
-Three such registered predictions failed (§4.4, §4.8), and each failure was
-more informative than a confirmation would have been.
+Three such registered predictions failed, and each produced a result the
+confirmation would not have: the sharding ablation yielded a two-term cost model
+that bounds per-step fixed overhead (§4.8), the model-scale ablation established
+that the regime map is set by batch size and dtype rather than parameter count
+(§4.8), and the concurrency sweep identified that padding migrates from individual
+requests to the packed step under chunked prefill (§4.4).
 
 **Contributions.**
 
@@ -1223,7 +1227,7 @@ of free request padding, and the frontier bound derived from that account. Four 
 the last five retractions were mechanism claims, and not one was a number that
 failed to reproduce.
 
-The asymmetry is structural rather than careless. Every measurement runs through a
+The asymmetry has a procedural cause. Every measurement runs through a
 contract that aborts on an unstated variable, is tied to a run identifier, and is
 recomputed from captured data by a script that exits non-zero on disagreement. **No
 equivalent validation applies to explanations.** A proposed mechanism can be
@@ -1232,14 +1236,11 @@ without any stage of the process being able to contradict it. The bandwidth acco
 persisted through four sessions of work not because evidence supported it, but
 because no step in the procedure was capable of rejecting it.
 
-The registered-prediction discipline is the closest available remedy, and its
-record is instructive. Three predictions failed — the sharding ablation, the model-
-scale ablation and the concurrency sweep — and each failure was more informative
-than a confirmation would have been. One produced a calibrated two-term cost model,
-one established that the regime map is independent of parameter count, and one
-identified that padding migrates to the packed step under chunked prefill. A
-mechanism that never generates a falsifiable number does no work, and this work
-published three such mechanisms before withdrawing them.
+Requiring a proposed mechanism to state a falsifiable number before hardware is
+provisioned is the closest available remedy. Three such predictions failed, and
+§1 lists what each produced. The property that makes them useful is that they are
+rejectable: a mechanism stated only in prose cannot be, and this work published
+three of those before withdrawing them.
 
 We report this as a finding rather than as a methodological remark, and §1 states it
 before any result for that reason. A reader who accepts it will assign greater
