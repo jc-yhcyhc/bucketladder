@@ -112,8 +112,9 @@ a padded request slot costs under 0.7 µs has not changed since it was measured;
 the account first given for it — that the step reads the whole weight set
 regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
 utilization where 5.1% was measured, and was withdrawn. The number and the story
-came from the same experiment, and only one of them survived. The response adopted here is to require that
-a proposed mechanism emit a falsifiable number before hardware is provisioned.
+came from the same experiment, and only one of them survived. The response adopted here is to require that a
+proposed mechanism state a falsifiable number in advance of the measurement that
+would test it.
 Three such registered predictions failed, and each produced a result the
 confirmation would not have: the sharding ablation yielded a two-term cost model
 that bounds per-step fixed overhead (§4.8), the model-scale ablation established
@@ -143,14 +144,15 @@ requests to the packed step under chunked prefill (§4.4).
    reduction and additionally costs 8.8% of cache capacity and 53% more startup.
    The choice can be made offline from a length distribution, predicting the
    measured result to within 5%.
-5. **The conditions under which that gain holds** (§4.4, §4.5): it is a latency
-   optimization below saturation rather than a capacity one, and prefix caching
-   reduces it from 12.3% to 1.7% by moving the prefill onto a different entry.
-6. **Five optimizations, four rejected and one that works** ([tab:opts], §5), and **fourteen
-   invalid inferences of our own** in four classes (§6), three of which now have
-   mechanical checks.
-7. **An asymmetry between measurements and explanations** (§6), reported as a
-   finding rather than a disclaimer.
+5. **When ladder placement pays, and when it does not** (§4.4, §4.5, §4.6). The
+   reduction is a latency gain below saturation rather than added capacity: median
+   latency falls 46% just below the knee, while sustained throughput rises 2.6% at
+   it. Enabling prefix caching, which production vLLM does by default, shortens the
+   prefill onto a different compiled entry and reduces the same placement's benefit
+   from 12.3% to 1.7%, so entries must be placed against uncached prefill lengths.
+6. **Five optimizations designed against these measurements, four rejected and one
+   that works** ([tab:opts], §5), including a ladder that measured 29% faster until
+   a correctness gate showed it was dropping prompt tokens.
 
 **Scope.** This is primarily a measurement study. The single intervention it
 reports (§4.3) is set through a documented environment variable rather than a
@@ -1236,8 +1238,8 @@ without any stage of the process being able to contradict it. The bandwidth acco
 persisted through four sessions of work not because evidence supported it, but
 because no step in the procedure was capable of rejecting it.
 
-Requiring a proposed mechanism to state a falsifiable number before hardware is
-provisioned is the closest available remedy. Three such predictions failed, and
+Requiring a proposed mechanism to state a falsifiable number in advance is the
+closest available remedy. Three such predictions failed, and
 §1 lists what each produced. The property that makes them useful is that they are
 rejectable: a mechanism stated only in prose cannot be, and this work published
 three of those before withdrawing them.
