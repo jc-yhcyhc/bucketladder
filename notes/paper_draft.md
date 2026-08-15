@@ -63,16 +63,17 @@ across concurrencies 1 to 16. Under chunked prefill the scheduler assembles step
 against a token budget rather than a compiled shape, so padding moves from
 individual requests to the packed step rather than being eliminated.
 
-A final result concerns methodology, and it is a caution about how to read this
-paper. Fourteen invalid inferences were made and caught during the work, and they
-fall unevenly: no reported measurement has been withdrawn during the work, while
-four of the five most recent retractions were *explanations* for measurements that
-still stand. The checks that protect this work are programs: one aborts a run
-when a controlled variable is left undeclared, another recomputes every reported
-number from captured data and fails if it disagrees with the text. A program can
-check a number that way. It cannot check whether a stated reason for that number
-is correct, so explanations are never tested by anything. Readers should trust this
-paper's measurements more than its explanations (§1, §6).
+We close with a limitation of this work, stated because it bears on how the
+results should be weighed. Fourteen invalid inferences were identified and
+corrected during the study, and they are distributed unevenly: no reported
+measurement has been withdrawn, whereas four of the five most recent retractions
+were explanations offered for measurements that still stand. This follows from the
+verification procedure. Reported quantities are subject to automated validation —
+a configuration contract that aborts a run when a controlled variable is
+undeclared, and a recomputation script that regenerates every figure from captured
+data and fails on disagreement — while the mechanisms proposed to account for those
+quantities receive no equivalent scrutiny. We therefore present the measurements
+with greater confidence than the explanations that accompany them (§1, §6).
 
 ---
 
@@ -101,10 +102,12 @@ warmup charge that neither system measures.
 We additionally document how the experimental methodology evolved to enforce
 falsifiability, because that evolution shaped what was measured. Our measurements
 have proved durable and our explanations have not: no reported number has been
-withdrawn, while four of the last five retractions were claims about mechanism. This asymmetry is structural rather than
-accidental. Numbers here pass through a contract that aborts on an undeclared
-variable and a script that recomputes them, and either can reject a number. A
-proposed mechanism is checked by nothing. §4.1 carries an instance. The finding that
+withdrawn, while four of the last five retractions were claims about mechanism. The
+asymmetry follows from the verification procedure rather than from carelessness.
+Reported quantities are validated automatically, by a configuration contract that
+aborts on an undeclared variable and by a script that recomputes them from captured
+data, and either can reject a number. The mechanisms proposed to account for those
+numbers receive no equivalent scrutiny. §4.1 carries an instance. The finding that
 a padded request slot costs under 0.7 µs has not changed since it was measured;
 the account first given for it — that the step reads the whole weight set
 regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
@@ -1223,10 +1226,11 @@ failed to reproduce.
 The asymmetry is structural rather than careless. Every measurement runs through a
 contract that aborts on an unstated variable, is tied to a run identifier, and is
 recomputed from captured data by a script that exits non-zero on disagreement. **No
-comparable machinery exists for explanations.** A proposed mechanism can be
-written, accepted, cited by later sections, and carried across drafts without any
-step in the process being capable of contradicting it. The bandwidth account survived four sessions of work not because
-evidence supported it but because nothing in the pipeline could reject it.
+equivalent validation applies to explanations.** A proposed mechanism can be
+written, accepted, cited by later sections, and carried across successive drafts
+without any stage of the process being able to contradict it. The bandwidth account
+persisted through four sessions of work not because evidence supported it, but
+because no step in the procedure was capable of rejecting it.
 
 The registered-prediction discipline is the closest available remedy, and its
 record is instructive. Three predictions failed — the sharding ablation, the model-
