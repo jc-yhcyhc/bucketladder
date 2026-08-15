@@ -18,7 +18,11 @@ the same instrument, on a GPU.
 above a compiled entry costs
 approximately what the entry below it costs: on TPU it falls 3–5% under the lower
 entry, and on GPU, padding a batch from 8 up to a captured 16 costs 67 µs, or 0.6%
-of the step. Compilation overhead is instead incurred as a static
+of the step. **The two architectures are compared on the request dimension only.**
+CUDA-graph capture quantizes batch size, so the GPU arms vary batch size and
+establish request-padding parity; the token dimension, on which this paper's
+recommendation rests, is measured on TPU alone. Compilation overhead is instead
+incurred as a static
 startup cost: enabling CUDA-graph capture costs 108 s of initialisation, and XLA
 compiles a TPU ladder in 5 to 30 minutes for its first bucket. Neither is a
 per-step cost.
