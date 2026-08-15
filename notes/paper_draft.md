@@ -150,9 +150,10 @@ requests to the packed step under chunked prefill (§4.4).
    it. Enabling prefix caching, which production vLLM does by default, shortens the
    prefill onto a different compiled entry and reduces the same placement's benefit
    from 12.3% to 1.7%, so entries must be placed against uncached prefill lengths.
-6. **Five optimizations designed against these measurements, four rejected and one
-   that works** ([tab:opts], §5), including a ladder that measured 29% faster until
-   a correctness gate showed it was dropping prompt tokens.
+6. **A test of the measurements by construction** (§5). Four optimizations were
+   designed against the premise and rejected, and their failures are what the
+   measurements predict: those aimed at the request dimension or at per-request
+   length padding cannot pay, because §4.1 and §4.2 find no cost there to recover.
 
 **Scope.** This is primarily a measurement study. The single intervention it
 reports (§4.3) is set through a documented environment variable rather than a
@@ -1099,9 +1100,9 @@ It is future work rather than a result, and nothing above depends on it.
 
 ---
 
-## 5. Five optimizations, four rejected and one that works
+## 5. Optimizations designed against these measurements
 
-Table: Five optimizations designed against these measurements, and their outcomes. {#tab:opts}
+Table: Optimizations designed against the compiled-shape premise, and their outcomes. Each rejection identifies a dimension the measurements show carries no cost. {#tab:opts}
 | | outcome |
 |---|---|
 | **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; beats BucketServe's objective by 1.61 ms at equal shape count; −1.7% once prefix caching is on (§4.3–§4.7)** |
@@ -1110,9 +1111,10 @@ Table: Five optimizations designed against these measurements, and their outcome
 | last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
 | bucket-aligned step packing | implemented twice: inert, then output-corrupting |
 
-The one that works targets the single dimension the measurements left open. Three
-of the four rejected optimizations address the request dimension or per-request
-length padding, and §4.1 and §4.2 show that neither carries cost; the fourth
+The one that works targets the single dimension the measurements leave open, and
+the rejections are informative rather than incidental. Three of them address the
+request dimension or per-request length padding, where §4.1 and §4.2 find no cost
+to recover, so their failure is what those sections predict; the fourth
 restructures work the stack already packs. The token dimension is the only place
 where the premise was not refuted by measurement, and the only place where an
 intervention produced a gain — though not for the reason expected, since the payoff
