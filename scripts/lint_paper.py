@@ -25,6 +25,7 @@ Checks, each named after the failure that motivated it:
   SELF-ADDRESSED editorial notes to self ("stated once", "note to self")
   ACRONYM        an acronym used before it is expanded
   XREF           a cross-reference pointing at a section or table that is gone
+  XREF-CONTENT   a reference attributing content to a section that no longer has it
   TABLE-UNCAPTIONED  a table with no caption, so it cannot be numbered or cited
   DIALECT        British spelling in a paper standardized on American
   PROVENANCE-CLAIM  a claim about review history the artifact cannot substantiate
@@ -222,6 +223,23 @@ def main(argv: list[str] | None = None) -> int:
     for m in re.finditer(r"\[(tab:[\w-]+)\]", md):
         if m.group(1) not in labels:
             flag("XREF", f"[{m.group(1)}] referenced but no table carries that label")
+
+    # A reference that attributes specific content to a section must find it
+    # there. Deleting a section's catalogue left three references claiming it
+    # "classifies three errors", "identifies this work's most frequent class" and
+    # "records our twelfth" -- all pointing at text that no longer existed, none
+    # caught by a check that only verifies the section number resolves.
+    sec_bodies = {}
+    for m in re.finditer(r"^## (\d+)\.[^\n]*\n(.*?)(?=^## |\Z)", md, re.M | re.S):
+        sec_bodies[m.group(1)] = m.group(2)
+    for m in re.finditer(r"§(\d+)\s+(?:classifies|identifies|records|lists|names)\s+"
+                         r"([a-z]+)", md):
+        sec, word = m.group(1), m.group(2)
+        body = sec_bodies.get(sec, "")
+        if body and word not in body.lower():
+            flag("XREF-CONTENT",
+                 f"§{sec} is said to {m.group(0).split()[1]} {word!r}, which does "
+                 f"not appear in that section")
 
     # Cross-references must point at sections that exist.
     heads = set()

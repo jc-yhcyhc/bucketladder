@@ -171,8 +171,8 @@ overhead, tokenisation and queueing delay.
 **Scope of instruments.** A step-scoped property requires a step-scoped instrument.
 Single-step execution is verified per dispatch from the count delta of
 `iteration_tokens_total`, and dispatches that split are excluded rather than
-averaged. §6 classifies three of our own errors as instrument-definition failures,
-the one class for which no guardrail described here provides coverage.
+averaged. §6 notes that errors of this kind — an analysis that measures something
+other than its target — are the one class no check described here covers.
 
 **Request arrival.** Where a measurement requires *n* requests to reach the
 scheduler within one step, they are released from a thread barrier after every
@@ -224,8 +224,9 @@ number and figure and exits non-zero if any disagrees.
 
 ## 3. Three quantized dimensions
 
-A serving step is quantized along three independent axes, which this paper keeps
-separate throughout because they have different mechanisms and different costs.
+A serving step is rounded up to a compiled shape in three independent ways, and
+this paper keeps them separate because each has a different mechanism and a
+different cost.
 The ladders below are those the TPU backend constructs at startup and prints in
 its own warmup log, so they can be read off a running server rather than inferred:
 
@@ -236,9 +237,10 @@ Table: The three quantized dimensions of the TPU serving stack, read from source
 | **D2** | scheduled tokens / step | `[16, 32, …, 8192]` |
 | **D3** | requests / step | `[8, …, 256]` non-attention; **`[256]` attention** |
 
-The three are measured separately throughout, and results from one are not used to
-support claims about another. §6 records one occasion on which that rule was
-broken.
+Keeping them separate matters because they behave differently: request-slot
+padding turns out to be free, per-request length padding does not exist, and only
+token padding is paid. A measurement of one therefore says nothing about the
+others, and every result below states which dimension it concerns.
 
 ---
 
@@ -350,9 +352,11 @@ Table: Utilization against batch size, testing the memory-bandwidth account of f
 | MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
 | high-bandwidth memory (HBM) utilization | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
 
-At n=256 the requests are not all resident, so that column is queue-contaminated.
-It is retained because it is the batch size the prediction names, and the
-refutation below is stated at n=64, where the queue is 0.1 ms.
+At n=256 the server has not admitted all 256 requests into the batch: some are
+still waiting in the queue, so the column does not describe a batch of 256 and no
+claim rests on it. It is shown because 256 is the batch size the prediction names.
+The refutation is stated at n=64, where queue time is 0.1 ms and the batch is
+genuinely full.
 
 MFU here is `2 × parameters × tokens` against the chip's 197 TFLOP/s bf16 peak,
 with attention FLOPs excluded, which is the same dense weight-stationary accounting
@@ -400,9 +404,9 @@ ladder boundaries. At fixed n=4 the paid share rises with boundary size, from
 10.0% at 512→1024 to 24.8% at 4096→8192, so the particular boundaries a row
 contains shift its value independently of batch size. The sets differ: n=8 lacks
 512→1024, the lowest-paying boundary, and n=16 lacks 4096→8192, the highest. Both
-omissions push in the same direction and exaggerate the decline. This is the error
-class §6 identifies as this work's most frequent, occurring here in a headline
-table.
+omissions push in the same direction and exaggerate the decline. Comparing rows
+measured over different boundary sets is the most common error in this work, and it
+occurred here in a headline table.
 
 Restricted to the two boundaries present in every row ([tab:paidmatched]):
 
@@ -1094,8 +1098,9 @@ scale with distinct experts touched, and at long context, where key–value stat
 rather than weights sets the floor.
 
 Two cautions apply. The identity is derived for decode, while the paid-share
-numbers are prefill, and applying it to them is the domain error §6 records as our
-twelfth. The intensity argument also explains why model size should not move the
+numbers are prefill; applying a decode argument to prefill measurements crosses
+between two of the quantized dimensions, which §3 states this paper does not do,
+so the numbers are reported as measurements with the explanation withdrawn. The intensity argument also explains why model size should not move the
 paid share, not why it moved downward; the likely reason is that non-weight fixed
 costs form a larger fraction of a 0.55 GB model's step.
 
