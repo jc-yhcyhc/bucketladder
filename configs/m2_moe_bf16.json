@@ -1,0 +1,47 @@
+{
+  "experiment": "m2_moe_bf16",
+  "description": "Designed confirmation that step token padding is not paid at n>1. Straddles a compiled bucket boundary at fixed batch size and near-fixed per-sequence length, so real work moves ~1.6% while padded work doubles. H1 answered this from a natural experiment; this is the randomised version.",
+  "model": "Qwen/Qwen3-30B-A3B",
+  "tpu_type": "v5litepod-16",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 16,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 9,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "512/1024",
+      "n": 4,
+      "seq_len_below": 128,
+      "seq_len_above": 130
+    },
+    {
+      "name": "1024/2048",
+      "n": 8,
+      "seq_len_below": 128,
+      "seq_len_above": 129
+    }
+  ],
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "REGISTERED. The paid share is a ratio, (measured - real)/(padded - real). Padded tokens are routed to experts exactly as real tokens are, so if routing changes cost per token it changes numerator and denominator together and the ratio is unchanged. We predict the MoE and dense arms agree within the interval each edge supports. A difference would mean routing treats padded and real tokens differently, which nothing in \u00a74.2's mechanism anticipates.",
+  "dimension": "D2",
+  "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction.",
+  "independent_vars": {
+    "tensor_parallel_size": "Held at 16 in both arms of this comparison. It differs from the TP=4 used elsewhere because a 16-chip slice is what allows both arms to run in native bf16; \u00a74.8 measures what TP itself does, and no number here is compared against a TP=4 measurement."
+  },
+  "note_model": "MoE arm: 30.5B total, ~3B active, Qwen3MoeForCausalLM, 61 GB in bf16.",
+  "note_topology": "Run on a v5litepod-16 at TP=16, not the v5litepod-4 at TP=4 used elsewhere in this paper. The larger slice is what makes the comparison clean: at 64 GB the only mixture-of-experts model that fits is an FP8 checkpoint, and \u00a74.8 argues dtype moves the arithmetic-intensity ridge, so an FP8 MoE against a bf16 dense baseline would confound quantization with routing. At 256 GB both arms run in native bf16. Tensor-parallel degree is therefore 16 in BOTH arms, so it is held fixed within this comparison even though it differs from the rest of the paper; no result here is differenced against a TP=4 measurement."
+}

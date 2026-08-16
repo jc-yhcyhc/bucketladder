@@ -1,0 +1,44 @@
+{
+  "experiment": "m1_moe_fp8",
+  "description": "Designed confirmation that step token padding is not paid at n>1. Straddles a compiled bucket boundary at fixed batch size and near-fixed per-sequence length, so real work moves ~1.6% while padded work doubles. H1 answered this from a natural experiment; this is the randomised version.",
+  "model": "Qwen/Qwen3-30B-A3B-FP8",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false
+  },
+  "output_len": 1,
+  "repeats": 9,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "512/1024",
+      "n": 4,
+      "seq_len_below": 128,
+      "seq_len_above": 130
+    },
+    {
+      "name": "1024/2048",
+      "n": 8,
+      "seq_len_below": 128,
+      "seq_len_above": 129
+    }
+  ],
+  "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "REGISTERED. The paid share is a ratio, (measured - real)/(padded - real), and padded tokens route to experts exactly as real tokens do, so if MoE changes cost per token it changes numerator and denominator together. We predict the paid share is unchanged between these two arms within the interval the edge supports. A difference would mean routing treats padded and real tokens differently, which no part of the mechanism in \u00a74.2 anticipates.",
+  "dimension": "D2",
+  "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction.",
+  "note_model": "MoE arm. 30.5B total, ~3B active, Qwen3MoeForCausalLM. The only mixture-of-experts model that is both in tpu-inference's JAX registry and small enough for a v5litepod-4: gpt-oss-20b fits but fails TP=4 sharding, Llama-4-Scout is 217 GB, DeepSeek-V3 is 685 GB, and DeepSeek-V2-Lite, deepseek-moe-16b, Qwen1.5-MoE and OLMoE are architectures the registry does not accept.",
+  "note_confounds": "Not fully matched: the MoE arm is GQA 8:1 with 48 layers, the dense arm GQA 4:1 with 36 layers. Those affect attention cost, while the paid share concerns token padding in a matmul-dominated prefill step, so they are expected to bias little; they are stated rather than corrected because no smaller Qwen3 MoE exists."
+}

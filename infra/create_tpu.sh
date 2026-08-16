@@ -240,6 +240,11 @@ fi
 log "creating TPU VM (this takes a few minutes)…"
 "${CMD[@]}"
 log "created. BILLING HAS STARTED."
+  # A stable, greppable marker. Twice in one session a caller detected
+  # success by matching log prose, missed it, and kept looping -- once
+  # creating a second billing slice in another zone. Callers should test for
+  # this exact token, or better, query the API.
+  echo "BUCKETLADDER_CREATED_MARKER ${ZONE}"
 log ""
 log "Next:"
 log "  1. record the start time in DECISIONS.md (billed VM-hours, not benchmark-hours)"
