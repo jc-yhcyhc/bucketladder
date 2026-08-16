@@ -1266,7 +1266,10 @@ one currently asks for it.
 attempt is reported because its obstacle is specific rather than a matter of
 budget. Of the mixture-of-experts architectures `tpu-inference` supports natively,
 `gpt-oss-20b` fails to initialize at TP=4 with a JAX `IndivisibleError`: a
-parameter axis of size 6 cannot be partitioned across four chips. Sharding it at
+parameter axis of size 6 cannot be partitioned across four chips. The obstacle is
+not visible in the model's configuration, whose expert count of 32 divides four
+cleanly; it arises in how the backend shards that architecture, and we could not
+determine it without attempting the run. Sharding it at
 TP=2 would divide cleanly but would change a controlled variable that §4.8 shows
 moves the fixed cost by 38%, so the comparison would be confounded rather than
 informative. The other native option, `llama4`, is 109B parameters and exceeds the

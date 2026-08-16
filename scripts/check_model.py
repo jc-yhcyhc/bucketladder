@@ -220,3 +220,14 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# NOT COVERED: mixture-of-experts sharding.
+#
+# `openai/gpt-oss-20b` passes every check above and still fails to initialize at
+# TP=4 with a JAX IndivisibleError on a parameter axis of size 6. Its config
+# declares num_local_experts=32, which divides four cleanly, so an expert-count
+# rule would pass it too. The offending axis is introduced by the backend's own
+# sharding of that architecture and is not derivable from the published config.
+# Attempting the boot is currently the only way to find out, which cost ~22
+# minutes of v5e-4 time. Recorded here so the next attempt budgets for it rather
+# than assuming this script has already ruled it out.
