@@ -23,8 +23,9 @@ CUDA-graph capture quantizes batch size, so the GPU arms vary batch size and
 establish request-padding parity; the token dimension, on which this paper's
 recommendation rests, is measured on TPU alone. Compilation overhead is instead
 incurred as a static
-startup cost: enabling CUDA-graph capture costs 108 s of initialisation, and XLA
-compiles a TPU ladder in 5 to 30 minutes for its first bucket. Neither is a
+startup cost: enabling CUDA-graph capture costs 108 s of initialization, and XLA, the compiler
+that turns a TPU model into fixed-shape executables, takes 5 to 30 minutes over
+the first bucket of a ladder. Neither is a
 per-step cost.
 
 The three quantized dimensions behave differently, and separating them is the
@@ -166,7 +167,7 @@ deliberately and declared.
 **Units.** All timings are measured server-side, as differences between Prometheus
 histogram snapshots taken before and after each measurement block. Client-side
 wall-clock timings are not used, because they include round-trip time, HTTP
-overhead, tokenisation and queueing delay.
+overhead, tokenization and queueing delay.
 
 **Scope of instruments.** A step-scoped property requires a step-scoped instrument.
 Single-step execution is verified per dispatch from the count delta of
@@ -342,8 +343,12 @@ The memory-bandwidth explanation is tested and rejected. A natural account of
 free request padding is that the step reads the whole weight set regardless of
 batch, so padded slots are absorbed into a fixed cost that batch size does not
 change. That account predicts utilization climbing toward the compute roof past the
-arithmetic-intensity ridge near 240 FLOP/byte, reaching a model FLOPs utilization
-(MFU) of approximately 49% at n=256. The measurement, with `prompt_len=256` and
+arithmetic-intensity ridge near 240 FLOP/byte, reaching approximately 49% at
+n=256. The quantity is **model FLOPs utilization (MFU)**: the arithmetic the model
+performs, divided by the arithmetic the chip could perform in the same time. A
+value of 5% means the chip spent 95% of its time doing something other than the
+model's floating-point work — waiting on memory, mostly. The table also reports utilization of high-bandwidth memory (HBM), the
+off-chip memory the weights are streamed from. Measured with `prompt_len=256` and
 `output_len=64`:
 
 Table: Utilization against batch size, testing the memory-bandwidth account of free request padding. The account predicts about 49% MFU at n=256. {#tab:roofline}
@@ -441,15 +446,15 @@ is the signature of an arrival race rather than a capacity limit. Releasing all
 requests from a thread barrier after connection setup reduced arrival spread by a
 factor of 7.6 at n=32, from 15.4 ms to 1.7 ms:
 
-Table: Fraction of dispatches the scheduler splits, before and after synchronising request release. {#tab:splits}
-| n | split under the old launcher | split under a synchronised launch |
+Table: Fraction of dispatches the scheduler splits, before and after synchronizing request release. {#tab:splits}
+| n | split under the old launcher | split under a synchronized launch |
 |---|---|---|
 | 4 | 0% | 0% |
 | 8 | 20% | **0%** |
 | 16 | 100% | **60%** |
 | 32 | 100% | 100% |
 
-The real barrier lies between 16 and 32 rather than at 8. Under a synchronised
+The real barrier lies between 16 and 32 rather than at 8. Under a synchronized
 launch n=16 becomes measurable, and the paid share there is indistinguishable from
 zero across three boundaries that each double the padded token count.
 
@@ -581,8 +586,8 @@ Table: What the finer ladder costs: startup, resident executables, and the memor
 | cold warmup | 285 s | 436 s (+53%) |
 | compiled-shape cache on disk | 43 MB | 92 MB |
 | highest memory fraction that boots | 0.92 (the default) | **0.85** |
-| KV cache at 0.92 | 367,360 tokens | *does not boot* |
-| KV cache at 0.85 | 335,104 tokens | 335,104 tokens |
+| key–value cache at 0.92 | 367,360 tokens | *does not boot* |
+| key–value cache at 0.85 | 335,104 tokens | 335,104 tokens |
 
 The warmup figures are cold. A persistent compilation cache amortizes them across
 restarts, and warm boots of the same two ladders measured 165–315 s, reflecting
@@ -787,11 +792,11 @@ persistent benefit was measured under burst arrival at fixed concurrency, which
 loads the server differently from a steady arrival process at the same nominal
 rate.
 
-For the fourteen-shape ladder this trade is favourable, since it costs no capacity
+For the fourteen-shape ladder this trade is favorable, since it costs no capacity
 at all: four additional compiled shapes reduce tail latency by up to 46% in the
 regime most interactive deployments run in. For the twenty-one-shape ladder, which
 costs 8.8% of capacity, the same arithmetic argues against it, since surrendering
-8.8% of the cache to gain 2.6% in sustained throughput is an unfavourable exchange
+8.8% of the cache to gain 2.6% in sustained throughput is an unfavorable exchange
 at saturation.
 
 ### 4.6 Prefix caching moves the target the ladder is placed against
@@ -1043,7 +1048,7 @@ Per-dispatch variance is a prefill phenomenon. Over 9 repeats on the same
 server, decode spread is 1.00–1.04× at most batch sizes, while prefill is 1.00–1.03×
 at n≤4 and 1.18–1.26× at n≥8. Variance appears exactly where the scheduler begins
 splitting dispatches, and decode, which makes no chunking decision, never exhibits
-it. This localises the effect without explaining it. The aggregate figure does not
+it. This localizes the effect without explaining it. The aggregate figure does not
 describe every cell: bootstrapping the decode cells §4.1 depends on gives 95%
 interval widths of 38.7% at n=8 and 28.2% at n=9 over 21 repeats, wider than
 several differences a reader might otherwise treat as signal.
@@ -1150,7 +1155,7 @@ Table: Release-timing policies against arrival rate, positive being a saving in 
 
 The saving decays monotonically with load and becomes an 11.7% penalty by 70 req/s.
 A single measurement at 25 req/s cannot distinguish that from a robust effect, and
-it samples the most favourable region of the curve.
+it samples the most favorable region of the curve.
 
 **It is also not free.** The harness scrapes `/metrics` around every batch, adding a
 median 22.6–24.9 ms of inter-dispatch overhead to a policy that never waits. That
@@ -1371,7 +1376,7 @@ small on each. These remain single measurements: three batch points, one GPU, no
 repeats.
 
 **What is paid is the capture, and it is paid at startup.** Enabling graphs costs
-108 s of initialisation, 118.7 s against 10.7 s, for a capture set fixed in advance.
+108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
 That is precisely the quantity BucketServe and LAPS manage when they write that the
 number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
 compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.

@@ -108,14 +108,23 @@ BRITISH = [
     r"amortis(?:e|es|ed|ing)\b", r"minimis(?:e|es|ed|ing)\b",
     r"characteris(?:e|es|ed|ing)\b", r"\bartefact", r"\bbehaviour",
     r"\bmodelling\b", r"\banalyse\b", r"\bcatalogue",
+    # forms the first version of this list missed, found by a reader
+    r"initialis(?:e|es|ed|ing|ation)\b", r"tokenis(?:e|es|ed|ing|ation)\b",
+    r"synchronis(?:e|es|ed|ing|ation)\b", r"localis(?:e|es|ed|ing)\b",
+    r"\bfavourab", r"specialis(?:e|es|ed|ing)\b", r"generalis(?:e|es|ed|ing)\b",
+    r"\bcolour", r"\blabour", r"\blicence\b", r"\bpractise\b",
 ]
 
 # Acronym -> the expansion that must appear at or before first bare use.
 ACRONYMS = {
     "TP": "tensor-parallel", "RPA": "Ragged Paged Attention",
-    "MAPE": "mean absolute percentage error", "MFU": "model",
-    "TTFT": "time to first token", "ITL": "inter-token",
-    "KV": None, "HBM": "high-bandwidth", "XLA": None, "MXU": None,
+    "MAPE": "mean absolute percentage error",
+    # The expansion must be the full phrase. "model" alone matched the word
+    # "model" anywhere earlier in the paper, so the check passed while the term
+    # went undefined -- and expanding an acronym is not defining it in any case.
+    "MFU": "model FLOPs utilization",
+    "TTFT": "time to first token", "ITL": "inter-token latency",
+    "KV": "key–value", "HBM": "high-bandwidth", "XLA": "compiler", "MXU": None,
 }
 
 
@@ -205,8 +214,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         first_flat = len(re.sub(r"\s+", " ", md[:uses[0]]))
         exp = flatmd.find(re.sub(r"\s+", " ", expansion).lower())
-        if exp < 0 or exp > first_flat:
-            flag("ACRONYM", f"{ac} used at char {uses[0]} before {expansion!r} appears")
+        # An appositive defines the term AT first use -- "XLA, the compiler that
+        # turns a model into fixed-shape executables" -- which is correct English
+        # and which a strictly-before rule rejects. Allow the expansion to follow
+        # within a short window, as well as to precede.
+        APPOSITIVE = 140
+        if exp < 0 or exp > first_flat + APPOSITIVE:
+            flag("ACRONYM", f"{ac} used at char {uses[0]} without {expansion!r} "
+                            f"appearing before it or defining it in place")
 
     # Every table needs a caption, so it can be numbered and referred to. A bare
     # table was the state of all twenty-four before a reviewer said so.
