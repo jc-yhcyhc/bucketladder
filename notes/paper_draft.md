@@ -63,17 +63,12 @@ across concurrencies 1 to 16. Under chunked prefill the scheduler assembles step
 against a token budget rather than a compiled shape, so padding moves from
 individual requests to the packed step rather than being eliminated.
 
-We close with a limitation of this work, stated because it bears on how the
-results should be weighed. Fourteen invalid inferences were identified and
-corrected during the study, and they are distributed unevenly: no reported
-measurement has been withdrawn, whereas four of the five most recent retractions
-were explanations offered for measurements that still stand. This follows from the
-verification procedure. Reported quantities are subject to automated validation —
-a configuration contract that aborts a run when a controlled variable is
-undeclared, and a recomputation script that regenerates every figure from captured
-data and fails on disagreement — while the mechanisms proposed to account for those
-quantities receive no equivalent scrutiny. We therefore present the measurements
-with greater confidence than the explanations that accompany them (§1, §6).
+Every reported quantity is produced under automated validation: a configuration
+contract that aborts a run when a controlled variable is undeclared, and a
+recomputation script that regenerates each figure from captured data and fails on
+disagreement. The mechanisms proposed to account for those quantities receive no
+equivalent scrutiny, and §6 reports what follows from that, including two of our
+own explanations that were withdrawn while the measurements behind them stood.
 
 ---
 
@@ -99,28 +94,10 @@ central measurement on a GPU using the same framework and instrument. Run-time
 padding proves close to free on both, and the cost of shape coverage proves to be a
 warmup charge that neither system measures.
 
-We additionally document how the experimental methodology evolved to enforce
-falsifiability, because that evolution shaped what was measured. Our measurements
-have proved durable and our explanations have not: no reported number has been
-withdrawn, while four of the last five retractions were claims about mechanism. The
-asymmetry follows from the verification procedure.
-Reported quantities are validated automatically, by a configuration contract that
-aborts on an undeclared variable and by a script that recomputes them from captured
-data, and either can reject a number. The mechanisms proposed to account for those
-numbers receive no equivalent scrutiny. §4.1 carries an instance. The finding that
-a padded request slot costs under 0.7 µs has not changed since it was measured;
-the account first given for it — that the step reads the whole weight set
-regardless of batch, so padding hides inside a bandwidth floor — predicted 49%
-utilization where 5.1% was measured, and was withdrawn. The number and the story
-came from the same experiment, and only one of them survived. The response adopted here is to require that a
-proposed mechanism state a falsifiable number in advance of the measurement that
-would test it.
-Three such registered predictions failed, and each produced a result the
-confirmation would not have: the sharding ablation yielded a two-term cost model
-that bounds per-step fixed overhead (§4.8), the model-scale ablation established
-that the regime map is set by batch size and dtype rather than parameter count
-(§4.8), and the concurrency sweep identified that padding migrates from individual
-requests to the packed step under chunked prefill (§4.4).
+A second theme shaped what was measured. Our measurements have proved durable and
+our explanations have not: no reported number has been withdrawn, while four of the
+last five retractions were claims about mechanism. §2 states the protocol adopted
+in response, and §6 reports what the asymmetry does and does not license.
 
 **Contributions.**
 
@@ -164,7 +141,20 @@ scheduler.
 
 ## 2. Method
 
-**Controlled variables.** Prefix caching is disabled and asserted, except in §4.5
+**Controlled variables.** Chunked prefill is **enabled** throughout, which is the
+stack's default and the configuration production runs; §4.2 reports a
+`--no-enable-chunked-prefill` control for the one result where it could be
+confounding. This matters for how the ladder results should be read. Under chunked
+prefill the scheduler selects a compiled shape for the *packed step*, not for an
+individual request, so a statement that a 1200-token prompt pads to 2048 describes
+what executes only while that prompt prefills alone in its step. At the two
+concurrent requests of §4.3 it does, and the evidence is internal to the
+measurement: two cells saving 512 and 1024 padded tokens agree on cost per padded
+token to within 1%, which co-scheduling would not produce, since a packed step
+would save a different amount in each cell. §4.4 measures where that ceases to hold
+and §4.6 restores it deliberately by staggering arrivals.
+
+Prefix caching is disabled and asserted, except in §4.5
 where it is the treatment. Chunked prefill, `max_model_len`,
 `max_num_batched_tokens`, tensor-parallel size, `gpu_memory_utilization`,
 `XLA_FLAGS` and `ATTN_BUCKETIZED_NUM_REQS` are recorded. Every run parses the
@@ -204,6 +194,18 @@ than milliseconds. §4.2 shows that this changes what is measurable.
 - **Model rejection, quoted as a percentage** — the amount by which a candidate
   model's prediction exceeds the measurement, as a fraction of the prediction.
 
+**Registered predictions.** A proposed mechanism must state a falsifiable number
+before the measurement that would test it, recorded in the experiment's
+configuration file and therefore fixed before any result is seen. The requirement
+exists because a mechanism stated only in prose cannot be rejected by any check in
+this pipeline, whereas a number can. Three such predictions failed during this
+work, and each produced a result its confirmation would not have: the sharding
+ablation yielded a two-term cost model bounding per-step fixed overhead (§4.8), the
+model-scale ablation established that the regime map is set by batch size and dtype
+rather than by parameter count (§4.8), and the concurrency sweep identified that
+padding migrates from individual requests to the packed step under chunked prefill
+(§4.4).
+
 **Statistics.** Medians over repeats, with 95% confidence intervals from 10,000
 bootstrap resamples. Intervals are reported wherever a claim depends on the size of
 a difference, because §4.7 establishes that some cells are far noisier than others.
@@ -222,7 +224,10 @@ number and figure and exits non-zero if any disagrees.
 
 ## 3. Three quantized dimensions
 
-From `tpu_inference/runner/tpu_runner.py:2133` and `runner/utils.py`, per step:
+A serving step is quantized along three independent axes, which this paper keeps
+separate throughout because they have different mechanisms and different costs.
+The ladders below are those the TPU backend constructs at startup and prints in
+its own warmup log, so they can be read off a running server rather than inferred:
 
 Table: The three quantized dimensions of the TPU serving stack, read from source. {#tab:dims}
 | | quantizes | ladder |
@@ -256,18 +261,20 @@ The attention kernel therefore executes at a fixed size of 256 request slots,
 independently of the batch size. Three measurements establish that this padding
 carries negligible cost.
 
-First, a paired experiment: enabling the flag compiles the full ladder, verified in
-the warmup log, and changes decode by 0.0%, identical to 0.1 ms at n=8 and n=9.
+The first is a paired experiment. Enabling the ladder for attention, so that it
+matches the one the stack advertises, changes decode by 0.0%: the two arms are
+identical to 0.1 ms at n=8 and n=9.
 This comparison excludes a large effect and supports nothing finer, since the
 paired difference is +0.00 ms with a 95% bootstrap interval of [−10.7, +10.8] ms at
 n=8, or ±20% of the decode phase.
 
-Second, the compiler names the padding. The decode attention kernel is emitted as
-`RPAd-p_256-bq_1_1-bkv_8192_8192`, writing the 256-request padding into the name of
-the emitted kernel independently of the batch size.
+Second, the compiler records the padding in the name it gives the kernel. The
+decode attention kernel is emitted under a name that encodes the shapes it was
+compiled for, and the field holding the request-slot count reads 256 regardless of
+the batch actually being served. The stack therefore reports, in its own
+compilation output, that attention runs at 256 slots.
 
-Third, and decisively, an operator-level measurement. With prompt and output length
-fixed, so that per-sequence key–value state is constant, attention device time
+The third is an operator-level measurement. With prompt and output length fixed, so that per-sequence key–value state is constant, attention device time
 aggregated over a full 64-step generation is:
 
 Table: Attention device time aggregated over a 64-step generation, at fixed per-sequence key-value state. {#tab:attn}
@@ -1167,91 +1174,42 @@ less work.
 
 ---
 
-## 6. Fourteen invalid inferences, and one asymmetry
+## 6. Validation, and what it does not cover
 
-Fourteen invalid inferences were made and caught during this work. They fall into
-four classes, and the guardrails cover only some of them.
+Every reported quantity is produced under a configuration contract that aborts a
+run when a controlled variable is left undeclared, is tied to a run identifier, and
+is recomputed from captured data by a script that exits non-zero if it disagrees
+with the text. §2 states the registered-prediction requirement that accompanies it.
 
-Table: Fourteen invalid inferences by class, and whether a mechanical check now covers each. {#tab:failures}
-| class | count | what it is | covered? |
-|---|---|---|---|
-| **provenance** | 8 | a quantity measured under one configuration, used under another | **yes** — config-diff over registered claims |
-| **instrument definition** | 4 | an analysis that measures something other than the target | no |
-| **lever validity** | 1 | a lever that cannot move the quantity claimed | **yes** — `prediction_mechanism` |
-| **dimension** | 1 | a result in one quantized dimension licensing a claim in another | **yes** — required `dimension` field |
-
-**The provenance guardrail took three versions.** A rule forbidding derivations
-that combine quantities measured at different batch sizes would not have caught the
-`output_len` failure. A whitelist of configuration keys missed the largest error,
-because batch size is not a top-level field and lives inside experiment-specific
-structures. The working form diffs every configuration key across a claim's source
-runs, exempts only free text, and requires each difference to be named. It flagged
-five claims already believed correct, and has since invalidated two of our own
-headline numbers: a crossover point and a recoverable-headroom figure.
-
-**Its coverage is the set of registered claims, not the set of claims made.** The
-headroom figure evaded it for three drafts by living in prose, and was caught only
-when it was registered in order to be checked. §4.3's cache-capacity price, the
-eighth provenance failure and the most recent, evaded it the same way: capacity at
-memory fraction 0.92 was differenced against capacity at 0.80 and the gap
-attributed to ladder length, in a table assembled by hand from two servers' boot
-logs rather than by a script over registered runs. Boot-time facts do not flow
-through the run-recording path, and nothing checks them.
-
-**The four instrument-definition errors are not covered by anything.** A step-count
-criterion that could never pass; a boundary experiment that pooled split dispatches
-it claimed to exclude; a microbenchmark that timed dispatch overhead at 7% of peak
-bandwidth and called it a weight-load floor; and §4.4's placebo, a control cell
-chosen to be inert that ceases to be inert above n=2 once the scheduler packs
-requests into shared steps. Each was caught by a measurement disagreeing with an
-independent one, which is fortunate rather than systematic, and one of them, the
-split pooling, biased upward, in the direction that manufactures a positive result.
-
-The placebo failure is the clearest instance of the class, because the reasoning
-behind it was checkable and was never checked. "Prompt 300 pads to 512 on both
-ladders" is a statement about what the stack executes, and the stack exports what it
-executes: one histogram scrape settled it in under a minute, after both arms had
-already run. Nothing in the machinery asks whether a control is a control. The
-check that would have caught it is cheap and does not exist: assert that the
-executed shape distribution matches the one the design assumes, before treating a
-cell as inert.
-
-The last two classes each produced a mechanical check, and both are cheap: state
-the target as a formula in the lever and show the derivative is nonzero; name the
-quantized dimension a claim belongs to and reject derivations that cross one. Both
-would have fired before hardware was provisioned.
-
-### 6.1 Measurements outlast explanations
-
-Counting the fourteen entries alone conceals a pattern: **the measurements have
-survived revision intact and the explanations have not.** Every headline measurement in §4 still stands as measured. What has been
-withdrawn, in order, is a crossover rule, a recoverable-headroom figure, a
-microbenchmark and the mechanism it claimed to isolate, a memory-bandwidth account
-of free request padding, and the frontier bound derived from that account. Four of
-the last five retractions were mechanism claims, and not one was a number that
-failed to reproduce.
-
-The asymmetry has a procedural cause. Every measurement runs through a
-contract that aborts on an unstated variable, is tied to a run identifier, and is
-recomputed from captured data by a script that exits non-zero on disagreement. **No
-equivalent validation applies to explanations.** A proposed mechanism can be
+**No equivalent validation applies to explanations.** A proposed mechanism can be
 written, accepted, cited by later sections, and carried across successive drafts
-without any stage of the process being able to contradict it. The bandwidth account
-persisted through four sessions of work not because evidence supported it, but
-because no step in the procedure was capable of rejecting it.
+without any stage of the process being able to contradict it. Two instances in this
+paper show the consequence. The bandwidth account of free request padding persisted
+through four sessions of work before §4.1's utilization measurement refuted it, and
+it was never supported by evidence so much as never confronted with any. The
+control cell of §4.4 was chosen on the reasoning that a 300-token prompt pads
+identically on both ladders, which is true only while each request prefills alone;
+one scrape of the executed step distribution settled it, after both arms had run.
 
-Requiring a proposed mechanism to state a falsifiable number in advance is the
-closest available remedy. Three such predictions failed, and
-§1 lists what each produced. The property that makes them useful is that they are
-rejectable: a mechanism stated only in prose cannot be, and this work published
-three of those before withdrawing them.
+The consequence for a reader is that the measurements in §4 and the mechanisms
+offered for them do not carry the same weight, and we present them accordingly.
+Two qualifications keep that statement honest.
 
-We report this as a finding rather than as a methodological remark, and §1 states it
-before any result for that reason. A reader who accepts it will assign greater
-confidence to the measurements of §4 than to its explanations, which is the response
-the evidence warrants.
+First, survival is not uniform. §4.2's paid-share table survived the discovery that
+its rows were measured over different boundary sets as an *ordinal* claim; the
+cardinal values did not. §4.4's rows above n=2 survive as floors rather than
+estimates under burst arrival, and only the isolated-dispatch control recovers
+interval-level statements. A value that reproduces while its interpretation is
+withdrawn has not survived in the sense the word usually carries.
 
----
+Second, the asymmetry is partly a property of what can be checked rather than of
+what is true. A measurement has a value a script can recompute; a mechanism does
+not, so it is never submitted to the check at all, and passing no check is not the
+same as passing one. Our own record limits the stronger reading: four of the errors
+we caught were instrument-definition failures, in which an analysis measured
+something other than its target, and those corrupt numbers rather than explanations.
+No guardrail here covers that class, so we cannot bound residual error in the
+measurements either.
 
 ## 7. Limitations
 
