@@ -243,6 +243,24 @@ padding turns out to be free, per-request length padding does not exist, and onl
 token padding is paid. A measurement of one therefore says nothing about the
 others, and every result below states which dimension it concerns.
 
+These ladders are properties of the scheduler rather than of the model.
+`get_token_paddings`, which builds the D2 ladder, takes a minimum size, a maximum
+size, and a gap; it receives no reference to the model or its configuration, and
+the D3 ladder is constructed the same way. A mixture-of-experts model is
+therefore given the same ladder as a dense one at equal `max_num_batched_tokens`
+and gap, and searching the backend for a per-step expert-capacity shape — a
+fourth quantized dimension, which a mixture-of-experts implementation might
+plausibly have introduced — finds none: the expert-side padding in that stack is
+a static weight layout fixed at load, not a shape the scheduler selects. Three
+dimensions is the complete list for both architectures.
+
+This is read from the implementation rather than measured, which is the right
+kind of evidence for the claim: which shapes exist is a fact about the code, and
+no experiment could establish it more directly. It also bounds what
+architecture-generality can mean here. Whether these results transfer to another
+architecture is a question about cost per padded token, and never about which
+shapes that architecture is padded to.
+
 ---
 
 ## 4. Results
@@ -1262,20 +1280,44 @@ interface, but the operational advice is pinned to this version. §4.7's rule
 mitigates this only partly: it states which ladder to want, while the flags are how
 one currently asks for it.
 
-**Mixture-of-experts models could not be measured on this hardware.** The
-attempt is reported because its obstacle is specific rather than a matter of
-budget. Of the mixture-of-experts architectures `tpu-inference` supports natively,
-`gpt-oss-20b` fails to initialize at TP=4 with a JAX `IndivisibleError`: a
-parameter axis of size 6 cannot be partitioned across four chips. The obstacle is
-not visible in the model's configuration, whose expert count of 32 divides four
-cleanly; it arises in how the backend shards that architecture, and we could not
-determine it without attempting the run. Sharding it at
-TP=2 would divide cleanly but would change a controlled variable that §4.8 shows
-moves the fixed cost by 38%, so the comparison would be confounded rather than
-informative. The other native option, `llama4`, is 109B parameters and exceeds the
-slice. The prediction we would test is that the paid share is roughly unchanged,
-since it is a ratio and padded tokens route to experts exactly as real tokens do,
-but that remains untested.
+**Cost per padded token on a mixture-of-experts model is unmeasured.** No slice
+was available: `v5litepod-4` capacity was refused in thirteen zones across three
+continents, on both on-demand and spot pricing, over a full day of half-hourly
+attempts. The obstacle is capacity rather than budget or design.
+
+What the implementation settles is the direction. In `tpu-inference` 0.25.0 a
+padded token entering the fused expert kernel carries whatever the routing
+top-*k* returned for its unwritten row, and is dispatched to that many real
+experts — eight, for Qwen3-30B-A3B. Two costs follow, and only one has a dense
+analogue. The first is one token's worth of expert compute, which is what a real
+token pays too, and which therefore leaves the paid *share* unchanged, that share
+being a ratio. The second is that a padded token can activate an expert no real
+token in the step required, adding a group to the grouped matmul that would not
+otherwise run. That second term grows as the batch shrinks, which is exactly
+where padded share is already highest (§4.2), and it is the quantity §4.8's
+arithmetic-intensity argument already names as the reason that argument does not
+extend to these models: bytes there scale with distinct experts touched, and
+padding is a way of touching more of them. The backend carries a flag,
+`MOE_ROUTE_PADDING_TO_EXPERT0`, that collapses padding onto a single expert at
+zero weight; it ships disabled, is inert when attention is data-parallel, and
+fails open, serving the unmitigated path if it cannot read the step's valid-token
+count.
+
+The sign survives this; the magnitude does not. Whether the second term is three
+percent of a padded token's cost or sixty decides whether that flag is an
+operational recommendation or a footnote, and no reading of the source answers
+it.
+
+**A published diagnosis of the `gpt-oss-20b` failure was wrong.** An earlier
+draft attributed its refusal to initialize at TP=4 to a parameter axis of size
+six. No axis of that size appears in its configuration. Its weights are MXFP4,
+whose 4-bit values are packed in blocks of 32, and 2880/4 = 720 is not a multiple
+of 32, so a block would straddle two chips. TP=2 divides cleanly but cannot run
+on this hardware: the device mesh is built as (data, tensor) over every visible
+chip, so the product of the two must equal the slice's four, and any data-parallel
+degree above one disables the flag above. With no two-chip topology offered and
+single-chip quota at zero, that model has no configuration available to it here.
+`llama4` remains out of reach at 109B parameters.
 
 **The GPU control is inference-tier hardware.** The L4 has neither the compute
 throughput nor the memory bandwidth of the accelerators most production serving
