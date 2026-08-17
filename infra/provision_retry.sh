@@ -14,6 +14,9 @@ DEADLINE_MIN="${DEADLINE_MIN:-45}"
 PERIOD_SEC="${PERIOD_SEC:-180}"
 DEADMAN_SEC="${DEADMAN_SEC:-5400}"
 ZONES="${ZONES:-us-west4-a us-west1-c us-east1-d us-central1-a us-east5-a us-south1-a}"
+# v5litepod-8 is single-host like the -4, so it is a drop-in. -16 is multi-host
+# and needs every worker driven, so it is deliberately not in the default list.
+ACCEL_LIST="${ACCEL_LIST:-v5litepod-4 v5litepod-8}"
 
 deadline=$(( $(date +%s) + DEADLINE_MIN * 60 ))
 attempt=0
@@ -22,12 +25,17 @@ while [[ $(date +%s) -lt $deadline ]]; do
   attempt=$(( attempt + 1 ))
   # Alternate pools: spot and on-demand are scheduled from different capacity.
   if (( attempt % 2 == 1 )); then pool=spot; else pool=ondemand; fi
-  echo "[retry] attempt $attempt ($pool) $(date -u +%H:%M:%S)"
 
-  if SPOT=$([[ $pool == spot ]] && echo true || echo false) ZONES="$ZONES" \
-       bash "$HERE/provision_first_available.sh" 2>&1 | tail -2; then
-    :
-  fi
+  # Rotate topology too. Three hunts asked only for v5litepod-4 on the
+  # assumption that a bigger slice is harder to schedule -- an assumption
+  # never tested, while the project holds quota for 16 chips. A larger slice
+  # is a different scheduling unit, not merely a scarcer one, so it is worth
+  # asking for when the small one is refused everywhere.
+  for accel in $ACCEL_LIST; do
+    echo "[retry] attempt $attempt ($pool, $accel) $(date -u +%H:%M:%S)"
+    SPOT=$([[ $pool == spot ]] && echo true || echo false) ZONES="$ZONES" \
+      ACCELERATOR_TYPE="$accel" bash "$HERE/provision_first_available.sh" 2>&1 | tail -1
+  done
 
   # Ask the API, never the log prose -- parsing output for success is what
   # billed two slices at once earlier in this project.

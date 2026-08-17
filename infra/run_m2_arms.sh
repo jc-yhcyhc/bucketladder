@@ -2,15 +2,18 @@
 # =============================================================================
 # run_m2_arms.sh — the three M2 MoE arms, end to end, on a slice that already exists.
 # =============================================================================
-# Arms, all at TP=2 and all on the vLLM implementation:
+# Arms, all at TP=4 and all on the vLLM implementation. TP=4 is forced by the
+# hardware, not chosen: the mesh is (model_dp_size, tp_size) over every visible
+# chip, so DP x TP must equal the slice's 4 -- and any DP>1 disables the very
+# flag under test, because the interface gates it on `not is_dp`.
 #
-#   A  m2_moe_gptoss_default   gpt-oss-20b, MOE_ROUTE_PADDING_TO_EXPERT0=0  (stock)
-#   B  m2_moe_gptoss_expert0   gpt-oss-20b, MOE_ROUTE_PADDING_TO_EXPERT0=1  (mitigated)
-#   C  m2_dense_control        Qwen3-4B,    MODEL_IMPL_TYPE=vllm            (dense reference)
+#   A  m2_moe_qwen_default     Qwen3-30B-A3B-FP8, MOE_ROUTE_PADDING_TO_EXPERT0=0 (stock)
+#   B  m2_moe_qwen_expert0     Qwen3-30B-A3B-FP8, MOE_ROUTE_PADDING_TO_EXPERT0=1 (mitigated)
+#   C  m2_dense_control        Qwen3-4B,          MODEL_IMPL_TYPE=vllm           (dense reference)
 #
 # A vs B is the strong comparison: same model, same slice, same ladder, one env
-# var. C gives the dense per-padded-token reference the paper already has at
-# TP=4, re-measured at TP=2 so the MoE contrast is not confounded with TP.
+# var. C gives the dense per-padded-token reference at the paper's own TP=4, so
+# this arm is directly comparable to the existing results.
 #
 # Two things are verified from the warmup log rather than assumed, because both
 # fail silently:
@@ -46,7 +49,7 @@ run_arm() {
   log "    model=$model impl=$impl expert0=$expert0"
 
   if ! ZONE="$ZONE" MODEL_IMPL_TYPE="$impl" MOE_ROUTE_PADDING_TO_EXPERT0="$expert0" \
-       bash "$HERE/boot_and_poll.sh" "$model" 2 "$BOOT_BUDGET"; then
+       bash "$HERE/boot_and_poll.sh" "$model" 4 "$BOOT_BUDGET"; then
     log "    arm $arm FAILED TO BOOT -- recording and moving on"
     ssh_try 'tail -40 /tmp/vllm_warmup.log' > "$ROOT/results/m2_${arm}_bootfail.log" 2>/dev/null
     return 1
@@ -75,9 +78,9 @@ run_arm() {
 
 mkdir -p "$ROOT/results"
 rc=0
-run_arm A m2_moe_gptoss_default openai/gpt-oss-20b auto 0 || rc=1
-run_arm B m2_moe_gptoss_expert0 openai/gpt-oss-20b auto 1 || rc=1
-run_arm C m2_dense_control      Qwen/Qwen3-4B      vllm 0 || rc=1
+run_arm A m2_moe_qwen_default Qwen/Qwen3-30B-A3B-FP8 auto 0 || rc=1
+run_arm B m2_moe_qwen_expert0 Qwen/Qwen3-30B-A3B-FP8 auto 1 || rc=1
+run_arm C m2_dense_control    Qwen/Qwen3-4B          vllm 0 || rc=1
 
 log "pulling artifacts back before anything is torn down"
 bash "$HERE/capture.sh" || log "capture reported a problem -- check before teardown"
