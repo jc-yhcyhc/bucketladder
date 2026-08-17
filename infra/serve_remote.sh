@@ -41,6 +41,11 @@ set -uo pipefail
 # than empty when defaulting: vLLM does int(os.environ[...]) unconditionally
 # when the variable is present, so "" kills the engine (verified 2026-08-09).
 : "${VLLM_TPU_BUCKET_PADDING_GAP:=}"
+# Stack defaults, restated here so a run that sets neither still records what it
+# used. "auto" resolves GptOssForCausalLM to the vllm implementation and
+# Qwen3ForCausalLM to flax_nnx, which is why the dense control pins it.
+: "${MODEL_IMPL_TYPE:=auto}"
+: "${MOE_ROUTE_PADDING_TO_EXPERT0:=0}"
 
 log() { echo "[$(date '+%H:%M:%S')] [serve] $*"; }
 
@@ -137,6 +142,17 @@ cmd_start() {
     unset VLLM_TPU_BUCKET_PADDING_GAP
     log "VLLM_TPU_BUCKET_PADDING_GAP unset (default exponential ladder)"
   fi
+
+  # Both are controlled variables as of 2026-08-17 and both are stated
+  # explicitly rather than left to the stack default, because the default is
+  # what the M2 MoE arms are measuring. env_bool accepts "0"/"1", and
+  # env_with_choices validates against {auto,vllm,flax_nnx,jetpack}, so unlike
+  # VLLM_TPU_BUCKET_PADDING_GAP above an explicit value here is safe.
+  export MODEL_IMPL_TYPE MOE_ROUTE_PADDING_TO_EXPERT0
+  log "MODEL_IMPL_TYPE=$MODEL_IMPL_TYPE  MOE_ROUTE_PADDING_TO_EXPERT0=$MOE_ROUTE_PADDING_TO_EXPERT0"
+  # The flag fails open: if query_start_loc is unreadable the interface warns
+  # once and serves with padding routed normally. Intent is not effect, so the
+  # arm is verified from the log after the run, not from this line.
 
   log "starting: $model  (TP=$TP_SIZE, max_model_len=$MAX_MODEL_LEN)"
   setsid nohup "${serve[@]}" > "$WARMUP_LOG" 2>&1 < /dev/null &
