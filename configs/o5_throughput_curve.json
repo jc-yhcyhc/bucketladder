@@ -16,7 +16,9 @@
     "max_model_len": 8192,
     "gpu_memory_utilization": 0.92,
     "XLA_FLAGS": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "serve_extra_args": "--gpu-memory-utilization 0.92",
   "note_memory": "0.92 -- the STOCK fraction -- on both arms, which is possible only because the arms compared here are the ten-shape default and the fourteen-shape gap-1024 ladder, and S4.9 measured that the fourteen-shape ladder boots at 0.92 with the full 367,360 tokens. The twenty-one-shape ladder cannot be run at 0.92 at all, which is itself the reason it is not the arm under test: comparing it here would require dropping to 0.85 on one side and would reintroduce the memory fraction as a confound, which is failure 14 in S6.",

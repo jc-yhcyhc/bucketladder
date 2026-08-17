@@ -1,22 +1,22 @@
 {
-  "experiment": "m1_dense_fp8",
-  "description": "Designed confirmation that step token padding is not paid at n>1. Straddles a compiled bucket boundary at fixed batch size and near-fixed per-sequence length, so real work moves ~1.6% while padded work doubles. H1 answered this from a natural experiment; this is the randomised version.",
-  "model": "Qwen/Qwen3-4B-FP8",
+  "experiment": "m2_dense_control",
+  "description": "Arm C. Dense control at matched TP=2. A dense model has no expert dispatch, so this flag is inert here; it is recorded to keep the three arms diffable. Straddles the 512/1024 token bucket edge so padded work roughly doubles while real work moves ~1.6%, isolating per-padded-token cost rather than inferring it from a throughput difference. Pinned to the vLLM implementation to match the MoE arms; if it refuses to boot, the fallback is auto (flax_nnx) with the implementation confound stated in the result.",
+  "model": "Qwen/Qwen3-4B",
   "tpu_type": "v5litepod-4",
   "warmup_log_path": "/tmp/vllm_warmup.log",
   "controlled": {
     "enable_prefix_caching": false,
     "enable_chunked_prefill": true,
     "max_num_batched_tokens": 8192,
-    "tensor_parallel_size": 4,
+    "tensor_parallel_size": 2,
     "speculative_model": null,
     "kv_cache_dtype": "auto",
     "VLLM_TPU_BUCKET_PADDING_GAP": "",
-    "max_model_len": 8192,
+    "max_model_len": 4096,
     "gpu_memory_utilization": 0.92,
     "XLA_FLAGS": "",
     "ATTN_BUCKETIZED_NUM_REQS": false,
-    "MODEL_IMPL_TYPE": "auto",
+    "MODEL_IMPL_TYPE": "vllm",
     "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "output_len": 1,
@@ -41,6 +41,10 @@
   "note_prediction": "REGISTERED. The paid share is a ratio, (measured - real)/(padded - real), and padded tokens route to experts exactly as real tokens do, so if MoE changes cost per token it changes numerator and denominator together. We predict the paid share is unchanged between these two arms within the interval the edge supports. A difference would mean routing treats padded and real tokens differently, which no part of the mechanism in \u00a74.2 anticipates.",
   "dimension": "D2",
   "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction.",
-  "note_model": "Dense control at matched dtype. FP8 is the only precision in which an MoE model fits this slice, and \u00a74.8 argues dtype moves the arithmetic-intensity ridge, so a bf16 dense baseline would confound quantization with MoE routing. Qwen3-4B-FP8 holds family, head_dim and dtype fixed against the MoE arm and has 4B dense parameters against its ~3B active.",
-  "note_confounds": "Not fully matched: the MoE arm is GQA 8:1 with 48 layers, the dense arm GQA 4:1 with 36 layers. Those affect attention cost, while the paid share concerns token padding in a matmul-dominated prefill step, so they are expected to bias little; they are stated rather than corrected because no smaller Qwen3 MoE exists."
+  "note_model": "MoE arm. 30.5B total, ~3B active, Qwen3MoeForCausalLM. The only mixture-of-experts model that is both in tpu-inference's JAX registry and small enough for a v5litepod-4: gpt-oss-20b fits but fails TP=4 sharding, Llama-4-Scout is 217 GB, DeepSeek-V3 is 685 GB, and DeepSeek-V2-Lite, deepseek-moe-16b, Qwen1.5-MoE and OLMoE are architectures the registry does not accept.",
+  "note_confounds": "Not fully matched: the MoE arm is GQA 8:1 with 48 layers, the dense arm GQA 4:1 with 36 layers. Those affect attention cost, while the paid share concerns token padding in a matmul-dominated prefill step, so they are expected to bias little; they are stated rather than corrected because no smaller Qwen3 MoE exists.",
+  "independent_vars": {
+    "tensor_parallel_size": "gpt-oss-20b is MXFP4; 2880/4=720 is not 32-aligned so a 4-bit block would straddle two chips at the paper's TP=4. TP=2 gives 1440=45*32. The dense control moves to TP=2 as well so MoE-vs-dense is not confounded with TP.",
+    "MODEL_IMPL_TYPE": "Pinned to 'vllm' rather than 'auto'. Captured warmup logs show Qwen3ForCausalLM resolves auto->flax_nnx, while GptOssForCausalLM resolves auto->vllm via _VLLM_PREFERRED_ARCHITECTURES. Left at auto, the MoE-vs-dense contrast would confound architecture with implementation."
+  }
 }

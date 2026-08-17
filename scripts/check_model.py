@@ -174,10 +174,29 @@ def evaluate(model: str, cfg: dict[str, Any], files: list[str],
     inter = cfg.get("intermediate_size")
     head_dim = cfg.get("head_dim") or (hidden // heads if hidden and heads else None)
 
+    # MoE models carry a second FFN width and an expert count, and both shard.
+    # The dense rules below missed all of it, which is why an MoE boot could fail
+    # on an axis this checker had never looked at.
+    n_exp = cfg.get("num_local_experts", cfg.get("num_experts"))
+    moe_inter = cfg.get("moe_intermediate_size")
     for name, v in (("num_attention_heads", heads), ("num_key_value_heads", kv),
-                    ("intermediate_size", inter)):
+                    ("intermediate_size", inter),
+                    ("moe_intermediate_size", moe_inter),
+                    ("num_experts", n_exp)):
         if v is not None and v % tp != 0:
             fatal.append(f"{name}={v} is not divisible by TP={tp} (IndivisibleError at load)")
+
+    # MXFP4 packs two 4-bit values per byte in 32-element blocks. A per-shard FFN
+    # width that is not 32-aligned splits a block across chips.
+    qmethod = (cfg.get("quantization_config") or {}).get("quant_method")
+    if qmethod:
+        warn.append(f"quantization is '{qmethod}'; confirm tpu-inference implements it on TPU "
+                    f"before trusting a boot failure as a property of the model")
+    if qmethod and "mxfp4" in str(qmethod).lower():
+        for name, v in (("intermediate_size", inter), ("moe_intermediate_size", moe_inter)):
+            if v is not None and (v // tp) % 32 != 0:
+                fatal.append(f"{name}={v} gives {v // tp} per shard at TP={tp}, which is not "
+                             f"32-aligned; an MXFP4 block would straddle two chips")
 
     maxpos = cfg.get("max_position_embeddings")
     if maxpos and maxpos < max_model_len:

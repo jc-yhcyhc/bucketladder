@@ -43,6 +43,13 @@ def good_controlled(**overrides):
         # Default False. Added to the contract 2026-08-10 once M2 began sweeping
         # it; every run before that used the default.
         "ATTN_BUCKETIZED_NUM_REQS": False,
+        # Promoted to a control in session 25. Absent from this fixture until
+        # 2026-08-17, which silently red-lit every test that builds a compliant
+        # config -- the contract's own tests stopped exercising the contract.
+        "gpu_memory_utilization": 0.92,
+        # Added 2026-08-17 for the M2 MoE arms.
+        "MODEL_IMPL_TYPE": "auto",
+        "MOE_ROUTE_PADDING_TO_EXPERT0": False,
     }
     base.update(overrides)
     return base
@@ -338,8 +345,11 @@ def test_controlled_vars_list_is_not_silently_shrunk():
         "kv_cache_dtype",
         "VLLM_TPU_BUCKET_PADDING_GAP",
         "max_model_len",
+        "gpu_memory_utilization",
         "XLA_FLAGS",
         "ATTN_BUCKETIZED_NUM_REQS",
+        "MODEL_IMPL_TYPE",
+        "MOE_ROUTE_PADDING_TO_EXPERT0",
     }
 
 

@@ -16,7 +16,9 @@
     "max_model_len": 8192,
     "gpu_memory_utilization": 0.8,
     "XLA_FLAGS": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "serve_extra_args": "--gpu-memory-utilization 0.80",
   "note_memory": "0.80 on BOTH arms, not a free choice: at vLLM 0.25.0's default of 0.92 the 21-shape ladder does not boot at all (RESOURCE_EXHAUSTED, 32.50M requested against 12.40M free, reproduced byte-identically on two independently provisioned v5e-4 hosts). Matching the arms at 0.80 is what makes them comparable; see configs/o1_ladder_cost.json.",

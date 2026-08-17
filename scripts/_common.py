@@ -92,6 +92,27 @@ CONTROLLED_VARS: dict[str, Any] = {
     # took effect is the warmup log, where "Prepared attn request paddings"
     # prints the full ladder instead of [256].
     "ATTN_BUCKETIZED_NUM_REQS": REQUIRE_EXPLICIT,
+    # Decides which implementation serves the model, and therefore whether
+    # MOE_ROUTE_PADDING_TO_EXPERT0 below has any effect at all. "auto" resolves
+    # GptOssForCausalLM and Qwen3MoeForCausalLM to the vLLM implementation via
+    # _VLLM_PREFERRED_ARCHITECTURES; the flax_nnx path for the same model has no
+    # padding-awareness whatsoever, so the same flag on the same model would
+    # measure nothing. Recorded because "auto" is a resolution, not a value.
+    "MODEL_IMPL_TYPE": REQUIRE_EXPLICIT,
+    # tpu-inference default False. When False, padding tokens carry whatever
+    # top_k returned for their garbage rows and are dispatched to k real experts
+    # (4 for gpt-oss-20b, 8 for Qwen3-30B-A3B), which can widen the active
+    # expert set and slow the gmm. When True, they collapse onto expert 0 at
+    # weight 0. This is the independent variable of the M2 MoE arms, so it is
+    # swept -- but an unrecorded value would make a MoE-vs-dense padding cost
+    # uninterpretable, because the default is the expensive path.
+    #
+    # It fails OPEN: if query_start_loc cannot be read from the attention
+    # metadata the interface logs a warning once and serves with padding routed
+    # normally. So the config value is an intent, and the check that it took
+    # effect is the absence of "MOE_ROUTE_PADDING_TO_EXPERT0: failed to read
+    # num_valid_tokens" in the server log.
+    "MOE_ROUTE_PADDING_TO_EXPERT0": REQUIRE_EXPLICIT,
 }
 
 

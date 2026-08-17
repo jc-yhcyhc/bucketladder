@@ -17,7 +17,9 @@
     "max_model_len": 8192,
     "gpu_memory_utilization": 0.92,
     "XLA_FLAGS": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "note_arch": "Qwen3-4B dimensions as published in the model's HF config. Stated here rather than hardcoded in the script so the parameter count the roofline rests on is auditable against the source, and so a second model can be added by adding a config.",
   "arch": {

@@ -15,7 +15,9 @@
     "max_model_len": 8192,
     "gpu_memory_utilization": 0.92,
     "XLA_FLAGS": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "buckets": [
     256,

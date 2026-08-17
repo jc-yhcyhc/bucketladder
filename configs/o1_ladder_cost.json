@@ -16,7 +16,9 @@
     "max_model_len": 8192,
     "gpu_memory_utilization": 0.8,
     "XLA_FLAGS": "",
-    "ATTN_BUCKETIZED_NUM_REQS": false
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
   },
   "serve_extra_args": "--gpu-memory-utilization 0.80",
   "note_memory": "gpu_memory_utilization is pinned to 0.80 on BOTH arms, and that pinning is itself a result. At the stack default of 0.92 (vLLM 0.25.0 EngineArgs, read off the installed package rather than the docs) the 21-shape ladder does not boot: it dies in warmup with RESOURCE_EXHAUSTED, 'Attempting to allocate 32.50M ... There are 12.40M free', byte-identical across two independently provisioned v5e-4 hosts (2026-08-11 and 2026-08-12), while the 10-shape ladder boots and serves on the same host, same script, same model, same TP. Compiled executables are charged against the same HBM the KV cache is sized to fill, so doubling the ladder can cost the whole headroom. Backing off to 0.80 buys room for the 21 shapes at a measured price of 55,040 tokens of KV capacity (367,360 -> 312,320, -15.0%). That is the honest shape of this optimisation: the finer ladder is not merely more expensive, it is infeasible until KV capacity is given up.",
