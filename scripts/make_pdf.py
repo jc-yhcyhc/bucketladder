@@ -215,7 +215,7 @@ def convert(md: str) -> str:
             if caption:
                 cap_tex = ("\\caption{" + inline(caption) + "}"
                            + ("\\label{" + label + "}" if label else ""))
-            if longest_cell > 34:
+            if longest_cell > 34 or (ncol < 6 and widest <= 48):
                 # Long prose cells must WRAP. tabularx does that, but only for
                 # the columns declared X, and the wide column is NOT always the
                 # last one: in the failure taxonomy it is the third of four, so
@@ -223,6 +223,20 @@ def convert(md: str) -> str:
                 # ("what it isprovenance", "used under another" -> "one confi").
                 # Declare X for EVERY column that carries long text, so the slack
                 # is distributed among the columns that actually need it.
+                #
+                # The `ncol < 6 and widest <= 48` half used to be the ELSE case
+                # below: a plain \tabular sized to its own natural width, with
+                # nothing constraining that width to \columnwidth. widest<=48 was
+                # meant as "safe," but it is a character count, not a font metric
+                # -- Table: Ladder placement with and without prefix caching hit
+                # widest=48 exactly and still overflowed into the facing column,
+                # with no Overfull \hbox warning to catch it, because an
+                # unconstrained tabular has nothing to be overfull AGAINST. Every
+                # table this heuristic calls "narrow" now gets the same
+                # \columnwidth-pinned tabularx as a genuinely wide one; wide=[]
+                # falls back to wide=[ncol-1] below, so a table with no
+                # individually-long cell still gets one X column and cannot
+                # exceed its box regardless of how the character count guessed.
                 colmax = [max(len(r[c]) if c < len(r) else 0 for r in rows)
                           for c in range(ncol)]
                 wide = [c for c, w in enumerate(colmax) if w > 20]
@@ -255,18 +269,19 @@ def convert(md: str) -> str:
                          cap_tex,
                          "\\begin{tabularx}{\\columnwidth}{" + xspec + "}\\hline"]
                     close = "\\hline\\end{tabularx}\\end{table}"
-            elif ncol >= 6 or widest > 48:
-                # Short cells, too many for one column: span the page at a
-                # readable size rather than scaling the whole table down.
+            else:
+                # ncol >= 6 or widest > 48, and not caught above: short cells,
+                # too many for one column. Span the page at a readable size
+                # rather than scaling the whole table down. This is a natural-
+                # width tabular across \textwidth rather than \columnwidth, so
+                # it has roughly twice the margin the removed narrow branch
+                # had -- every measured table here (widest <= 112) clears it --
+                # but it is the same style of unconstrained width and could
+                # in principle repeat this bug for a wide enough table.
                 t = ["\\begin{table*}[tbp]\\centering\\footnotesize",
                      cap_tex,
                      "\\begin{tabular}{" + spec + "}\\hline"]
                 close = "\\hline\\end{tabular}\\end{table*}"
-            else:
-                t = ["\\begin{table}[tbp]\\centering\\small",
-                     cap_tex,
-                     "\\begin{tabular}{" + spec + "}\\hline"]
-                close = "\\hline\\end{tabular}\\end{table}"
             t.append(" & ".join(f"\\textbf{{{inline(c)}}}" for c in head) + r" \\ \hline")
             for r in data:
                 r = r + [""] * (ncol - len(r))
