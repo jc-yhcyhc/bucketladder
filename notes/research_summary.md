@@ -1,6 +1,6 @@
 # Research summary — what was done, and what it showed
 
-**Twenty-one hardware sessions on `v5litepod-4`, [redacted] of a $1,000 ceiling, 73
+**Twenty-one hardware sessions on `v5litepod-4`, well under the $1,000 ceiling, 73
 verified numerical claims, 192 tests.** Every number regenerates from
 `captured/` via `./reproduce_all.sh`, which exits non-zero if any disagrees.
 
@@ -463,14 +463,14 @@ a single load point with no saturation curve.
 
 ## 8. Cost
 
-| phase | sessions | spend |
-|---|---|---|
-| Bring-up through the premise falsification | 1–6 | ~$21 |
-| Mechanism, LENS, regime map | 7–12 | ~$20 |
-| Review response: workload, launcher | 13 | [redacted] |
-| Review response: TP ablation, n=16 | 14 | [redacted] |
-| Review response: operator profile | 15 | [redacted] |
-| **Total** | **15** | **[redacted]** of $1,000 |
+| phase | sessions |
+|---|---|
+| Bring-up through the premise falsification | 1–6 |
+| Mechanism, LENS, regime map | 7–12 |
+| Review response: workload, launcher | 13 |
+| Review response: TP ablation, n=16 | 14 |
+| Review response: operator profile | 15 |
+| **Total** | **15** |
 
 A separate GCE instance unrelated to this project, running since 2026-07-31,
 has cost roughly **four times** the entire research programme. The per-session
