@@ -22,7 +22,7 @@ fitted_params.yaml}`, `infersim/{sim,policies/capacity,eval}/`,
 `reproduce_all.sh`, `gapcache/notes/{kill_condition.md,prior_art.md}`.
 
 Host state confirms v2's bring-up argument: Python 3.11.2, git, gcloud (project
-`gcp-project-id-redacted`), 16 cores / 62 GB, **no `/dev/accel*`, no jax, no vllm,
+id redacted), 16 cores / 62 GB, **no `/dev/accel*`, no jax, no vllm,
 no pyarrow**. `~/DeterministicInfer` is empty. Nothing runs today.
 
 ---

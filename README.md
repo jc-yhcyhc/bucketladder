@@ -3,7 +3,7 @@
 **What compiled-shape padding actually costs in production TPU serving.**
 
 A measurement study of vLLM 0.25.0 + `tpu-inference` 0.25.0 on `v5litepod-4`.
-Fifteen hardware sessions, **[redacted]**, 66 verified claims, 184 tests.
+Fifteen hardware sessions, 66 verified claims, 184 tests.
 
 TPU executables are compiled for fixed tensor shapes, so a serving stack rounds
 every workload up to a precompiled ladder. The obvious inference — that rounding
