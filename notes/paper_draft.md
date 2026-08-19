@@ -1137,14 +1137,18 @@ It is future work rather than a result, and nothing above depends on it.
 
 ## 5. Optimizations designed against these measurements
 
-Table: Optimizations designed against the compiled-shape premise, and their outcomes. Each rejection identifies a dimension the measurements show carries no cost. {#tab:opts}
-| intervention | outcome |
-|---|---|
-| **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; beats BucketServe's objective by 1.61 ms at equal shape count; −1.7% once prefix caching is on (§4.3–§4.7)** |
-| bucket-aware admission control | premise false (§4.2) |
-| ladder redesign on the request dimension | D1 does not exist; D3 inert by default |
-| last-chunk decomposition | **20.6% worse** measured (51.06 vs 42.33 ms) |
-| bucket-aligned step packing | implemented twice: inert, then output-corrupting |
+Five interventions were designed against the compiled-shape premise. Each
+rejection below identifies a dimension the measurements show carries no cost:
+
+- **Ladder placed against the workload** — works: −12.1% at n=2 and −46% p50
+  below the knee, at full memory; beats BucketServe's objective by 1.61 ms at
+  equal shape count; −1.7% once prefix caching is on (§4.3–§4.7).
+- **Bucket-aware admission control** — premise false (§4.2).
+- **Ladder redesign on the request dimension** — D1 does not exist; D3 inert by
+  default.
+- **Last-chunk decomposition** — 20.6% worse measured (51.06 vs 42.33 ms).
+- **Bucket-aligned step packing** — implemented twice: inert, then
+  output-corrupting.
 
 The one that works targets the single dimension the measurements leave open, and
 the rejections are informative rather than incidental. Three of them address the
