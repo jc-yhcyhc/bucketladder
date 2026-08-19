@@ -100,10 +100,10 @@ Verified pricing (Aug 2026), against `tpu-inference`'s compatibility list:
 
 | TPU | On-demand $/chip-hr | Spot | `tpu-inference` status |
 |---|---|---|---|
-| v4 | [redacted] | ~[redacted] | experimental |
-| **v5e** | **[redacted]** | **~[redacted]** | **recommended** |
-| v5p | [redacted] | ~[redacted] | experimental |
-| v6e | [redacted] | — | recommended |
+| v4 | $3.22 | ~$0.96 | experimental |
+| **v5e** | **$1.20** | **~$0.35** | **recommended** |
+| v5p | $4.20 | ~$1.45 | experimental |
+| v6e | $2.70 | — | recommended |
 | v7x | — | — | recommended |
 
 Going older costs *more*, not less: v4 is 2.7× v5e on-demand and is experimental in `tpu-inference`, as are v3 and v5p. An experimental backend is the worst place to run this particular paper, because every pathology you find becomes ambiguous between "real finding" and "porting artifact" — the same argument your doc already makes for preferring Gemma's well-tested path.
@@ -114,7 +114,7 @@ Gemma-3-4b at bf16 is ~8 GB of weights and fits comfortably; Llama-3.1-8B at ~16
 
 ### Budget: spot for sweeps, on-demand for anything you intend to keep
 
-Spot v5e-4 is ~$1.40/hr against [redacted] on-demand. Split by whether a preemption is recoverable:
+Spot v5e-4 is ~$1.40/hr against $4.80 on-demand. Split by whether a preemption is recoverable:
 
 | Allocation | Hours | Pricing | Cost |
 |---|---|---|---|

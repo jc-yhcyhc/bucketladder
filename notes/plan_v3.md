@@ -56,7 +56,7 @@ Models: Gemma-3-4b (bf16, ~8 GB) primary; Llama-3.1-8B (~16 GB, reduced `max_mod
 
 ## Budget — billed VM-hours, not benchmark-hours
 
-**This is the correction that matters most.** A TPU VM bills while it *exists*, not while it runs a benchmark. v2 allocated "40 hours for W0 bring-up = $192," but bring-up is a week of calendar — gated-repo stalls, install, audits. A VM left up across that week is 168 h × [redacted] = **$806**, which alone nearly exhausts the ceiling.
+**This is the correction that matters most.** A TPU VM bills while it *exists*, not while it runs a benchmark. v2 allocated "40 hours for W0 bring-up = $192," but bring-up is a week of calendar — gated-repo stalls, install, audits. A VM left up across that week is 168 h × $4.80 = **$806**, which alone nearly exhausts the ceiling.
 
 **Teardown discipline, non-negotiable:**
 - Delete the VM at the end of every working session. Re-create from `infra/create_tpu.sh` — which is why that script must be re-runnable rather than one-shot.

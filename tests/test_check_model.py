@@ -2,7 +2,7 @@
 The model preflight is pinned against the boots that actually failed.
 
 Each case below is a configuration this project really tried on a v5e-4. Two of
-them cost a server boot each (~[redacted] and ~12 minutes) before the rule existed;
+them cost a server boot each (~$1.60 and ~12 minutes) before the rule existed;
 a third, OLMo-2, was caught by the checker before it was ever booted. If a
 future dependency bump changes these answers, that is a real signal and this
 test should fail loudly rather than be relaxed.

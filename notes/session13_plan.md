@@ -5,7 +5,7 @@ already done and committed; this file covers only what needs a TPU, in the order
 it should run, with what each step decides.
 
 **Budget:** ~$15 at on-demand $4.80/hr, ~3 hours of billed VM time. Running total
-would move from [redacted] to ~$56. Ceiling is $1,000.
+would move to ~$56, well under the $1,000 ceiling.
 
 **Why on-demand rather than spot:** two of these four are paired A/B comparisons
 on one server. A preemption mid-arm does not corrupt a preemptible sweep, but it

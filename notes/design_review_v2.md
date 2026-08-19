@@ -60,7 +60,7 @@ v2: *"Your $4.80/hr on-demand figure in `infersim/calibration/fitted_params.yaml
 is measured rather than guessed."*
 
 The file contains `price_per_chip_hour: 1.2` — a **list price constant**, not a
-measurement, and not [redacted] (that's 4 × 1.2, derived in the doc, not read from the
+measurement, and not $4.80 (that's 4 × 1.2, derived in the doc, not read from the
 file). What *is* measured in that file is `warmup_time_sec: 57.0`,
 `prefill_tokens_per_sec: 13310`, `decode_tokens_per_sec: 1874`.
 
