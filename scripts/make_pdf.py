@@ -247,11 +247,23 @@ def convert(md: str) -> str:
                 # table gave "class" as much width as "what it is". Weight each
                 # X column by its own content length, normalised so the weights
                 # sum to the number of X columns, which is what tabularx expects.
-                tot = sum(colmax[c] for c in wide) or 1
+                #
+                # Pure proportion has the opposite failure at a wider ratio: the
+                # optimizations table paired a short label column (colmax ~40)
+                # against a paragraph-length outcome column (colmax ~180), a
+                # 4.5x spread, and gave the label column 18% of the row -- too
+                # narrow for its own words, so it broke mid-word ("work-",
+                # "load"; "admis-", "sion"). Floor every column at a fraction of
+                # the widest one before normalising, so a short column keeps
+                # enough room for its longest word even beside a long neighbour.
+                peak = max(colmax[c] for c in wide)
+                MIN_RATIO = 0.35
+                adj = {c: max(colmax[c], MIN_RATIO * peak) for c in wide}
+                tot = sum(adj.values()) or 1
                 parts = []
                 for c in range(ncol):
                     if c in wide:
-                        w = len(wide) * colmax[c] / tot
+                        w = len(wide) * adj[c] / tot
                         parts.append(f">{{\\hsize={w:.2f}\\hsize}}X")
                     else:
                         parts.append("l")

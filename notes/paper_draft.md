@@ -1138,7 +1138,7 @@ It is future work rather than a result, and nothing above depends on it.
 ## 5. Optimizations designed against these measurements
 
 Table: Optimizations designed against the compiled-shape premise, and their outcomes. Each rejection identifies a dimension the measurements show carries no cost. {#tab:opts}
-| | outcome |
+| intervention | outcome |
 |---|---|
 | **ladder placed against the workload** | **works: −12.1% at n=2 and −46% p50 below the knee, at full memory; beats BucketServe's objective by 1.61 ms at equal shape count; −1.7% once prefix caching is on (§4.3–§4.7)** |
 | bucket-aware admission control | premise false (§4.2) |
