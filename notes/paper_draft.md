@@ -54,8 +54,8 @@ Both designs create the same apparent inefficiency, and a literature has grown
 around removing it. **BucketServe** derives an optimal length-bucket boundary and
 then declines to compute it, describing it as *"computationally expensive to
 calculate in practice."* **LAPS** captures a graph per `(length, batch)` cell and
-notes that *"the number of graphs must be limited."* Both take for granted that the
-padding they manage is paid at run time.
+notes that *"the number of graphs must be limited."* Both take padding paid at
+run time for granted.
 
 This paper instruments the three quantized dimensions of a TPU serving stack,
 isolates the mechanism responsible for each, and repeats the central measurement on
@@ -75,53 +75,51 @@ response; §6 reports what that asymmetry does and does not license.
    alike; what shape coverage costs is paid at boot, not per step. The GPU comparison covers the
    request dimension, which is the dimension graph capture quantizes.
 2. **The request ladder reported by the TPU stack differs from the one its
-   attention kernel executes** (§4.1). This can be confirmed directly from the
-   source code, by a paired hardware experiment, and from the compiler-emitted
-   kernel name.
-   It is absent from the RPA (Ragged Paged Attention) paper, from LENS, and from vendor documentation.
+   attention kernel executes** (§4.1) — confirmed from the source code, a paired
+   hardware experiment, and the compiler-emitted kernel name, and absent from the
+   RPA (Ragged Paged Attention) paper, from LENS, and from vendor documentation.
 3. **A mechanism for free request padding** (§4.1): the ragged kernel performs
    under 0.7 µs of work per padded slot, against 27.5 µs if it were paid,
    established by reducing the compiled slot count by a factor of 32 for a −0.9%
-   change. The memory-bandwidth explanation that the same data invites is tested
-   and rejected.
+   change. The memory-bandwidth explanation the same data invites is tested and
+   rejected.
 4. **Ladder design as placement rather than cardinality** (§4.3, Appendix §10.3): a
    fourteen-shape ladder placed against the workload reduces end-to-end latency by
    12.1% at no memory cost, while a uniformly finer ladder achieves the same
    reduction and additionally costs 8.8% of cache capacity and 53% more startup.
    The choice can be made offline from a length distribution, predicting the
    measured result to within 5%.
-5. **When ladder placement pays, and when it does not** (Appendix §10.1, Appendix §10.2, Appendix §10.3). The
-   reduction is a latency gain below saturation rather than added capacity: median
-   latency falls 46% just below the knee, while sustained throughput rises 2.6% at
-   it. Enabling prefix caching, which production vLLM does by default, shortens the
-   prefill onto a different compiled entry and reduces the same placement's benefit
-   from 12.3% to 1.7%, so entries must be placed against uncached prefill lengths.
-6. **A test of the measurements by construction** (§5). Four optimizations were
-   designed against the premise and rejected, and their failures are what the
-   measurements predict: those aimed at the request dimension or at per-request
-   length padding cannot pay, because §4.1 and §4.2 find no cost there to recover.
+5. **When ladder placement pays, and when it does not** (Appendix §10.1–§10.3): a
+   latency gain below saturation rather than added capacity — median latency falls
+   46% just below the knee, sustained throughput rises 2.6% at it — and one that
+   shrinks from 12.3% to 1.7% once prefix caching (vLLM's default) moves the
+   prefill onto a different compiled entry, so entries must target uncached
+   prefill lengths.
+6. **A test of the measurements by construction** (§5): four optimizations
+   designed against the premise and rejected, their failures matching what the
+   measurements predict — those aimed at the request dimension or per-request
+   length padding cannot pay, since §4.1 and §4.2 find no cost there to recover.
 
-**Scope.** This is primarily a measurement study. The single intervention it
-reports (§4.3) is set through a documented environment variable rather than a
-patch, so the measurement does not depend on the correctness of a modified
-scheduler.
+**Scope.** Primarily a measurement study; its single intervention (§4.3) is set
+through a documented environment variable rather than a patch, so the measurement
+does not depend on a modified scheduler's correctness.
 
 ---
 
 ## 2. Method
 
-**Controlled variables.** Chunked prefill is **enabled** throughout, which is the
-stack's default and the configuration production runs; §4.2 reports a
+**Controlled variables.** Chunked prefill is **enabled** throughout — the stack's
+default and the configuration production runs; §4.2 reports a
 `--no-enable-chunked-prefill` control for the one result where it could be
-confounding. This matters for how the ladder results should be read. Under chunked
-prefill the scheduler selects a compiled shape for the *packed step*, not for an
-individual request, so a statement that a 1200-token prompt pads to 2048 describes
-what executes only while that prompt prefills alone in its step. At the two
-concurrent requests of §4.3 it does, and the evidence is internal to the
-measurement: two cells saving 512 and 1024 padded tokens agree on cost per padded
+confounding. This matters for how the ladder results should be read: under
+chunked prefill the scheduler selects a compiled shape for the *packed step*, not
+for an individual request, so a statement that a 1200-token prompt pads to 2048
+describes what executes only while that prompt prefills alone in its step. At the
+two concurrent requests of §4.3 it does, and the evidence is internal to the
+measurement — two cells saving 512 and 1024 padded tokens agree on cost per padded
 token to within 1%, which co-scheduling would not produce, since a packed step
-would save a different amount in each cell. Appendix §10.1 measures where that ceases to hold
-and Appendix §10.3 restores it deliberately by staggering arrivals.
+would save a different amount in each cell. Appendix §10.1 measures where that
+ceases to hold and Appendix §10.3 restores it deliberately by staggering arrivals.
 
 Prefix caching is disabled and asserted, except in Appendix §10.2
 where it is the treatment. Chunked prefill, `max_model_len`,
@@ -132,16 +130,15 @@ disagrees with the configuration it reports. The check has rejected three runs i
 which a controlled variable had drifted, and one in which a control was varied
 deliberately and declared.
 
-**Units.** All timings are measured server-side, as differences between Prometheus
-histogram snapshots taken before and after each measurement block. Client-side
-wall-clock timings are not used, because they include round-trip time, HTTP
-overhead, tokenization and queueing delay.
-
-**Scope of instruments.** A step-scoped property requires a step-scoped instrument.
-Single-step execution is verified per dispatch from the count delta of
-`iteration_tokens_total`, and dispatches that split are excluded rather than
-averaged. §6 notes that errors of this kind — an analysis that measures something
-other than its target — are the one class no check described here covers.
+**Units and instrument scope.** All timings are measured server-side, as
+differences between Prometheus histogram snapshots taken before and after each
+measurement block; client-side wall-clock timings are not used, since they
+include round-trip time, HTTP overhead, tokenization and queueing delay. A
+step-scoped property requires a step-scoped instrument: single-step execution is
+verified per dispatch from the count delta of `iteration_tokens_total`, and
+dispatches that split are excluded rather than averaged. §6 notes that errors of
+this kind — an analysis that measures something other than its target — are the
+one class no check described here covers.
 
 **Request arrival.** Where a measurement requires *n* requests to reach the
 scheduler within one step, they are released from a thread barrier after every
@@ -164,16 +161,15 @@ than milliseconds. §4.2 shows that this changes what is measurable.
   model's prediction exceeds the measurement, as a fraction of the prediction.
 
 **Registered predictions.** A proposed mechanism must state a falsifiable number
-before the measurement that would test it, recorded in the experiment's
-configuration file and therefore fixed before any result is seen. The requirement
-exists because a mechanism stated only in prose cannot be rejected by any check in
-this pipeline, whereas a number can. Three such predictions failed during this
-work, and each produced a result its confirmation would not have: the sharding
-ablation yielded a two-term cost model bounding per-step fixed overhead (Appendix §10.4), the
-model-scale ablation established that the regime map is set by batch size and dtype
-rather than by parameter count (Appendix §10.4), and the concurrency sweep identified that
-padding migrates from individual requests to the packed step under chunked prefill
-(Appendix §10.1).
+before the measurement that tests it, fixed in the run's configuration file before
+any result is seen — a mechanism stated only in prose cannot be rejected by any
+check in this pipeline, whereas a number can. Three such predictions failed during
+this work, each producing a result its confirmation would not have: the sharding
+ablation yielded a two-term cost model bounding per-step fixed overhead (Appendix
+§10.4), the model-scale ablation found the regime map set by batch size and dtype
+rather than parameter count (Appendix §10.4), and the concurrency sweep found
+padding migrating from individual requests to the packed step under chunked
+prefill (Appendix §10.1).
 
 **Statistics.** Medians over repeats, with 95% confidence intervals from 10,000
 bootstrap resamples. Intervals are reported wherever a claim depends on the size of
@@ -255,50 +251,27 @@ compiled for, and the field holding the request-slot count reads 256 regardless 
 the batch actually being served. The stack therefore reports, in its own
 compilation output, that attention runs at 256 slots.
 
-The third is an operator-level measurement. With prompt and output length fixed, so that per-sequence key–value state is constant, attention device time
-aggregated over a full 64-step generation is:
-
-Table: Attention device time aggregated over a 64-step generation, at fixed per-sequence key-value state. {#tab:attn}
-| n | 1 | 2 | 4 | 8 | 16 |
-|---|---|---|---|---|---|
-| attention (µs) | 16 830 | 26 011 | 45 919 | 85 103 | **163 535** |
-| per real request | 16 830 | 13 005 | 11 480 | 10 638 | 10 221 |
-
-These figures alone do not discriminate between the hypotheses. The apparent
-argument — that a kernel doing work for 256 padded slots would be flat in n, that
-this is not flat, and therefore that padded slots are skipped — fails because
-flatness was never the alternative. Padded slots hold no key–value blocks, so no
-kernel could do work proportional to their state. The only cost padding can
-plausibly carry is a fixed per-slot overhead: walking 256 block-table entries,
-loading 256 metadata records, launching tiles across 256 slots regardless of
-occupancy. Such a cost is constant in n by construction. Fitting `T = a·n + b` through the endpoints ([tab:attnfit]):
-
-Table: Fitting the attention table to a linear model with a fixed term. {#tab:attnfit}
-| n | 1 | 2 | 4 | 8 | 16 |
-|---|---|---|---|---|---|
-| measured | 16 830 | 26 011 | 45 919 | 85 103 | 163 535 |
-| 9 780·n + 7 050 | 16 830 | 26 610 | 46 171 | 85 292 | 163 535 |
-
-Residuals are under 2.3%, and the fixed term is 7 050 µs, or 42% of attention time
-at n=1, falling to 4% at n=16. If that term were a 256-slot padding cost it would
-amount to 27.5 µs per padded slot. The table is equally consistent with padded
-slots being skipped and with a fixed cost being paid for all 256, and so cannot
-establish either.
+The third is an operator-level measurement, and by itself it cannot discriminate
+between the hypotheses either. With prompt and output length fixed, attention
+device time over a full 64-step generation rises from 16,830 µs at n=1 to
+163,535 µs at n=16 — not flat, but flatness was never the alternative, since
+padded slots hold no key–value blocks and no kernel could do work proportional to
+state that does not exist. The only cost padding could plausibly carry is a fixed
+per-slot overhead — walking 256 block-table entries, loading 256 metadata records
+— which is constant in n by construction. Fitting `T = a·n + b` gives a fixed term
+of 7,050 µs (residuals under 2.3%), 42% of attention time at n=1 falling to 4% at
+n=16; were that a 256-slot padding cost it would be 27.5 µs per slot. The fit is
+equally consistent with padded slots being skipped and with a fixed cost paid for
+all 256, and so establishes neither.
 
 ##### Discriminating experiment: reducing the slot count
 
 The discriminating experiment reduces the compiled slot count and observes the
 fixed term. Enabling `ATTN_BUCKETIZED_NUM_REQS` compiles attention at 8 slots
 rather than 256, a 32-fold reduction, profiled in both arms at the same real batch
-size:
-
-Table: Attention device time with the compiled slot count reduced 32-fold. A per-slot padding cost would fall by about 97%; it falls by 2%. {#tab:slotcut}
-| n | flag off (256 slots) | flag on (8-slot ladder) | change |
-|---|---|---|---|
-| 1 | 16 898 µs | 16 749 µs | **−0.9%** |
-| 2 | 26 130 µs | 25 999 µs | −0.5% |
-| 8 | 85 081 µs | 85 055 µs | −0.0% |
-| fitted fixed term `b` | 7 158 µs | 6 991 µs | **−2%** |
+size: device time moves by −0.9% at n=1 (16,898→16,749 µs), −0.5% at n=2
+(26,130→25,999 µs), and −0.0% at n=8 (85,081→85,055 µs), and the fitted fixed
+term `b` moves by −2% (7,158→6,991 µs).
 
 A per-padded-slot cost would be expected to fall by approximately 97% when the slot
 count is reduced by a factor of 32. The measured reduction is 2%. The fixed term
@@ -309,22 +282,18 @@ fixed term by 167 µs, so a padded request slot costs **under 0.7 µs**, against
 it is a bound rather than zero: at 256 slots the residue is up to approximately
 170 µs, about 1% of attention time at n=1.
 
-This measurement also runs the high-power version of the paired experiment above.
-That test used n=8 and n=9, where a fixed 256-slot cost would have been about 8% of
-attention time; at n=1 it would be 42%, and at n=1 the measured difference is
-−0.9%. The 0.0% result was not a low-power test concealing an effect, because the
-effect is absent where it would have been largest.
+This measurement also runs the high-power version of the paired experiment above:
+that test used n=8 and n=9, where a fixed 256-slot cost would have been about 8% of
+attention time, against 42% at n=1 — and at n=1 the measured difference is −0.9%,
+so the 0.0% result was not a low-power test concealing an effect, since the effect
+is absent where it would have been largest.
 
 The memory-bandwidth account — that free padding follows from the step reading
 the whole weight set regardless of batch — is tested and rejected using measured
 chip utilization and memory-bandwidth utilization; Appendix §10.7 has the account
-and the measurements against it.
-
-##### Promotion cost at the 8-to-16 request edge
-
-No promotion cost exists at the 8→16 request edge under the default
-configuration, because the attention kernel is already compiled at 256 slots and
-does not distinguish the two batch sizes.
+and the measurements against it. No promotion cost exists at the 8→16 request edge
+under the default configuration either, because the attention kernel is already
+compiled at 256 slots and does not distinguish the two batch sizes.
 
 ### 4.2 Token-dimension padding is paid, and its share falls with batch size
 
@@ -337,17 +306,19 @@ wherever the step's cost is dominated by arithmetic on those tokens.
 with batch size fixed and sequence length held near-constant:
 
 Table: Share of nominal token padding paid, by batch size. Rows are confounded: each was measured over a different set of ladder boundaries. {#tab:paidraw}
-| batch size | median | mean | 95% CI over boundaries | boundaries | clean dispatches/arm |
-|---|---|---|---|---|---|
-| 1–2 | **~85%** | — | *not computed* | 1 | see below |
-| 4 | 23.1% | 20.2% | [13.5%, 24.4%] | 4 | 9–15 |
-| 8 | 14.3% | 11.8% | [0.2%, 21.0%] | 3 | 3–5 |
-| 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] | 3 | 7–11 |
+| batch size | median | mean | 95% CI |
+|---|---|---|---|
+| 1–2 | **~85%** | — | *not computed* |
+| 4 | 23.1% | 20.2% | [13.5%, 24.4%] |
+| 8 | 14.3% | 11.8% | [0.2%, 21.0%] |
+| 16 | **−2.7%** | −5.9% | [−15.4%, +0.5%] |
 
 ##### Confounding across ladder boundaries
 
-These rows are confounded, because each was measured over a different set of
-ladder boundaries. At fixed n=4 the paid share rises with boundary size, from
+These rows are confounded — over 1, 4, 3 and 3 boundaries respectively (9–15
+clean dispatches/arm at n=4, 3–5 at n=8, 7–11 at n=16), because each was
+measured over a different set of ladder boundaries. At fixed n=4 the paid
+share rises with boundary size, from
 10.0% at 512→1024 to 24.8% at 4096→8192, so the particular boundaries a row
 contains shift its value independently of batch size. The sets differ: n=8 lacks
 512→1024, the lowest-paying boundary, and n=16 lacks 4096→8192, the highest. Both
@@ -355,24 +326,15 @@ omissions push in the same direction and exaggerate the decline. Comparing rows
 measured over different boundary sets is the most common error in this work, and it
 occurred here in a headline table.
 
-Restricted to the two boundaries present in every row ([tab:paidmatched]):
-
-Table: Paid share restricted to the two boundaries present in every row. {#tab:paidmatched}
-| n | 1024→2048 | 2048→4096 | mean |
-|---|---|---|---|
-| 4 | 22.1% | 24.0% | **23.1%** |
-| 8 | 0.2% | 21.0% | **10.6%** |
-| 16 | −2.7% | +0.5% | **−1.1%** |
-
-The decline remains after matching, though the n=8 mean falls from 14.3% to 10.6%.
-An interval bootstrapped over two boundaries would not be meaningful, so the
-matched table establishes the ordering of the rows rather than their absolute
-values. The defensible statement is ordinal rather than monotone: the paid share is
-substantial at n≤2, intermediate at n=4–8, and indistinguishable from zero at n=16,
-with only the n=4 against n=16 contrast separated at interval level.
-
-The n≤2 row rests on a single boundary, which is not one of the matched pair, and
-carries no interval. It is simultaneously the largest figure in the paper and the
+Restricted to the two boundaries present in every row (1024→2048 and 2048→4096),
+the decline remains: mean paid share is 23.1% at n=4, 10.6% at n=8 (down from
+14.3% unmatched), and −1.1% at n=16. An interval bootstrapped over two boundaries
+would not be meaningful, so this establishes the ordering of the rows rather than
+their absolute values. The defensible statement is ordinal rather than monotone:
+the paid share is substantial at n≤2, intermediate at n=4–8, and indistinguishable
+from zero at n=16, with only the n=4 against n=16 contrast separated at interval
+level. The n≤2 row itself rests on a single boundary, not one of the matched pair,
+and carries no interval — simultaneously the largest figure in the paper and the
 least well supported. The n=8 value of 14.3% excludes split dispatches; including
 them pools partial steps into the median and yields 16%, and the exclusion is the
 correct treatment.
@@ -404,15 +366,12 @@ with `--no-enable-chunked-prefill` the result is unchanged, the packed model win
 8 of 10 ragged cells and batch padding being rejected by 75–579%.
 
 How padded share varies with workload shape, not just batch size, is a separate
-question from the one this section answers. Appendix §10.9 sweeps four length
+question from the one this section answers; Appendix §10.9 sweeps four length
 distributions at matched offered tokens and reports a retracted explanation along
-the way.
-
-A single recoverable-headroom figure would multiply the padded share above by the
-paid share reported earlier in this section, and that product is invalid: paid
-share moves with batch size, so a figure built from one workload's padded share and
-one batch size's paid share describes no configuration that was ever run. The two
-factors are reported separately for this reason.
+the way. A single recoverable-headroom figure — multiplying the padded share above
+by the paid share reported earlier in this section — would be invalid: paid share
+moves with batch size, so such a figure would describe no configuration that was
+ever run, which is why the two factors are reported separately.
 
 ### 4.3 Ladder design is placement, not cardinality
 
@@ -437,30 +396,27 @@ Table: Ten-shape against twenty-one-shape ladder at two concurrent requests. Pro
 | 3000 | 4096 | **3072** | 1024 | 289.9 ms | 253.7 ms | **−36.2 ms** [−36.5, −36.0] |
 
 The two treated cells agree on cost per padded token to within 1%, at 34.9 and
-35.3 µs, while the two placebo cells differ by +0.5 ms in total. This agreement is
-the principal evidence for the effect. An arm-level offset, such as one server
-instance running uniformly slower, would produce a constant difference between the
-arms and therefore a per-token figure inversely proportional to the number of
-tokens saved; a padding effect scales with tokens saved, which is what the
-measurements show. For scale, a real prefill token costs 46.6 µs on the same arm (1200→3000 tokens
-for 83.9 ms),
-so at two concurrent requests a padded token costs about three quarters of a real
-one. Expressed as percentages, the twenty-one-shape ladder reduces end-to-end
-latency by 8.7% at prompt 1200 and 12.5% at prompt 3000.
+35.3 µs, while the two placebo cells differ by +0.5 ms in total — the principal
+evidence for the effect, since an arm-level offset (one server instance running
+uniformly slower) would produce a constant difference between the arms and
+therefore a per-token figure inversely proportional to tokens saved, whereas a
+padding effect scales with tokens saved, which is what the measurements show. For
+scale, a real prefill token costs 46.6 µs on the same arm (1200→3000 tokens for
+83.9 ms), so at two concurrent requests a padded token costs about three quarters
+of a real one; expressed as percentages, the twenty-one-shape ladder reduces
+end-to-end latency by 8.7% at prompt 1200 and 12.5% at prompt 3000.
 
 ##### Cost of the finer ladder
 
 The cost of the finer ladder is startup and memory headroom, not cache
 capacity. Measured with the compiled-shape cache cleared before each boot:
 
-Table: What the finer ladder costs: startup, resident executables, and the memory fraction at which the server will start. {#tab:laddercost}
+Table: What the finer ladder costs: startup and the memory fraction at which the server will start; key–value capacity at each fraction follows in text. {#tab:laddercost}
 | | 10 shapes | 21 shapes |
 |---|---|---|
 | cold warmup | 285 s | 436 s (+53%) |
 | compiled-shape cache on disk | 43 MB | 92 MB |
 | highest memory fraction that boots | 0.92 (the default) | **0.85** |
-| key–value cache at 0.92 | 367,360 tokens | *does not boot* |
-| key–value cache at 0.85 | 335,104 tokens | 335,104 tokens |
 
 The warmup figures are cold. A persistent compilation cache amortizes them across
 restarts, and warm boots of the same two ladders measured 165–315 s, reflecting
@@ -505,28 +461,27 @@ that mixes the gap-512 row with a value from this table's own boot carries that
 much additional, uncorrected uncertainty; the −12.1% figure below does not, since
 default and gap-1024 are both this boot's own measurements.
 
-Against the ten-shape ladder, and correcting by the prompt-300 cell, the
-fourteen-shape ladder is +0.2 ms at prompt 1200 and −36.0 ms, or −12.1%, at prompt
-3000 — both figures from arms measured in this same boot. It gains exactly where it
-places an entry the default lacks, at 3072, and nowhere else: it has no entry at
-1536, so prompt 1200 is unaffected. The eleven-shape ladder places nothing new near
-either prompt and tracks the default at both. Shape count ranges from 10 to 21
-across these arms while the benefit depends
-only on whether a boundary falls between the prompt and the next default entry.
+Against the ten-shape ladder, correcting by the prompt-300 cell, the
+fourteen-shape ladder is +0.2 ms at prompt 1200 and −36.0 ms (−12.1%) at prompt
+3000 — both from arms in this same boot — gaining exactly where it places an
+entry the default lacks, at 3072, and nowhere else: no entry at 1536 leaves prompt
+1200 unaffected, and the eleven-shape ladder, placing nothing new near either
+prompt, tracks the default at both. Shape count ranges from 10 to 21 across these
+arms while the benefit depends only on whether a boundary falls between the
+prompt and the next default entry.
 
 ##### Feasibility at the default memory fraction
 
 The fourteen-shape ladder boots at the stock 0.92 with 367,360 tokens, the same
-capacity as the default. The 8.8% is therefore the price of the twenty-one-shape
-ladder rather than of the optimization: a 12.1% reduction at prompt 3000 is
-available at full memory, for the warmup of four additional shapes. The
-twenty-one-shape ladder buys a further 8.7% at prompt 1200, and that increment is
-what costs 8.8% of capacity and 53% more startup.
-
-The recommendation is therefore not to compile more shapes but to **compile the
-shapes the workload's prompt distribution straddles**. Cardinality is what the
-stack charges for; placement is what latency responds to. A badly placed boundary
-is an executable that the compiler pays to produce and the scheduler never uses.
+capacity as the default, so the 8.8% is the price of the twenty-one-shape ladder
+rather than of the optimization: a 12.1% reduction at prompt 3000 is available at
+full memory, for the warmup of four additional shapes, while the twenty-one-shape
+ladder's further 8.7% at prompt 1200 is what costs 8.8% of capacity and 53% more
+startup. The recommendation is therefore not to compile more shapes but to
+**compile the shapes the workload's prompt distribution straddles**: cardinality
+is what the stack charges for, placement is what latency responds to, and a badly
+placed boundary is an executable the compiler pays to produce and the scheduler
+never uses.
 
 ### 4.4 A ladder can be chosen offline from a length distribution
 
@@ -553,24 +508,22 @@ The offline model predicted the measured result to within 5%: 7.5 ms predicted
 against 7.1 ms measured. Inverting it gives 33.3 µs per padded token against the
 34.9–35.3 µs of §4.3, and the two workloads share nothing, since §4.3 used two
 fixed lengths straddling known entries and this a heavy-tailed mixture over the
-whole ladder. A constant fitted on one workload and confirmed on another supports
-using the model for design.
-
-Ladder design therefore does not require a hardware sweep: sample the length
-distribution, compute expected padding per candidate ladder, and multiply by the
-per-token cost.
+whole ladder — a constant fitted on one workload and confirmed on another
+supports using the model for design. Ladder design therefore does not require a
+hardware sweep: sample the length distribution, compute expected padding per
+candidate ladder, and multiply by the per-token cost.
 
 ##### Constraining the objective
 
-The objective must be constrained, and the unconstrained objective is the premise
-this paper refutes. Expected padding falls monotonically with shape count, so
-minimizing it alone drives the ladder toward the finest the stack can compile,
-which §4.3 shows the stack cannot afford. Both finer arms failed to boot at the
-stock memory fraction, the 35-shape ladder more decisively (23.75 MB requested
-against 4.94 MB free) than the 21-shape one (32.50 MB against 12.40 MB). The
-feasible set here was {10, 14} and the answer was 14. The configuration rule is to select the
-greatest shape density that satisfies the memory constraint, with entries placed
-against the length distribution.
+The objective must be constrained, since the unconstrained objective is the
+premise this paper refutes: expected padding falls monotonically with shape
+count, so minimizing it alone drives the ladder toward the finest the stack can
+compile, which §4.3 shows the stack cannot afford. Both finer arms failed to boot
+at the stock memory fraction, the 35-shape ladder more decisively (23.75 MB
+requested against 4.94 MB free) than the 21-shape one (32.50 MB against 12.40 MB).
+The feasible set here was {10, 14} and the answer was 14 — the configuration rule
+is to select the greatest shape density that satisfies the memory constraint,
+with entries placed against the length distribution.
 
 ##### Comparison against BucketServe's ladder objective
 
@@ -593,13 +546,11 @@ from prompt lengths and begin at 208, and a ladder without small entries pads a
 two-token decode step to 208. Both arms therefore spend the same number of shapes,
 fourteen, and differ only in where the ten free entries sit.
 
-Table: Two ladder-design objectives at equal shape count, on the same replayed workload. Their objective minimizes relative waste; ours minimizes absolute padded tokens. {#tab:objectives}
-| ladder | shapes | padded tok/req | mean e2e |
-|---|---|---|---|
-| stock | 10 | 602 | 226.2 ms |
-| gap 1024 | 14 | 389 | 215.6 ms |
-| BucketServe objective | 14 | 328 | 209.0 ms |
-| padded-token objective | 14 | **248** | **207.4 ms** |
+At equal shape count (fourteen) on the same replayed workload, the stock ladder
+(10 shapes) pads 602 tokens/req for a mean end-to-end of 226.2 ms; gap-1024 pads
+389 tokens/req for 215.6 ms; BucketServe's relative-waste objective pads 328
+tokens/req for 209.0 ms; and the padded-token objective pads **248** tokens/req
+for **207.4 ms**.
 
 **The padded-token objective is faster by 1.61 ms, with a 95% interval of
 [1.04, 2.17] and p < 0.001** over nine replays per arm. Both ladder-design
@@ -610,14 +561,9 @@ what the cost model predicts: relative waste treats a 10-token overshoot on a
 whereas §4.3 prices a padded token at a constant, so absolute padding is the
 quantity that converts to time.
 
-Two honest qualifications. At three replays the same comparison gave
-[-5.39, +1.83] and did not resolve, and the arms were an order of magnitude
-noisier; the effect is real but small enough to need the replays. And the measured
-gap is about half the 2.8 ms the linear model predicts from 80 padded tokens,
-implying roughly 20 µs per token here against the 34.9–35.3 µs of §4.3. The
-per-token cost is therefore not constant across the range: the model is accurate
-where padding is large, which is where ladder design is decided, and overestimates
-the marginal value of removing padding once little remains.
+Two qualifications on that comparison — an unresolved low-replay interval, and a
+per-token cost that is not constant across the range — are honest enough to need
+stating, and are given in full in Appendix §10.11.
 
 Applying the rule under a moving traffic distribution — re-selection cadence, the
 counter that would trigger it, and a correction to how a padding gap maps to a
@@ -638,15 +584,13 @@ Table: GPU control on an L4: CUDA-graph capture against eager execution. The inc
 
 **The increments are the measurement; the levels are not.** Eager execution pays a
 constant per-operation launch overhead, so the levels differ by roughly 9.3 ms
-throughout, and that constant cancels in any increment. It cancels to within 9 µs on
-the 8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
+throughout, and that constant cancels in any increment — to within 9 µs on the
+8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
 requires: the two arms measure the same underlying work plus an offset, so their
-difference isolates what capture adds.
-
-On that basis, padding a batch from 8 up to the captured entry at 16 costs
-approximately **67 µs**, being the 0.283 ms increment with graphs against 0.215 ms
-without. That is 0.6% of a 10.9 ms step, or 4.0% of the nominal padding implied by
-rounding 9 up to 16.
+difference isolates what capture adds. On that basis, padding a batch from 8 up to
+the captured entry at 16 costs approximately **67 µs**, being the 0.283 ms
+increment with graphs against 0.215 ms without — 0.6% of a 10.9 ms step, or 4.0%
+of the nominal padding implied by rounding 9 up to 16.
 
 **This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
 CUDA path captures a graph per batch size, so what these arms vary is the request
@@ -655,14 +599,12 @@ where no proposed optimization was going to pay. The token dimension, where this
 paper locates the only surviving effect, is not reached: no arm here varies tokens
 per step at fixed batch. The cross-architecture statement this table supports is
 therefore that **request-dimension padding is close to free on both architectures**,
-not that the premise is false on both. Whether a GPU stack pays for token padding as
-a TPU stack does is untested, and is the experiment that would make the
-cross-architecture claim general.
-
-The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
-intervals of roughly ±50 percentage points, so this table cannot resolve a
-difference between the architectures; what both support is that the paid share is
-small on each.
+not that the premise is false on both — whether a GPU stack pays for token padding
+as a TPU stack does is untested, and is the experiment that would make the
+cross-architecture claim general. The comparison is also a bound rather than an
+equality: §4.1's TPU statistic carries intervals of roughly ±50 percentage points,
+so this table cannot resolve a difference between the architectures; what both
+support is that the paid share is small on each.
 
 [tab:gpu] is one measurement per arm. Repeating each arm 20 times on a fresh L4 and
 bootstrapping the position-of-n=9 statistic (10,000 resamples, median-based, the
@@ -737,24 +679,21 @@ identically on both ladders, which is true only while each request prefills alon
 one scrape of the executed step distribution settled it, after both arms had run.
 
 The consequence for a reader is that the measurements in §4 and the mechanisms
-offered for them do not carry the same weight, and we present them accordingly.
-Two qualifications keep that statement honest.
-
-First, survival is not uniform. §4.2's paid-share table survived the discovery that
-its rows were measured over different boundary sets as an *ordinal* claim; the
-cardinal values did not. Appendix §10.1's rows above n=2 survive as floors rather than
-estimates under burst arrival, and only the isolated-dispatch control recovers
-interval-level statements. A value that reproduces while its interpretation is
-withdrawn has not survived in the sense the word usually carries.
-
-Second, the asymmetry is partly a property of what can be checked rather than of
-what is true. A measurement has a value a script can recompute; a mechanism does
-not, so it is never submitted to the check at all, and passing no check is not the
-same as passing one. Our own record limits the stronger reading: four of the errors
-we caught were instrument-definition failures, in which an analysis measured
-something other than its target, and those corrupt numbers rather than explanations.
-No guardrail here covers that class, so we cannot bound residual error in the
-measurements either.
+offered for them do not carry the same weight, and we present them accordingly —
+with two qualifications. First, survival is not uniform: §4.2's paid-share table
+survived the discovery that its rows were measured over different boundary sets as
+an *ordinal* claim, not a cardinal one, and Appendix §10.1's rows above n=2 survive
+as floors rather than estimates under burst arrival, with only the
+isolated-dispatch control recovering interval-level statements — a value that
+reproduces while its interpretation is withdrawn has not survived in the sense the
+word usually carries. Second, the asymmetry is partly a property of what can be
+checked rather than of what is true: a measurement has a value a script can
+recompute, a mechanism does not, so it is never submitted to the check at all, and
+passing no check is not the same as passing one. Our own record limits the
+stronger reading — four of the errors we caught were instrument-definition
+failures, in which an analysis measured something other than its target, and those
+corrupt numbers rather than explanations, a class no guardrail here covers, so we
+cannot bound residual error in the measurements either.
 
 ## 7. Limitations
 
@@ -763,18 +702,16 @@ single L4 for the control. Appendix §10.4's TP=1/2/4 ablation finds request pad
 cheap at every sharding and argues analytically that the regime map is set by batch
 size and dtype rather than parameter count, for dense weight-stationary decode
 only — but model scale and multi-host topology remain unmeasured, and both change
-the fixed costs padding is absorbed into.
+the fixed costs padding is absorbed into. **The strongest single number is also
+the least well supported:** the ~85% paid share at n≤2 rests on one boundary and
+carries no interval (§4.2).
 
-**The strongest single number is the least well supported.** The ~85% paid share at
-n≤2 rests on one boundary and carries no interval (§4.2).
-
-**Prefix caching is measured but not swept.** Appendix §10.3 tests it at one prefix length,
-2048 of 3000 tokens, on one workload shape. This is enough to show that the
-placement target moves and not enough to say where it lands for a given amount of
-prefix reuse. Everything outside Appendix §10.3 is measured with caching disabled and so
-describes workloads with little prefix sharing.
-
-**No production trace.** §4.2's four length distributions are parametric families
+**Prefix caching is measured but not swept, and there is no production trace.**
+Appendix §10.3 tests caching at one prefix length, 2048 of 3000 tokens, on one
+workload shape — enough to show that the placement target moves, not enough to
+say where it lands for a given amount of prefix reuse, and everything outside
+Appendix §10.3 is measured with caching disabled and so describes workloads with
+little prefix sharing. §4.2's four length distributions are parametric families
 matched on mean length, not a trace of real traffic. They establish that padded
 share varies by a factor of four with distribution shape at equal offered tokens,
 and that dispersion does not order it, but the figures belong to those families
@@ -782,14 +719,13 @@ rather than to any deployment. Appendix §10.3 further shows that any such figur
 how much prefix reuse a workload has, since caching changes the length actually
 prefilled.
 
-**The ladder benefit has no measured upper bound in concurrency.** Appendix §10.1 sweeps 1 to
-16 and finds no crossing, so we cannot say where a finer ladder ceases to pay, only
-that it has not ceased by 16. Above n=4 that experiment has no valid placebo, so
-those rows are floors on the effect rather than unbiased estimates.
-
-**The recommendation is mediated by version-pinned internal flags.**
+**The ladder benefit has no measured upper bound in concurrency.** Appendix §10.1
+sweeps 1 to 16 and finds no crossing, so we cannot say where a finer ladder ceases
+to pay, only that it has not ceased by 16; above n=4 that experiment has no valid
+placebo, so those rows are floors on the effect rather than unbiased estimates.
+**The recommendation is also mediated by version-pinned internal flags:**
 `VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to vLLM
-and `tpu-inference` 0.25.0; an upstream refactor could change the ladder they
+and `tpu-inference` 0.25.0, and an upstream refactor could change the ladder they
 produce or remove them. The measurements survive such a change, since they
 characterize a mechanism rather than an interface, but the operational advice does
 not: §4.4's rule states which ladder to want, and the flags are only how one
@@ -821,20 +757,18 @@ padding stops mattering (Appendix §10.4), the batch thresholds reported here sh
 transferred to other hardware without re-measurement.
 
 **Prefill step cost above n=16 is not isolable**, and at n=16 the clean sample is
-7–11 dispatches per arm.
+7–11 dispatches per arm. **The n=4 convergence is unexplained and is not an
+operator effect**: an operator-level profile shows every category of device time
+moving smoothly through n=4, and the three observations that appear to converge
+there are not independent — LENS's failure and the paid-share drop are the same
+quantity described twice.
 
-**The n=4 convergence is unexplained and is not an operator effect.** An
-operator-level profile shows every category of device time moving smoothly through
-n=4. The three observations that appear to converge there are not independent:
-LENS's failure and the paid-share drop are the same quantity described twice.
-
-**The GPU control is one point rather than a curve.** Startup was measured at
-vLLM's default capture set, and the number of captured shapes was not varied, which
-is precisely the axis BucketServe and LAPS trade along.
-
-**Co-located prefill and decode only.** On a disaggregated deployment the padding
-question divides in two, and Appendix §10.4's finding that variance is a prefill phenomenon
-is the asymmetry that motivates disaggregation.
+**The GPU control is one point rather than a curve, and co-located prefill and
+decode only.** Startup was measured at vLLM's default capture set, and the number
+of captured shapes was not varied, which is precisely the axis BucketServe and LAPS
+trade along. On a disaggregated deployment the padding question divides in two,
+and Appendix §10.4's finding that variance is a prefill phenomenon is the asymmetry
+that motivates disaggregation.
 
 ---
 
@@ -872,69 +806,59 @@ against it: solved globally and given the same shape budget, its ladder is 1.61 
 slower than one chosen to minimize absolute padded tokens, and both are about
 15 ms faster than the stock ladder. Their ladder design is therefore effective,
 and our disagreement with these systems is narrower than a premise-level
-objection. It concerns which dimension the padding occupies — the request
-dimension is free (§4.1) and per-request length padding does not exist (§4.2) —
+objection — it concerns which dimension the padding occupies (the request
+dimension is free, §4.1, and per-request length padding does not exist, §4.2),
 and, for the token dimension where it is real, which objective converts to time.
-
 The cross-architecture comparison itself is measured rather than asserted, and is
 reported as a result in §4.5 rather than as related work.
 
 **How, then, do prior bucketing techniques achieve their reported speedups?** If
-the padding premise is false on
-both architectures, systems reporting end-to-end improvements from bucketing are
-improving something else, and §5 supplies a candidate from our own data. A positive
-measurement in this work — release timing saving 26% of TPU time at 25 req/s — is
-dynamic batching, an arrival-and-composition effect rather than a shape effect.
-Bucketing schemes change which requests occupy a step together, and that is worth
-something independent of padding. We place weight on the mechanism rather than the
-magnitude, because the magnitude is the weaker half: the saving costs latency once
-the harness overhead inflating the baseline is removed, and it reverses at high load
-(Appendix §10.5). The defensible claim is the negative one — **a bucketing result that does not
-control for batch composition cannot distinguish a shape effect from a scheduling
-one** — and it rests on the premise measurements of §4.1 and §4.2.
+the padding premise is false on both architectures, systems reporting end-to-end
+improvements from bucketing are improving something else — and §5's release-timing
+re-measurement supplies a candidate: dynamic batching, an arrival-and-composition
+effect rather than a shape effect, worth something independent of padding even
+though its magnitude does not survive scrutiny (Appendix §10.5). The defensible
+claim is the negative one — **a bucketing result that does not control for batch
+composition cannot distinguish a shape effect from a scheduling one** — and it
+rests on the premise measurements of §4.1 and §4.2.
 
 ---
 
 ## 9. Conclusion
 
 Two accelerator families reach the same design by different routes: XLA compiles a
-ladder of shapes, and CUDA captures a graph per batch size. Both round every step up
-to the nearest entry, and the optimization literature treats that rounding as a cost
-to be recovered. It is not, on either. A batch just above an entry costs what the
-entry below costs, because a ragged attention kernel does almost no work for slots
-holding no key–value blocks — under 0.7 µs per slot, against 27.5 µs if it were paid
-— and a captured graph does not care that part of its batch is unused.
+ladder of shapes, and CUDA captures a graph per batch size. Both round every step
+up to the nearest entry, and the optimization literature treats that rounding as a
+cost to be recovered. It is not, on either — a batch just above an entry costs
+what the entry below costs, because a ragged attention kernel does almost no work
+for slots holding no key–value blocks (under 0.7 µs per slot, against 27.5 µs if
+it were paid), and a captured graph does not care that part of its batch is
+unused.
 
 What shape coverage costs is a boot-time budget, and only part of it amortizes: a
-persistent compilation cache erases most of the 108-second CUDA-graph capture and
-5–30 minute XLA compilation on every restart after the first, but not the memory
-headroom a finer ladder demands before the server will start at all (§4.3) — the
-quantity BucketServe and LAPS manage when they limit the number of graphs.
-Reducing the number of shapes is worth doing for time-to-serve and resident
-executables. Routing requests
-to avoid run-time padding is not worth doing.
+persistent cache erases most of the 108-second CUDA-graph capture and 5–30 minute
+XLA compilation on every restart, but not the memory headroom a finer ladder
+demands before the server starts at all (§4.3) — the quantity BucketServe and
+LAPS manage by limiting graph count. Reducing shape count is worth doing for
+time-to-serve; routing requests to avoid run-time padding is not.
 
-The exception is the token dimension, where padded tokens are real arithmetic: the
-paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero by
-16, and is around 85% at batch ≤2 — a figure resting on a single boundary with no
-interval, and the least well supported number here. That low-batch regime is
-interactive serving, tight-latency deployments, and the prefill half of any
-disaggregated system, and it is where the ladder buys something.
-
+The exception is the token dimension: real arithmetic, paid at 23.1% of nominal at
+batch 4, indistinguishable from zero by 16, and around 85% at batch ≤2 — the least
+well supported number here, resting on a single boundary with no interval — and
+that low-batch regime (interactive serving, tight-latency deployments, the
+prefill half of any disaggregated system) is where the ladder buys something.
 **The variable that pays is placement, not shape count.** A fourteen-shape ladder
-adding a single entry the default lacks reduces end-to-end latency by 12.1% at the
-prompt length that straddles it, gains nothing at a length it does not, and boots at
-the stock memory fraction with unchanged cache capacity. A twenty-one-shape ladder
-achieves the same reduction and will not start above a memory fraction of 0.85,
-costing 8.8% of cache capacity and 53% more startup. Every cost measured scales with
-cardinality. The ladder can be chosen offline: expected padding computed from a
-length distribution predicted the measured reduction to within 5%, so the design
-rule is the finest ladder that still boots, with entries placed against the
-distribution the server actually prefills.
-
-Two conditions bound that advice, detailed in the Appendix: it is a latency gain
-below saturation rather than added capacity, and prefix caching shrinks it by
-moving the prefill onto a different compiled entry, so entries must target
+adding one entry the default lacks reduces end-to-end latency by 12.1% at the
+prompt length that straddles it, gains nothing at a length it does not, and boots
+at the stock memory fraction with unchanged cache capacity; a twenty-one-shape
+ladder achieves the same reduction but will not start above a memory fraction of
+0.85, costing 8.8% of cache capacity and 53% more startup — every cost measured
+scales with cardinality. The ladder can be chosen offline: expected padding
+computed from a length distribution predicted the measured reduction to within
+5%, so the design rule is the finest ladder that still boots, with entries placed
+against the distribution the server actually prefills — a latency gain below
+saturation rather than added capacity, shrinking as prefix caching moves the
+prefill onto a different compiled entry (Appendix), so entries must target
 uncached prefill lengths.
 
 Three predictions registered before measurement failed, and each failure was worth
@@ -1524,4 +1448,14 @@ doubling while the doubling step is no larger than the gap, then switches to lin
 spacing. At gap 256 this inserts an entry at 768, which a reading of "powers of two,
 then linear" does not predict. The predictions above were computed from the
 corrected rule, and each arm re-reads the ladder its server printed.
+
+**Two qualifications on the BucketServe-objective comparison (§4.4).** At three
+replays the same comparison gave [-5.39, +1.83] and did not resolve, and the arms
+were an order of magnitude noisier; the effect is real but small enough to need
+the replays. And the measured gap is about half the 2.8 ms the linear model
+predicts from 80 padded tokens, implying roughly 20 µs per token here against the
+34.9–35.3 µs of §4.3. The per-token cost is therefore not constant across the
+range: the model is accurate where padding is large, which is where ladder design
+is decided, and overestimates the marginal value of removing padding once little
+remains.
 
