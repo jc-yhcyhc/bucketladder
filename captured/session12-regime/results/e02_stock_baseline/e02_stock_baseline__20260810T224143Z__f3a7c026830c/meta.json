@@ -1,0 +1,77 @@
+{
+  "config": {
+    "concurrency": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "REGIME MAP, decode arm. output_len=64 so decode dominates; decode_ms/64 is the per-decode-step cost, measured against n. Every cost number in this project comes from prefill-dominated work, and decode is where production serving spends its time.",
+    "edge": 8,
+    "experiment": "e02_stock_baseline",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_budget": "n=16 x 512 = 8192 tokens is exactly max_num_batched_tokens, so n<=16 is one scheduler step and n=18 must split into two. The split cell is kept deliberately: it is the only direct evidence of what a two-step dispatch costs.",
+    "note_expectation": "RPA is a ragged kernel, so a padded request dimension should cost little even at 256 -- the padded slots hold no KV blocks. The likely finding is a large compile-time increase for little or no runtime change, which would explain why the default is off. A runtime WIN would be the more actionable result: the default leaves performance on the table.",
+    "note_gap": "n=11..14 were never measured. At prompt_len 512 the sparse sweep jumped from 5120 tokens (n=10, ~89 ms) to 7680 (n=15, ~158 ms), so the SHAPE of the cost curve across that range is unknown -- and it is exactly the range where request padding (all of 9..16 pad to 16) and token padding (4608..8192 all pad to 8192) predict a flat cost while the measurements do not. Filling it is what makes a refit possible rather than a guess.",
+    "note_verification": "The flag is not in vLLM's engine-config line, so the audit cannot see it. It IS verifiable from the warmup log: with the flag on, 'Prepared attn request paddings' prints the full ladder instead of [256]. Check that before trusting this run.",
+    "output_len": 64,
+    "prompt_len": 256,
+    "repeats": 9,
+    "request_ladder": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "f3a7c026830c",
+  "duration_sec": 28.934,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e02_stock_baseline",
+  "finished_at": "2026-08-10T22:42:12.866885+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-6d4b76fb-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.13"
+  },
+  "preempted": false,
+  "run_id": "e02_stock_baseline__20260810T224143Z__f3a7c026830c",
+  "started_at": "2026-08-10T22:41:43.916929+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "stock_verdict",
+    "verdict"
+  ]
+}

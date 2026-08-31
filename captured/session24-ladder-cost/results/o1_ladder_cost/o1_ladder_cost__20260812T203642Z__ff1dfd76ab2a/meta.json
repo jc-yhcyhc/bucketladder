@@ -1,0 +1,66 @@
+{
+  "config": {
+    "arm": "default",
+    "concurrency": 8,
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "What a compiled shape costs (warmup) against what it buys (latency). VLLM_TPU_BUCKET_PADDING_GAP unset gives 10 token shapes, 512 gives 21. If padding is free, the finer ladder costs warmup and buys nothing \u2014 which turns the paper's characterisation into a recommendation.",
+    "dimension": "D2",
+    "experiment": "o1_ladder_cost",
+    "independent_vars": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "The ladder granularity IS the experiment: unset compiles 10 token shapes, 512 compiles 21. Varying it is the point."
+    },
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "note_prediction": "REGISTERED. If run-time padding is free, the 21-shape ladder serves within noise of the 10-shape ladder and costs roughly 2x the warmup. If length bucketing's premise holds, the 21-shape ladder is measurably faster at these prompt lengths.",
+    "note_prompt_lens": "Chosen to sit BETWEEN exponential ladder entries (300 pads to 512, 600 to 1024, 1200 to 2048, 3000 to 4096) so the fine ladder has the largest possible advantage. If it cannot win here it cannot win anywhere.",
+    "output_len": 32,
+    "prediction_mechanism": "Target: end-to-end latency at prompt lengths that straddle ladder entries. Lever: ladder granularity, which changes padded tokens per step by up to 2x while leaving real tokens fixed \u2014 so d(padded)/d(lever) is large and nonzero, and the two hypotheses predict opposite signs.",
+    "prompt_lens": [
+      300,
+      600,
+      1200,
+      3000
+    ],
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "ff1dfd76ab2a",
+  "duration_sec": 0.822,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "o1_ladder_cost",
+  "finished_at": "2026-08-12T20:36:43.199783+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-d9ea6573-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "o1_ladder_cost__20260812T203642Z__ff1dfd76ab2a",
+  "started_at": "2026-08-12T20:36:42.362159+00:00",
+  "status": "ok",
+  "tables": [
+    "latency",
+    "ladder"
+  ]
+}

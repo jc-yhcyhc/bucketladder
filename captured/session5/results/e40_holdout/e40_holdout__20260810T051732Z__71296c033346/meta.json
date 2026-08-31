@@ -1,0 +1,67 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "RATE holdout. The refit validated at 3.6% MAPE on seeds 201-211, but those reused the fit's rates (25 and 55), so the validation could not catch an error constant across rate. These rates were never fitted or validated on.",
+    "experiment": "e40_holdout",
+    "latency_weight": 1.0,
+    "max_wait_s": 0.5,
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "n_requests": 60,
+    "note_holdout": "plan_v4 requires MAPE<15% per cell on data the fit never saw. Seeds AND rates are both new here; the earlier holdout varied only seed and server instance.",
+    "output_len": 1,
+    "policies": [
+      "promote",
+      "wait",
+      "hybrid"
+    ],
+    "prompt_len": 512,
+    "rates_hz": [
+      15,
+      40,
+      75
+    ],
+    "seed": 307,
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "71296c033346",
+  "duration_sec": 20.813,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e40_holdout",
+  "finished_at": "2026-08-10T05:17:53.636093+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-77306a07-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e40_holdout__20260810T051732Z__71296c033346",
+  "started_at": "2026-08-10T05:17:32.807601+00:00",
+  "status": "ok",
+  "tables": [
+    "holdout",
+    "batches",
+    "latency",
+    "verdict"
+  ]
+}

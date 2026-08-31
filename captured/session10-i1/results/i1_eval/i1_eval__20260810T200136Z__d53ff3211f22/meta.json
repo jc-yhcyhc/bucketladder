@@ -1,0 +1,82 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "correctness_out": 24,
+    "correctness_prompt_lens": [
+      128,
+      520,
+      1032,
+      2056
+    ],
+    "correctness_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "description": "A/B for bucket-aligned step packing. Run once per server mode against the SAME build, with BUCKETLADDER_ALIGN deciding which. Correctness is gated first: greedy completions at prompt lengths chosen to straddle compiled buckets, hashed and compared across modes. If the hashes differ the patch is wrong and no timing here means anything.",
+    "experiment": "i1_eval",
+    "mode": "live",
+    "mode_label": "default",
+    "model": "Qwen/Qwen3-4B",
+    "n_requests": 60,
+    "note_both_sides": "Throughput and p99 are both recorded. The optimisation defers work, so a throughput number without the tail-latency cost would be exactly the one-sided report the plan warned about.",
+    "note_output_len": "16, not 1. The patch defers PREFILL chunks, so a workload with real decode is the one where deferral could plausibly disturb output, and decode is also where production serving spends its time.",
+    "note_prompt_lens": "520, 1032 and 2056 sit just above 512, 1024 and 2048 -- exactly the steps the patch trims. 128 is a control that never triggers it. If the patch corrupts anything it will be at these lengths.",
+    "output_len": 16,
+    "prompt_len": 512,
+    "rates_hz": [
+      25,
+      55
+    ],
+    "repeats": 3,
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "d53ff3211f22",
+  "duration_sec": 17.596,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "i1_eval",
+  "finished_at": "2026-08-10T20:01:54.152562+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-f60885f8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "i1_eval__20260810T200136Z__d53ff3211f22",
+  "started_at": "2026-08-10T20:01:36.541841+00:00",
+  "status": "ok",
+  "tables": [
+    "correctness",
+    "perf"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "config": {
+    "buckets": [
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "R3 replication on a different attention shape. head_dim 64 (vs 128) AND full MHA 32/32 (vs GQA 4:1) \u2014 two variables, so a confounded but real contrast. Chosen after granite-3.1-2b failed TP=4 sharding with IndivisibleError; SmolLM2's 32 kv heads divide by 4 cleanly.",
+    "experiment": "e01_oracle_gap",
+    "fractions": [
+      1.0,
+      0.95,
+      0.85,
+      0.75,
+      0.65,
+      0.55
+    ],
+    "mode": "live",
+    "model": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+    "note_occupancy": "Occupancy is bounded to (0.5, 1.0] by the power-of-two ladder; B/2 is a bucket edge. Run e01 on the DEFAULT ladder \u2014 gap ladders give a far narrower range (gap=512 at B=4096 spans only 0.875-1.0).",
+    "output_len": 1,
+    "repeats": 5,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "cf792e8f8406",
+  "duration_sec": 6.784,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e01_oracle_gap",
+  "finished_at": "2026-08-09T23:39:14.189446+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-5ac718d8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e01_oracle_gap__20260809T233907Z__cf792e8f8406",
+  "started_at": "2026-08-09T23:39:07.389861+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "flatness",
+    "flatness_ci"
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "config": {
+    "concurrency": [
+      8,
+      9,
+      10,
+      12,
+      14,
+      16
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Does the scheduler split the batch? Counts engine iterations per dispatch at the concurrency levels where e02 found two cost modes. output_len=1 so decode iterations do not bury the prefill iteration that carries the signal.",
+    "experiment": "e04_step_count",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_levels": "8 and 16 are unimodal in e02 and act as controls: if their step count also varies, the metric is measuring something other than batch splitting.",
+    "output_len": 1,
+    "prompt_len": 512,
+    "repeats": 21,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "b1bba9a1c162",
+  "duration_sec": 23.348,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e04_step_count",
+  "finished_at": "2026-08-10T03:27:19.684156+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e6fa186a-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e04_step_count__20260810T032656Z__b1bba9a1c162",
+  "started_at": "2026-08-10T03:26:56.321606+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "by_iterations",
+    "verdict"
+  ]
+}

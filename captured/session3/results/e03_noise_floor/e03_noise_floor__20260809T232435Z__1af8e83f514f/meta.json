@@ -1,0 +1,54 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Run-to-run variance on one fixed config. Sets the UNITS for every threshold in e01/e02 \u2014 a '5% gap' is meaningless until this is known.",
+    "experiment": "e03_noise_floor",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "output_len": 1,
+    "probe_len": 512,
+    "repeats": 30,
+    "restart_block": 1,
+    "restarts": 3,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 5,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "1af8e83f514f",
+  "duration_sec": 1.031,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e03_noise_floor",
+  "finished_at": "2026-08-09T23:24:36.927815+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-5ac718d8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e03_noise_floor__20260809T232435Z__1af8e83f514f",
+  "started_at": "2026-08-09T23:24:35.881572+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "noise_floor"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 2048,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Ladder enumeration and controlled-variable audit for the R3 control. The flatness comparison against SmolLM2 and Qwen3-4B is only meaningful if this server compiled the same buckets, and max_model_len is 4096 here rather than 8192, so the ladder MUST be read from the log rather than assumed.",
+    "experiment": "e00_smoke_test",
+    "mode": "log",
+    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "ecc01b6d537b",
+  "duration_sec": 0.309,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e00_smoke_test",
+  "finished_at": "2026-08-10T03:49:01.047742+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e6fa186a-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e00_smoke_test__20260810T034900Z__ecc01b6d537b",
+  "started_at": "2026-08-10T03:49:00.722566+00:00",
+  "status": "ok",
+  "tables": [
+    "ladder",
+    "controlled_audit"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Holdout validation of the e30 cost model on real hardware. Policies are implemented CLIENT-SIDE by controlling release timing, which is faithful because stock vLLM never holds requests back (measured in e02: queue time 0.0 ms at every level). No scheduler patch needed.",
+    "experiment": "e40_holdout",
+    "latency_weight": 1.0,
+    "max_wait_s": 0.5,
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "n_requests": 60,
+    "note_holdout": "seed 99 and these rates were NOT used to fit the cost model \u2014 the fit came from e02's concurrency sweep at fixed n. plan_v4 requires MAPE<15% per cell on data the fit never saw.",
+    "output_len": 1,
+    "policies": [
+      "promote",
+      "wait",
+      "hybrid"
+    ],
+    "prompt_len": 512,
+    "rates_hz": [
+      25,
+      55
+    ],
+    "seed": 207,
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "d6a6a0fa28b4",
+  "duration_sec": 10.464,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e40_holdout",
+  "finished_at": "2026-08-10T03:53:41.138541+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e6fa186a-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e40_holdout__20260810T035330Z__d6a6a0fa28b4",
+  "started_at": "2026-08-10T03:53:30.658363+00:00",
+  "status": "ok",
+  "tables": [
+    "holdout",
+    "batches",
+    "latency",
+    "verdict"
+  ]
+}

@@ -1,0 +1,254 @@
+{
+  "config": {
+    "cells": [
+      {
+        "bucket": 512,
+        "n": 1,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 2,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 4,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 8,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 16,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 1024,
+        "n": 1,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 2,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 4,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 8,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 16,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 32,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 2048,
+        "n": 1,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 2,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 4,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 8,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 16,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 32,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 4096,
+        "n": 1,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 2,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 4,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 8,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 16,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 32,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 8192,
+        "n": 2,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 4,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 8,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 16,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 32,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      }
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "REGIME MAP, prefill arm. Intercept and slope per (bucket, n) across n in {1,2,4,8,16,32}. We have measured only corners -- n=1 and n=4 -- and asserted a structure between them. This says whether step cost falls smoothly with n or steps between levels, which is the difference between a continuum and the 'two regimes' description the draft is deliberately not using yet.",
+    "experiment": "m5_lens_form",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len.",
+    "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
+    "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
+    "output_len": 1,
+    "repeats": 7,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "eabc6dd9605a",
+  "duration_sec": 74.332,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m5_lens_form",
+  "finished_at": "2026-08-10T22:41:33.771575+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-6d4b76fb-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.13"
+  },
+  "preempted": false,
+  "run_id": "m5_lens_form__20260810T224019Z__eabc6dd9605a",
+  "started_at": "2026-08-10T22:40:19.423583+00:00",
+  "status": "ok",
+  "tables": [
+    "points",
+    "fits",
+    "verdict"
+  ]
+}

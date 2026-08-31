@@ -1,0 +1,81 @@
+{
+  "config": {
+    "concurrency": [
+      4,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      18
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Re-measurement of the stock baseline at 21 repeats over a dense concurrency sweep. Session 3 ran 3 repeats and fitted PROMOTION_COST_MS=60.21 to the 8->9 step; session 4 reproduced the cell and found it BIMODAL (prefill ms at n=9 was [176.3, 79.7, 86.7] here and [78.2, 179.2, 137.9] in session 3, spread 2.2x). A median of three draws from that is not an estimate, and the whole e30 result rests on it. This config exists to characterise the distribution instead of sampling it three times.",
+    "edge": 8,
+    "experiment": "e02_stock_baseline",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_budget": "n=16 x 512 = 8192 tokens is exactly max_num_batched_tokens, so n<=16 is one scheduler step and n=18 must split into two. The split cell is kept deliberately: it is the only direct evidence of what a two-step dispatch costs.",
+    "note_gap": "n=11..14 were never measured. At prompt_len 512 the sparse sweep jumped from 5120 tokens (n=10, ~89 ms) to 7680 (n=15, ~158 ms), so the SHAPE of the cost curve across that range is unknown -- and it is exactly the range where request padding (all of 9..16 pad to 16) and token padding (4608..8192 all pad to 8192) predict a flat cost while the measurements do not. Filling it is what makes a refit possible rather than a guess.",
+    "output_len": 8,
+    "prompt_len": 512,
+    "repeats": 21,
+    "request_ladder": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "9185bb2eb47e",
+  "duration_sec": 65.715,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e02_stock_baseline",
+  "finished_at": "2026-08-10T03:23:35.410537+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e6fa186a-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e02_stock_baseline__20260810T032229Z__9185bb2eb47e",
+  "started_at": "2026-08-10T03:22:29.680334+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "stock_verdict",
+    "verdict"
+  ]
+}

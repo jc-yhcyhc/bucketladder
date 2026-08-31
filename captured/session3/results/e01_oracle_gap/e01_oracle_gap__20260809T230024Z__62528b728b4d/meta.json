@@ -1,0 +1,70 @@
+{
+  "config": {
+    "buckets": [
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Marginal cost of padding. Hold a bucket, vary occupancy. Decides whether padding costs wall-clock at all.",
+    "experiment": "e01_oracle_gap",
+    "fractions": [
+      1.0,
+      0.95,
+      0.85,
+      0.75,
+      0.65,
+      0.55
+    ],
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_occupancy": "Occupancy is bounded to (0.5, 1.0] by the power-of-two ladder; B/2 is a bucket edge. Run e01 on the DEFAULT ladder \u2014 gap ladders give a far narrower range (gap=512 at B=4096 spans only 0.875-1.0).",
+    "output_len": 1,
+    "repeats": 5,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "62528b728b4d",
+  "duration_sec": 8.692,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e01_oracle_gap",
+  "finished_at": "2026-08-09T23:00:33.677507+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-5ac718d8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e01_oracle_gap__20260809T230024Z__62528b728b4d",
+  "started_at": "2026-08-09T23:00:24.969138+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "flatness",
+    "flatness_ci"
+  ]
+}

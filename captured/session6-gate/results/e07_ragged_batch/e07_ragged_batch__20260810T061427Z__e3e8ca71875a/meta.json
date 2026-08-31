@@ -1,0 +1,118 @@
+{
+  "config": {
+    "cells": [
+      {
+        "max_len": 512,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 768,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 1024,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 1536,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 2048,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 3072,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 3900,
+        "n": 8,
+        "total_tokens": 4096
+      },
+      {
+        "max_len": 512,
+        "n": 4,
+        "total_tokens": 2048
+      },
+      {
+        "max_len": 768,
+        "n": 4,
+        "total_tokens": 2048
+      },
+      {
+        "max_len": 1024,
+        "n": 4,
+        "total_tokens": 2048
+      },
+      {
+        "max_len": 1536,
+        "n": 4,
+        "total_tokens": 2048
+      },
+      {
+        "max_len": 1900,
+        "n": 4,
+        "total_tokens": 2048
+      }
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Raggedness penalty curve. The three-way gate rejected batch padding by 105-209%, so cost is essentially PACKED -- but the most ragged cell ran 19.5% over the packed prediction while a moderate one ran 0.9% over. This sweeps the spread at fixed n and fixed total tokens to measure how that penalty grows, which is now the real question: not whether raggedness costs 3.7x, but whether it costs anything worth scheduling around.",
+    "experiment": "e07_ragged_batch",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_budget": "Batch-padded totals are allowed to exceed max_num_batched_tokens here, unlike the gate run: that constraint existed only to keep the batch-padding PREDICTION in-budget for a clean three-way test, and batch padding is now rejected. Under packed behaviour the step holds total_tokens regardless of spread, so nothing splits.",
+    "note_controls": "The two max_len=512 cells are uniform, so all three models predict the same cost. They cannot distinguish anything and are not meant to: they check the MEASUREMENT. If a control disagrees with every model, the verdict on the ragged cells is untrustworthy.",
+    "note_separation": "Predicted costs at n=4, total=2048, max=1536 are 39.2 / 56.6 / 144.8 ms for packed / per-request-padded / batch-padded -- a 3.7x spread, far outside the measurement noise, so the cell decides rather than hints.",
+    "note_spread": "max_len is the only variable; n and total tokens are held exactly. The uniform cells (max_len=512) remain controls.",
+    "output_len": 1,
+    "repeats": 21,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "e3e8ca71875a",
+  "duration_sec": 27.767,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e07_ragged_batch",
+  "finished_at": "2026-08-10T06:14:55.268183+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-eb6a4697-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e07_ragged_batch__20260810T061427Z__e3e8ca71875a",
+  "started_at": "2026-08-10T06:14:27.485724+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "cells",
+    "verdict"
+  ]
+}

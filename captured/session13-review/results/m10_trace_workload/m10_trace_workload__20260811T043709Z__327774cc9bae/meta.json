@@ -1,0 +1,72 @@
+{
+  "config": {
+    "arrival_rate_rps": 8.0,
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Padding share, TTFT and ITL under four prompt-length distributions at a common Poisson arrival rate. Tests whether 35.9% is a stack property or a workload property (review M5/Q5), and supplies the TTFT/ITL a serving paper is expected to report.",
+    "distributions": [
+      "fixed",
+      "lognormal",
+      "uniform",
+      "bimodal"
+    ],
+    "experiment": "m10_trace_workload",
+    "lengths": {
+      "fixed_len": 256,
+      "long_len": 2048,
+      "max_len": 4096,
+      "median_len": 256,
+      "min_len": 16,
+      "short_frac": 0.7,
+      "short_len": 128,
+      "sigma": 0.9
+    },
+    "max_inflight": 64,
+    "model": "Qwen/Qwen3-4B",
+    "note_lengths": "Parametric families spanning the plausible range, NOT a production trace -- we have none and the paper says so. sigma=0.9 is the order of magnitude reported for chat prompt-length spread; the bimodal arm is the agentic shape (short turns plus long context). The result is a sensitivity range, not a corrected point estimate.",
+    "note_output_len": "64, not 1. Review M5(ii): output_len=1 leaves no decode steady state, so decode results were measured under a workload that barely decodes. 64 gives every request a decode phase long enough for an inter-token latency to mean something.",
+    "note_rate": "8 rps is below the saturation point measured in earlier sessions, so the arms compare packing rather than compare queueing collapse. Poisson, not closed-loop: a closed loop cannot produce the queueing that decides how steps pack.",
+    "output_len": 64,
+    "requests_per_arm": 120,
+    "seed": 20260811,
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "327774cc9bae",
+  "duration_sec": 63.95,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m10_trace_workload",
+  "finished_at": "2026-08-11T04:38:13.964518+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e482d502-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m10_trace_workload__20260811T043709Z__327774cc9bae",
+  "started_at": "2026-08-11T04:37:09.998580+00:00",
+  "status": "ok",
+  "tables": [
+    "requests",
+    "arms"
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "REGIME MAP, padding arm. The same 2048->4096 boundary straddled at every batch size, so the paid-padding fraction is measured against n with the boundary held fixed. M1/M4 varied boundary and n together; this separates them.",
+    "edges": [
+      {
+        "n": 1,
+        "name": "n1:2048/4096",
+        "seq_len_above": 2049,
+        "seq_len_below": 2048
+      },
+      {
+        "n": 2,
+        "name": "n2:2048/4096",
+        "seq_len_above": 1025,
+        "seq_len_below": 1024
+      },
+      {
+        "n": 4,
+        "name": "n4:2048/4096",
+        "seq_len_above": 513,
+        "seq_len_below": 512
+      },
+      {
+        "n": 8,
+        "name": "n8:2048/4096",
+        "seq_len_above": 257,
+        "seq_len_below": 256
+      },
+      {
+        "n": 16,
+        "name": "n16:2048/4096",
+        "seq_len_above": 129,
+        "seq_len_below": 128
+      },
+      {
+        "n": 32,
+        "name": "n32:2048/4096",
+        "seq_len_above": 65,
+        "seq_len_below": 64
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_budget": "Every 'above' arm stays under max_num_batched_tokens=8192 so the dispatch is one step: the largest is 8x513=4104. Splits are counted per arm and warned about.",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "repeats": 7,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "b10e40c858c9",
+  "duration_sec": 9.867,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-08-10T22:41:43.785126+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-6d4b76fb-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.13"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260810T224133Z__b10e40c858c9",
+  "started_at": "2026-08-10T22:41:33.902028+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

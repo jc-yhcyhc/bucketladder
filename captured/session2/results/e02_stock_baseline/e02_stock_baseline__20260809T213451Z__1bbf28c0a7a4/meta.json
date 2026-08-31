@@ -1,0 +1,62 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "What stock tpu-inference does when a batch crosses a request-ladder edge. Decides whether the admission contribution exists.",
+    "edge": 8,
+    "experiment": "e02_stock_baseline",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "output_len": 8,
+    "prompt_len": 512,
+    "repeats": 3,
+    "request_ladder": [
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 1,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "1bbf28c0a7a4",
+  "duration_sec": 7.023,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e02_stock_baseline",
+  "finished_at": "2026-08-09T21:34:58.386120+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-49a917e8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e02_stock_baseline__20260809T213451Z__1bbf28c0a7a4",
+  "started_at": "2026-08-09T21:34:51.348111+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "verdict"
+  ]
+}

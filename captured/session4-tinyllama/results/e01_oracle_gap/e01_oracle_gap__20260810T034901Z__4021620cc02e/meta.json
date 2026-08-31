@@ -1,0 +1,74 @@
+{
+  "config": {
+    "buckets": [
+      256,
+      512,
+      1024,
+      2048
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 2048,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "R3 single-variable control on the GQA ratio. TinyLlama-1.1B-Chat is LlamaForCausalLM with head_dim 64 and GQA 8:1; SmolLM2-1.7B-Instruct is LlamaForCausalLM with head_dim 64 and full MHA. Same architecture, same head_dim, same order of size -- the only structural difference is the GQA ratio. Session 3's contrast (Qwen3-4B vs SmolLM2) moved head_dim, GQA ratio AND model family together and cannot attribute the gradient to any of them.",
+    "experiment": "e01_oracle_gap",
+    "fractions": [
+      0.99,
+      0.95,
+      0.85,
+      0.75,
+      0.65,
+      0.55
+    ],
+    "mode": "live",
+    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "note_arch": "LlamaForCausalLM is one of the architectures tpu-inference 0.25.0 actually implements in JAX (llama3.py). Qwen1.5-4B-Chat was the first choice and is UNSERVABLE: tpu_inference/models/jax/qwen2.py reads hf_config.text_config.hidden_size, which exists only on multimodal Qwen2 configs, so every text-only Qwen2ForCausalLM model raises AttributeError at engine start.",
+    "note_fractions": "Top fraction is 0.99, not 1.0. max_position_embeddings is 2048, so bucket 2048 at full occupancy would need 2048 prompt tokens plus an output token and be rejected. 0.99 x 2048 = 2027 still maps to bucket 2048, and flatness is computed from ACTUAL lengths.",
+    "note_reading": "The Qwen3-4B / SmolLM2 gap is present at EVERY bucket, not only at 4096: 1.00 vs 0.84 at 512, 0.96 vs 0.78 at 1024, 0.91 vs 0.73 at 2048. So capping at 2048 still tests the contrast. Against SmolLM2 at matched buckets: landing near SmolLM2's 0.73 at bucket 2048 means the GQA ratio does NOT drive the gradient and head_dim does; landing near Qwen3's 0.91 means GQA does.",
+    "note_size": "1.1B against SmolLM2's 1.7B. Flatness is a ratio of differences within one bucket, so absolute scale cancels; parameter count is not held constant and is stated as a residual difference rather than claimed away.",
+    "note_tp": "32 heads / 4 = 8, 4 kv / 4 = 1, intermediate 5632 / 4 = 1408 -- TP=4 shards cleanly.",
+    "note_weights": "Chosen after THREE models failed to load, each for a different reason invisible in config.json's architecture field: Qwen1.5 (Qwen2ForCausalLM is registered but broken), Sheared-LLaMA-1.3B (no safetensors), and NousResearch/Llama-2-7b-chat-hf, which has the ideal geometry -- Llama arch, head_dim 128, MHA -- and whose weights carry 24 rotary_emb.inv_freq buffers that tpu-inference's loader rejects as invalid param paths. Llama-2-era exports persist those buffers; TinyLlama, SmolLM2 and Qwen3 have zero.",
+    "output_len": 1,
+    "repeats": 5,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "4021620cc02e",
+  "duration_sec": 3.239,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e01_oracle_gap",
+  "finished_at": "2026-08-10T03:49:04.430423+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e6fa186a-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e01_oracle_gap__20260810T034901Z__4021620cc02e",
+  "started_at": "2026-08-10T03:49:01.176117+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "flatness",
+    "flatness_ci"
+  ]
+}

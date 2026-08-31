@@ -1,5 +1,14 @@
 __pycache__/
 *.pyc
 .venv/
-results/
-*.parquet
+# Anchored to the repo root: the WORKING results/ directory (regenerated
+# scratch output of a live run) is not tracked. Unanchored "results/" also
+# matched every captured/*/results/ directory -- the actual reproducibility
+# data reproduce_all.sh depends on -- so none of it was ever pushed, and a
+# fresh clone of this repo could not reproduce anything despite the paper's
+# own claims about that script. Found 2026-08-31, backfilled in the same
+# commit that fixes this line.
+/results/
+# Was also a blanket "*.parquet", which caught the same captured/ files a
+# second way even once /results/ was anchored. Removed rather than scoped:
+# nothing in this repo needs an unpinned rule for a whole file type.

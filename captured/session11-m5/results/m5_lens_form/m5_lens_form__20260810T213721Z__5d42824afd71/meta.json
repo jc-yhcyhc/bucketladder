@@ -1,0 +1,191 @@
+{
+  "config": {
+    "cells": [
+      {
+        "bucket": 512,
+        "n": 1,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 2,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 4,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 512,
+        "n": 8,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 1024,
+        "n": 1,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 2,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 4,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 1024,
+        "n": 8,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 2048,
+        "n": 1,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 2,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 4,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 2048,
+        "n": 8,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 4096,
+        "n": 1,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 2,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 4,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 4096,
+        "n": 8,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 8192,
+        "n": 2,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 4,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 8192,
+        "n": 8,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      }
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Fits LENS's per-bucket linear model (intercept + slope*length) on TPU across bucket AND batch size, to test whether our 6.11 ms fixed cost -- measured only at n=1, this project's known-degenerate regime -- is actually a constant. The paper's crossover result depends on it being one. A third mid-bucket point per cell is measured but withheld from the fit, so LENS's protocol can be validated against its stated 2.15% on hardware it never ran on.",
+    "experiment": "m5_lens_form",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len.",
+    "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
+    "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
+    "output_len": 1,
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "5d42824afd71",
+  "duration_sec": 55.325,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m5_lens_form",
+  "finished_at": "2026-08-10T21:38:16.726603+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-4497d73d-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m5_lens_form__20260810T213721Z__5d42824afd71",
+  "started_at": "2026-08-10T21:37:21.385554+00:00",
+  "status": "ok",
+  "tables": [
+    "points",
+    "fits",
+    "verdict"
+  ]
+}

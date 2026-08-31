@@ -1,0 +1,66 @@
+{
+  "config": {
+    "concurrency": [
+      1,
+      8,
+      32,
+      64,
+      128,
+      256
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Decode to n=256, the regime the paper advises about and has never measured. Discriminates the two candidate mechanisms: ragged tiling predicts request padding free at ANY batch size (padded slots hold no KV blocks), bandwidth predicts free only until the ridge near batch 240. They diverge here and nowhere below n=32.",
+    "experiment": "e02_stock_baseline",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "REGISTERED. Bandwidth: ms/step should bend upward approaching n~240 as the step leaves the memory-bound regime, and MFU should approach the ~49% the frontier table predicts at 256-token context. Ragged tiling: no bend, per-step cost continues its gentle rise and MFU stays low. A bend near 240 favours bandwidth; its absence favours ragged tiling and means the frontier bound in \u00a74.5 measures the wrong thing.",
+    "output_len": 64,
+    "prediction_mechanism": "Target: per-step decode cost and its curvature vs n. Lever: n. Under the bandwidth model, time = max(bytes/BW, flops/peak) and bytes = W + n*ctx*kv while flops = 2Pn, so d(time)/dn changes sign of curvature at the ridge \u2014 nonzero derivative, and the two models disagree about WHERE. Under ragged tiling the padded slots contribute no work at any n, so no bend is predicted.",
+    "prompt_len": 256,
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "cc983eb77ca0",
+  "duration_sec": 104.08,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e02_stock_baseline",
+  "finished_at": "2026-08-11T22:53:06.033575+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-dd0678c2-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e02_stock_baseline__20260811T225121Z__cc983eb77ca0",
+  "started_at": "2026-08-11T22:51:21.938269+00:00",
+  "status": "ok",
+  "tables": [
+    "samples",
+    "summary",
+    "server_timing",
+    "stock_verdict",
+    "verdict"
+  ]
+}

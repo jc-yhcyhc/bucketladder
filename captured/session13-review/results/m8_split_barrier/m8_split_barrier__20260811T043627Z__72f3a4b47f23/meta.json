@@ -1,0 +1,71 @@
+{
+  "config": {
+    "cells": [
+      {
+        "n": 4,
+        "seq_len": 128
+      },
+      {
+        "n": 8,
+        "seq_len": 128
+      },
+      {
+        "n": 16,
+        "seq_len": 128
+      },
+      {
+        "n": 32,
+        "seq_len": 128
+      }
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Is the n>8 measurement barrier the scheduler's or the harness's? Paired A/B between the ThreadPoolExecutor launcher every prior experiment used and a barrier-synchronised launcher that pays connection cost before the timed send. Cells hold total tokens far below max_num_batched_tokens so that any splitting cannot be a token-capacity effect.",
+    "experiment": "m8_split_barrier",
+    "model": "Qwen/Qwen3-4B",
+    "note_cells": "seq_len is held at 128 so total tokens stay at 512-4096, i.e. well under max_num_batched_tokens=8192 at every n. If splitting were a token-capacity effect none of these would split; the captured data says n=8 splits about half the time at ~1024 tokens.",
+    "note_repeats": "15 rather than 9: the quantity is a FRACTION of dispatches that split, and the prior cells sat near 50%, where a 9-sample estimate has a wide interval.",
+    "output_len": 1,
+    "repeats": 15,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "72f3a4b47f23",
+  "duration_sec": 12.11,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m8_split_barrier",
+  "finished_at": "2026-08-11T04:36:39.911140+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e482d502-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m8_split_barrier__20260811T043627Z__72f3a4b47f23",
+  "started_at": "2026-08-11T04:36:27.761339+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "summary"
+  ]
+}

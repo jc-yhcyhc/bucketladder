@@ -1,0 +1,48 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "SESSION 1 ONLY. Ungated Qwen3-4B so the warmup log can be captured without waiting on meta-llama approval. Session 1 exists to learn the log format, which does not depend on the model. Real measurements use Llama-3.1-8B once access lands.",
+    "experiment": "e00_smoke_test",
+    "mode": "log",
+    "model": "Qwen/Qwen3-4B",
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "1e70fd103b81",
+  "duration_sec": 0.301,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e00_smoke_test",
+  "finished_at": "2026-08-10T05:13:09.114788+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-77306a07-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e00_smoke_test__20260810T051308Z__1e70fd103b81",
+  "started_at": "2026-08-10T05:13:08.798283+00:00",
+  "status": "ok",
+  "tables": [
+    "ladder",
+    "controlled_audit"
+  ]
+}

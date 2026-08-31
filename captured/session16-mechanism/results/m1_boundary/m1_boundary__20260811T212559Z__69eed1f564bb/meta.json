@@ -1,0 +1,84 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 2048,
+      "max_num_batched_tokens": 4096,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Paid padding share on a SMALLER model, testing the direction review M2 identifies as the first-order threat. Quantization halves the per-chip weight floor; so does a smaller model, and we already have one qualified. The TP ablation established that a LARGER floor makes padding cheaper, so a smaller floor must make it more expensive.",
+    "edges": [
+      {
+        "n": 4,
+        "name": "n4:512/1024",
+        "seq_len_above": 130,
+        "seq_len_below": 126
+      },
+      {
+        "n": 4,
+        "name": "n4:1024/2048",
+        "seq_len_above": 258,
+        "seq_len_below": 254
+      },
+      {
+        "n": 8,
+        "name": "n8:512/1024",
+        "seq_len_above": 130,
+        "seq_len_below": 126
+      },
+      {
+        "n": 8,
+        "name": "n8:1024/2048",
+        "seq_len_above": 258,
+        "seq_len_below": 254
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "note_limits": "max_model_len is 2048 because TinyLlama's max_position_embeddings is; check_model.py caught this before the boot rather than after. max_num_batched_tokens stays above it so an n=8 dispatch of ~2064 tokens is not split by the token limit, which would reintroduce exactly the smearing this experiment excludes.",
+    "note_prediction": "REGISTERED BEFORE MEASUREMENT. TinyLlama-1.1B at TP=4 puts ~0.55 GB of bf16 weights per chip against Qwen3-4B's 2.01 GB \u2014 a 3.6x smaller floor. If the mechanism is the weight floor, the paid share at n=4 and n=8 must be HIGHER than Qwen3-4B's 23.1% and 14.3%. If it is unchanged, the mechanism is not the floor and \u00a74.5 is wrong.",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "repeats": 15,
+    "synchronised_launch": true,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "69eed1f564bb",
+  "duration_sec": 5.808,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-08-11T21:26:05.150957+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-240b2248-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260811T212559Z__69eed1f564bb",
+  "started_at": "2026-08-11T21:25:59.313788+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

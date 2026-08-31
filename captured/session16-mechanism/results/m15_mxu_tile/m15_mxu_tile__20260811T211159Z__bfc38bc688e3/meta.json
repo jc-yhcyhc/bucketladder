@@ -1,0 +1,77 @@
+{
+  "config": {
+    "arch": {
+      "dtype_bytes": 2,
+      "head_dim": 128,
+      "hidden_size": 2560,
+      "intermediate_size": 9728,
+      "kv_dtype_bytes": 2,
+      "num_attention_heads": 32,
+      "num_hidden_layers": 36,
+      "num_key_value_heads": 8,
+      "vocab_size": 151936
+    },
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Isolated matmul microbenchmark at M=1..64 with the model's real sharded weight shapes, to test review Q1's tile-padding hypothesis for the n=4 convergence. No server, no scheduler.",
+    "experiment": "m15_mxu_tile",
+    "m_values": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "mode": "microbenchmark",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "REGISTERED BEFORE MEASUREMENT. For tiling to explain the n=4 convergence the knee must land at M=4. A knee at 8/16/128 means tile padding is real but lands elsewhere and does not explain it. No knee means these shapes are latency-bound across the range.",
+    "note_threshold": "A knee is the first M where TOTAL matmul time rises >15% over the previous point. Inside an MXU tile the M dimension is padded, so total time is flat and per-row cost halves per doubling; outside it, total time tracks M.",
+    "repeats": 50,
+    "rise_threshold": 1.15,
+    "tpu_type": "v5litepod-4",
+    "warmup": 10
+  },
+  "config_hash": "bfc38bc688e3",
+  "duration_sec": 28.462,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "error": {
+    "message": "No module named 'pandas'",
+    "traceback": "Traceback (most recent call last):\n  File \"/home/yhcyhc1991/bucketladder/scripts/m15_mxu_tile.py\", line 104, in main\n    save_table(run, \"matmuls\", rows)\n  File \"/home/yhcyhc1991/bucketladder/scripts/_common.py\", line 300, in save_table\n    import pandas as pd  # imported lazily so the module is importable without it\n    ^^^^^^^^^^^^^^^^^^^\nModuleNotFoundError: No module named 'pandas'\n",
+    "type": "ModuleNotFoundError"
+  },
+  "experiment": "m15_mxu_tile",
+  "finished_at": "2026-08-11T21:12:27.692920+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-240b2248-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m15_mxu_tile__20260811T211159Z__bfc38bc688e3",
+  "started_at": "2026-08-11T21:11:59.215547+00:00",
+  "status": "failed",
+  "tables": []
+}

@@ -1,0 +1,69 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Designed confirmation that step token padding is not paid at n>1. Straddles a compiled bucket boundary at fixed batch size and near-fixed per-sequence length, so real work moves ~1.6% while padded work doubles. H1 answered this from a natural experiment; this is the randomised version.",
+    "edges": [
+      {
+        "n": 4,
+        "name": "512/1024",
+        "seq_len_above": 130,
+        "seq_len_below": 128
+      },
+      {
+        "n": 8,
+        "name": "1024/2048",
+        "seq_len_above": 129,
+        "seq_len_below": 128
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "c450284521b1",
+  "duration_sec": 2.664,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-08-10T16:40:58.268855+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-37ceaacc-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260810T164055Z__c450284521b1",
+  "started_at": "2026-08-10T16:40:55.589212+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

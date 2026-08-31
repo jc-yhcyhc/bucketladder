@@ -1,0 +1,78 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Paid padding share at n=16, the regime the paper previously reported as unmeasurable. Uses the barrier launcher M8 validated: under the old thread pool 100% of n=16 dispatches split and every cell was discarded.",
+    "edges": [
+      {
+        "n": 16,
+        "name": "n16:512/1024",
+        "seq_len_above": 34,
+        "seq_len_below": 30
+      },
+      {
+        "n": 16,
+        "name": "n16:1024/2048",
+        "seq_len_above": 66,
+        "seq_len_below": 62
+      },
+      {
+        "n": 16,
+        "name": "n16:2048/4096",
+        "seq_len_above": 130,
+        "seq_len_below": 126
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_repeats": "25, not 9. Only ~40% of n=16 dispatches keep their prefill in one step even under the barrier, so the usable sample is a fraction of the repeats and the analysis discards the rest. 25 targets ~10 clean dispatches per arm.",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "repeats": 25,
+    "synchronised_launch": true,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "f122c3caa678",
+  "duration_sec": 11.148,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-08-11T18:35:05.818318+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-084e009e-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260811T183454Z__f122c3caa678",
+  "started_at": "2026-08-11T18:34:54.654368+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

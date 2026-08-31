@@ -1,0 +1,101 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Does the share of padding that gets paid depend on WHICH boundary, or only on batch size? e01 says ~97% is paid at n=1; M1's first two edges say 6-10% at n=4 and n=8. This sweeps four boundaries at both batch sizes. If the share is flat across boundaries, the 3.45-5.17% ceiling holds; if it grows toward the big buckets, the ceiling is larger than computed and bucket-aligned packing matters more.",
+    "edges": [
+      {
+        "n": 4,
+        "name": "n4:512/1024",
+        "seq_len_above": 130,
+        "seq_len_below": 128
+      },
+      {
+        "n": 4,
+        "name": "n4:1024/2048",
+        "seq_len_above": 258,
+        "seq_len_below": 256
+      },
+      {
+        "n": 4,
+        "name": "n4:2048/4096",
+        "seq_len_above": 514,
+        "seq_len_below": 512
+      },
+      {
+        "n": 4,
+        "name": "n4:4096/8192",
+        "seq_len_above": 1026,
+        "seq_len_below": 1024
+      },
+      {
+        "n": 8,
+        "name": "n8:1024/2048",
+        "seq_len_above": 129,
+        "seq_len_below": 128
+      },
+      {
+        "n": 8,
+        "name": "n8:2048/4096",
+        "seq_len_above": 258,
+        "seq_len_below": 256
+      },
+      {
+        "n": 8,
+        "name": "n8:4096/8192",
+        "seq_len_above": 513,
+        "seq_len_below": 512
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_budget": "Every 'above' arm stays under max_num_batched_tokens=8192 so the dispatch is one step: the largest is 8x513=4104. Splits are counted per arm and warned about.",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "0c4087987fd2",
+  "duration_sec": 13.226,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-08-10T18:22:25.257114+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-ade80fd9-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260810T182212Z__0c4087987fd2",
+  "started_at": "2026-08-10T18:22:12.015650+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

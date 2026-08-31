@@ -1,0 +1,62 @@
+{
+  "config": {
+    "concurrency": [
+      8,
+      32,
+      64,
+      128,
+      256
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Measures the ACTUAL running batch via vllm:num_requests_running, to test whether session 18's n=128/256 columns ever ran the batch they were labelled with (review 4.1).",
+    "experiment": "m19_resident",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "REGISTERED. If the gauge peaks well below n at 128/256, session 18's refutation of the bandwidth account is unsupported and must be withdrawn.",
+    "output_len": 64,
+    "poll_interval_s": 0.05,
+    "prediction_mechanism": "Target: effective running batch. Lever: requested concurrency n. The gauge reads the scheduler's own running set, so d(running)/d(n) is nonzero up to whatever cap max_num_seqs or KV capacity imposes \u2014 and locating that cap is the point.",
+    "prompt_len": 256,
+    "reached_frac": 0.95,
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "533f1f695519",
+  "duration_sec": 10.182,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m19_resident",
+  "finished_at": "2026-08-12T00:05:35.923597+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-e617e309-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m19_resident__20260812T000525Z__533f1f695519",
+  "started_at": "2026-08-12T00:05:25.725628+00:00",
+  "status": "ok",
+  "tables": [
+    "residency"
+  ]
+}

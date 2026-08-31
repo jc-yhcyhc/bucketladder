@@ -1,0 +1,65 @@
+{
+  "config": {
+    "concurrency": [
+      2,
+      4,
+      6,
+      8,
+      12,
+      16
+    ],
+    "control_levels": [],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Does cost depend on TOTAL TOKENS alone? sim/measured_cost_curve.json is keyed on total tokens in the step, but every run behind it used prompt_len=512, so that generalisation is assumed, not measured. This repeats the cost curve at prompt_len=256: if cost is a function of total tokens, 16x256 must cost what 8x512 costs. If it does not, the model is misspecified and cost depends on the batch shape, not just its token count.",
+    "experiment": "e04_step_count",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_levels": "8 and 16 are unimodal in e02 and act as CONTROLS: the mechanism is only confirmed if cost separates by step count on 9/10/12/14 and does NOT separate on these. Listing them in control_levels is what makes the verdict falsifiable rather than a restatement of 'the metric varies'.",
+    "note_matching": "Token counts hit: 512, 1024, 1536, 2048, 3072, 4096 -- every one of them a knot in the fitted curve, so the comparison is direct rather than interpolated.",
+    "output_len": 1,
+    "prompt_len": 256,
+    "repeats": 21,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "0b7a45adb432",
+  "duration_sec": 10.413,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e04_step_count",
+  "finished_at": "2026-08-10T05:15:58.775121+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-77306a07-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e04_step_count__20260810T051548Z__0b7a45adb432",
+  "started_at": "2026-08-10T05:15:48.346874+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "by_iterations",
+    "verdict",
+    "spread"
+  ]
+}

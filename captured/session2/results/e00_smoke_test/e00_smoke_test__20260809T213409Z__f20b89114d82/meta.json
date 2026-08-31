@@ -1,0 +1,48 @@
+{
+  "config": {
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "W0b gate against the vLLM default (exponential / power-of-two) ladder.",
+    "experiment": "e00_smoke_test",
+    "mode": "log",
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "tpu_type": "v5litepod-4",
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "f20b89114d82",
+  "duration_sec": 0.303,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e00_smoke_test",
+  "finished_at": "2026-08-09T21:34:10.110059+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-49a917e8-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e00_smoke_test__20260809T213409Z__f20b89114d82",
+  "started_at": "2026-08-09T21:34:09.792005+00:00",
+  "status": "ok",
+  "tables": [
+    "ladder",
+    "controlled_audit"
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "config": {
+    "arms": [
+      {
+        "K": 2560,
+        "N": 1536,
+        "iters": 200,
+        "m_values": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256,
+          512
+        ],
+        "name": "real_shapes",
+        "note": "Real qkv shape, amortised over 200 iterations so dispatch is divided away. Tests m13's frontier: flat to M~240, rising after."
+      },
+      {
+        "K": 2048,
+        "N": 2048,
+        "iters": 1000,
+        "m_values": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "name": "tile_probe",
+        "note": "2048x2048 = 8.4 MB, small enough to plausibly stay VMEM-resident across the 1000 loop iterations. That is the ONLY way to get compute-bound below M=241: for a weight-stationary matmul the arithmetic intensity IS M, so a per-iteration HBM reload makes every M<241 bandwidth-bound no matter how the matrix is sized. If the weights are not hoisted, this arm stays under the utilisation floor and is refused rather than misread -- which is the correct outcome, not a failure."
+      }
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Two-arm matmul microbenchmark that can discriminate bandwidth from MXU tiling, replacing M15 which could not. Every cell reports implied GB/s and FLOP/s; cells below a utilisation floor are refused rather than interpreted.",
+    "experiment": "m17_tile_discriminating",
+    "hardware": {
+      "hbm_bw_bytes_per_s_per_chip": 819000000000.0,
+      "peak_bf16_flops_per_chip": 197000000000000.0
+    },
+    "mode": "microbenchmark",
+    "model": "Qwen/Qwen3-4B",
+    "note_floor": "M15 ran at 7% of peak bandwidth and its curve was per-dispatch overhead. Any cell below 20% of either roof is dispatch-bound and is reported but not interpreted.",
+    "note_intensity": "Recorded because it invalidated the first design of this experiment: a weight-stationary matmul with M rows has arithmetic intensity exactly M, so no choice of matrix size makes M<241 compute-bound on this chip. Only amortising the weight load across iterations can.",
+    "repeats": 20,
+    "rise_threshold": 1.15,
+    "tpu_type": "v5litepod-4",
+    "utilisation_floor_pct": 20.0
+  },
+  "config_hash": "53932bb4b583",
+  "duration_sec": 22.622,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m17_tile_discriminating",
+  "finished_at": "2026-08-11T22:06:19.471373+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-f984c0dc-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m17_tile_discriminating__20260811T220556Z__53932bb4b583",
+  "started_at": "2026-08-11T22:05:56.834354+00:00",
+  "status": "ok",
+  "tables": [
+    "cells",
+    "verdicts"
+  ]
+}

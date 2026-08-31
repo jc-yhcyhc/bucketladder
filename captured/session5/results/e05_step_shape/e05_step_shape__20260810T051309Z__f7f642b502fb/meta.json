@@ -1,0 +1,63 @@
+{
+  "config": {
+    "concurrency": [
+      8,
+      9,
+      10,
+      12,
+      14,
+      16
+    ],
+    "controlled": {
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Reads the per-step token histogram to explain e02/e04's cost bimodality. Three explanations are already excluded from captured data: total scheduled tokens are identical between modes, step COUNT is identical at n=12 and n=14, and a runs test shows no clustering, so it is a per-dispatch coin flip rather than drift. What remains is how the same tokens were distributed across steps, which only the histogram buckets show.",
+    "experiment": "e05_step_shape",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_levels": "8 and 16 are near-unimodal in e02 and act as controls: if the expensive mode uses a higher token bucket at 9-14 but not at 8/16, the mechanism is specific to the region where the bimodality lives.",
+    "note_output_len": "output_len=1 keeps decode iterations from crowding the histogram. e04 confirmed the bimodality is present at output_len=1 (n=12: 87.9 vs 136.5 ms), so nothing is lost by measuring it in the cleaner regime.",
+    "output_len": 1,
+    "prompt_len": 512,
+    "repeats": 25,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 2,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "f7f642b502fb",
+  "duration_sec": 28.693,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "e05_step_shape",
+  "finished_at": "2026-08-10T05:13:37.949551+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-77306a07-w-0",
+    "platform": "Linux-6.5.0-1013-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "e05_step_shape__20260810T051309Z__f7f642b502fb",
+  "started_at": "2026-08-10T05:13:09.241566+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "modes",
+    "verdict"
+  ]
+}
