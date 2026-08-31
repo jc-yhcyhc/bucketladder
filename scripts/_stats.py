@@ -142,6 +142,65 @@ def flatness_ci(
     return point, vals[int(alpha / 2 * len(vals))], vals[int((1 - alpha / 2) * len(vals))]
 
 
+def _paid_share_point(below_vals: Sequence[float], above_vals: Sequence[float],
+                      tokens_real_below: float, tokens_real_above: float,
+                      tokens_padded_below: float, tokens_padded_above: float) -> float:
+    """Paid share for one resample. Mirrors paper_numbers.m1_share/m14_share
+    exactly: (measured - real) / (padded - real), as ratios relative to the
+    below arm. 0 = padding free, 1 = padding fully paid."""
+    below, above = statistics.median(below_vals), statistics.median(above_vals)
+    if below <= 0:
+        return float("nan")
+    real_ratio = tokens_real_above / tokens_real_below
+    padded_ratio = tokens_padded_above / tokens_padded_below
+    denom = padded_ratio - real_ratio
+    if denom == 0:
+        return float("nan")
+    return ((above / below) - real_ratio) / denom
+
+
+def paid_share_ci(
+    below_vals: Sequence[float],
+    above_vals: Sequence[float],
+    tokens_real_below: float,
+    tokens_real_above: float,
+    tokens_padded_below: float,
+    tokens_padded_above: float,
+    n: int = 10000,
+    alpha: float = 0.05,
+    seed: int = 42,
+) -> tuple[float, float, float]:
+    """(point, ci_lo, ci_hi) for the paid-share statistic at one boundary.
+
+    Built for the MLSys review's sharpest point: the ~85% paid share at n<=2 is
+    quoted in the abstract and conclusion with no interval, computed from one
+    boundary. This is the same paired-independent-resample pattern as
+    flatness_ci -- below_vals and above_vals are separate arms measured at
+    different times, not paired observations, so they resample independently.
+    tokens_real/tokens_padded are structural properties of the edge (fixed by
+    the config, not measured with noise) and are not resampled.
+    """
+    rng = random.Random(seed)
+    point = _paid_share_point(below_vals, above_vals, tokens_real_below,
+                              tokens_real_above, tokens_padded_below, tokens_padded_above)
+    n_lo, n_hi = len(below_vals), len(above_vals)
+    if n_lo < 2 or n_hi < 2:
+        return point, float("nan"), float("nan")
+
+    vals = []
+    for _ in range(n):
+        rb = [below_vals[rng.randint(0, n_lo - 1)] for _ in range(n_lo)]
+        ra = [above_vals[rng.randint(0, n_hi - 1)] for _ in range(n_hi)]
+        s = _paid_share_point(rb, ra, tokens_real_below, tokens_real_above,
+                              tokens_padded_below, tokens_padded_above)
+        if s == s:  # drop NaN
+            vals.append(s)
+    if not vals:
+        return point, float("nan"), float("nan")
+    vals.sort()
+    return point, vals[int(alpha / 2 * len(vals))], vals[int((1 - alpha / 2) * len(vals))]
+
+
 def fmt_ci(point: float, lo: float, hi: float, unit: str = "") -> str:
     """`0.97 [0.94, 1.01]` — the form every reported number should take."""
     if lo != lo or hi != hi:

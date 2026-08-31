@@ -1,0 +1,56 @@
+{
+  "experiment": "e14_n1_all_boundaries",
+  "description": "MLSys review: the ~85% paid share at n<=2 rests on one boundary with no interval, and it is the largest number in the paper and the one carrying the abstract's headline claim. This measures n=1 across all four D2 boundaries with enough repeats for a real interval, rather than one boundary asserted to generalize.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
+  },
+  "output_len": 1,
+  "repeats": 15,
+  "warmup_discard": 3,
+  "edges": [
+    {
+      "name": "512/1024",
+      "n": 1,
+      "seq_len_below": 508,
+      "seq_len_above": 516
+    },
+    {
+      "name": "1024/2048",
+      "n": 1,
+      "seq_len_below": 1020,
+      "seq_len_above": 1028
+    },
+    {
+      "name": "2048/4096",
+      "n": 1,
+      "seq_len_below": 2044,
+      "seq_len_above": 2052
+    },
+    {
+      "name": "4096/8192",
+      "n": 1,
+      "seq_len_below": 4088,
+      "seq_len_above": 4104
+    }
+  ],
+  "note_seq_len": "Each edge's below/above pair straddles that boundary with a fixed 8-token gap, so real tokens move by a shrinking fraction as the boundary grows (1.6% at 512, 0.2% at 4096) while padded tokens double at every edge -- the same discriminating design as m1_boundary, run at n=1 instead of 4/8 and across all four boundaries instead of one.",
+  "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+  "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+  "dimension": "D2",
+  "prediction_mechanism": "Target: the paid share of nominal padding at n=1, matched to Table 6's n<=2 row (~85%, no interval). Lever: four boundaries instead of one, 15 repeats instead of 9, so the headline figure gets the same interval treatment as every other row in that table."
+}

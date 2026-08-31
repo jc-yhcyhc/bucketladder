@@ -327,6 +327,71 @@ def test_fmt_ci_shape():
     assert "no CI" in fmt_ci(0.97, float("nan"), float("nan"))
 
 
+# Shared 512/1024 boundary geometry for the paid_share_ci tests below: real
+# tokens move 508->516 (real_ratio ~1.016), padded tokens double 512->1024
+# (padded_ratio 2.0) -- e14_n1_all_boundaries.json's actual first edge.
+_PS_REAL_BELOW, _PS_REAL_ABOVE = 508.0, 516.0
+_PS_PAD_BELOW, _PS_PAD_ABOVE = 512.0, 1024.0
+
+
+def test_paid_share_ci_is_one_when_fully_paid():
+    """Cost tracks the padded ratio exactly -> share 1.0 with a narrow CI."""
+    from _stats import paid_share_ci
+    real_ratio = _PS_REAL_ABOVE / _PS_REAL_BELOW
+    below = [100.0, 100.2, 99.8] * 4
+    above = [b * 2.0 for b in below]  # cost_ratio == padded_ratio == 2.0
+    pt, lo, hi = paid_share_ci(below, above, _PS_REAL_BELOW, _PS_REAL_ABOVE,
+                               _PS_PAD_BELOW, _PS_PAD_ABOVE)
+    assert pt == pytest.approx(1.0, abs=1e-9)
+    assert hi - lo < 0.1
+    assert real_ratio < 2.0  # sanity: the two ratios this statistic sits between differ
+
+
+def test_paid_share_ci_is_zero_when_fully_free():
+    """Cost tracks the real ratio exactly -> share 0.0 with a narrow CI."""
+    from _stats import paid_share_ci
+    real_ratio = _PS_REAL_ABOVE / _PS_REAL_BELOW
+    below = [100.0, 100.2, 99.8] * 4
+    above = [b * real_ratio for b in below]  # cost_ratio == real_ratio
+    pt, lo, hi = paid_share_ci(below, above, _PS_REAL_BELOW, _PS_REAL_ABOVE,
+                               _PS_PAD_BELOW, _PS_PAD_ABOVE)
+    assert pt == pytest.approx(0.0, abs=1e-9)
+    assert hi - lo < 0.1
+
+
+def test_paid_share_ci_is_wide_when_underpowered():
+    """Noisy arms must produce an interval that says so, not a confident point."""
+    from _stats import paid_share_ci
+    below = [80.0, 120.0, 90.0, 110.0]
+    above = [150.0, 250.0, 180.0, 220.0]
+    _, lo, hi = paid_share_ci(below, above, _PS_REAL_BELOW, _PS_REAL_ABOVE,
+                              _PS_PAD_BELOW, _PS_PAD_ABOVE)
+    assert hi - lo > 0.5
+
+
+def test_paid_share_ci_matches_paper_numbers_formula():
+    """The bootstrapped point must equal (measured - real) / (padded - real),
+    the formula paper_numbers.m1_share/m14_share already use."""
+    from _stats import paid_share_ci
+    below_vals, above_vals = [50.0] * 5, [92.0] * 5
+    real_ratio = _PS_REAL_ABOVE / _PS_REAL_BELOW
+    padded_ratio = _PS_PAD_ABOVE / _PS_PAD_BELOW
+    cost_ratio = 92.0 / 50.0
+    expected = (cost_ratio - real_ratio) / (padded_ratio - real_ratio)
+    pt, _, _ = paid_share_ci(below_vals, above_vals, _PS_REAL_BELOW, _PS_REAL_ABOVE,
+                             _PS_PAD_BELOW, _PS_PAD_ABOVE)
+    assert pt == pytest.approx(expected, abs=1e-9)
+
+
+def test_paid_share_ci_needs_at_least_two_repeats_per_arm():
+    """One repeat can't resample, so the interval must come back as NaN, not 0."""
+    from _stats import paid_share_ci
+    pt, lo, hi = paid_share_ci([100.0], [200.0], _PS_REAL_BELOW, _PS_REAL_ABOVE,
+                               _PS_PAD_BELOW, _PS_PAD_ABOVE)
+    assert pt == pytest.approx(1.0, abs=1e-9)  # point estimate still computable
+    assert lo != lo and hi != hi  # NaN != NaN
+
+
 def test_e01_emits_intervals_and_flags_underpowered(tmp_path):
     import pandas as pd
     e01.main(["--config", str(E01_CFG), "--mock", "--results-root", str(tmp_path)])
