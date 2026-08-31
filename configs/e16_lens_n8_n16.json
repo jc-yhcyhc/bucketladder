@@ -1,0 +1,95 @@
+{
+  "experiment": "e16_lens_n8_n16",
+  "description": "MLSys review: 'Extend the LENS reproduction to n=8 and n=16. The failure is at your endpoint, and \"LENS's protocol is specified over bucket structure\" does not answer whether the length term recovers above 4.' session12-regime already measured n=8/16/32, but with the plain thread-pool launcher, so every cell there splits (M8's arrival-race problem) and m6_lens_ablation.py's splits==0 filter drops all of it. This config reruns the same cells under the barrier launcher m1_boundary.py and m14 already validated for exactly this failure mode, so the n=8/16 result is not confounded with the launcher that produced it.",
+  "model": "Qwen/Qwen3-4B",
+  "tpu_type": "v5litepod-4",
+  "warmup_log_path": "/tmp/vllm_warmup.log",
+  "controlled": {
+    "enable_prefix_caching": false,
+    "enable_chunked_prefill": true,
+    "max_num_batched_tokens": 8192,
+    "tensor_parallel_size": 4,
+    "speculative_model": null,
+    "kv_cache_dtype": "auto",
+    "VLLM_TPU_BUCKET_PADDING_GAP": "",
+    "max_model_len": 8192,
+    "gpu_memory_utilization": 0.92,
+    "XLA_FLAGS": "",
+    "ATTN_BUCKETIZED_NUM_REQS": false,
+    "MODEL_IMPL_TYPE": "auto",
+    "MOE_ROUTE_PADDING_TO_EXPERT0": false
+  },
+  "output_len": 1,
+  "repeats": 25,
+  "warmup_discard": 3,
+  "cells": [
+    {
+      "bucket": 512,
+      "n": 8,
+      "tokens_lo": 320,
+      "tokens_mid": 384,
+      "tokens_hi": 512
+    },
+    {
+      "bucket": 1024,
+      "n": 8,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 2048,
+      "n": 8,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 4096,
+      "n": 8,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 8192,
+      "n": 8,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    },
+    {
+      "bucket": 1024,
+      "n": 16,
+      "tokens_lo": 640,
+      "tokens_mid": 768,
+      "tokens_hi": 1024
+    },
+    {
+      "bucket": 2048,
+      "n": 16,
+      "tokens_lo": 1280,
+      "tokens_mid": 1536,
+      "tokens_hi": 2048
+    },
+    {
+      "bucket": 4096,
+      "n": 16,
+      "tokens_lo": 2560,
+      "tokens_mid": 3072,
+      "tokens_hi": 4096
+    },
+    {
+      "bucket": 8192,
+      "n": 16,
+      "tokens_lo": 5120,
+      "tokens_mid": 6144,
+      "tokens_hi": 8192
+    }
+  ],
+  "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
+  "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
+  "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len.",
+  "dimension": "D2",
+  "synchronised_launch": true
+}

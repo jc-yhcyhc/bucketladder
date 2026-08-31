@@ -57,14 +57,24 @@ sys.path.insert(0, str(HERE.parent / "sim"))
 from _client import complete, complete_mock  # noqa: E402
 from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
 from _metrics import MockMetrics, delta, metrics_available, scrape  # noqa: E402
+from m8_split_barrier import launch_barrier  # noqa: E402
 
 PREFILL = "vllm:request_prefill_time_seconds"
 ITER = "vllm:iteration_tokens_total"
 
 
 def dispatch(base_url: str, model: str, n: int, seq_len: int, olen: int, seed: int,
-             mock=None, mock_intercept: float = 6.11) -> tuple[float, float]:
-    """One n-request dispatch of `seq_len` tokens each. Returns (ms, n_steps)."""
+             mock=None, mock_intercept: float = 6.11,
+             synchronised: bool = False) -> tuple[float, float]:
+    """One n-request dispatch of `seq_len` tokens each. Returns (ms, n_steps).
+
+    `synchronised` is M8's barrier launcher instead of the plain thread pool --
+    same fix m1_boundary.py uses, and for the same reason: at n>=8 the thread
+    pool's millisecond-scale arrival smear makes the scheduler split nearly
+    every dispatch, and a split cell contributes nothing to a fit that assumes
+    a single step. Without this, LENS's protocol was never actually
+    reproducible above n=4 on this stack, independent of what the numbers say.
+    """
     before = mock.snapshot() if mock else scrape(base_url)
 
     def fn(i: int):
@@ -72,8 +82,11 @@ def dispatch(base_url: str, model: str, n: int, seq_len: int, olen: int, seed: i
             return complete_mock(seq_len, olen, ladder=None, staircase=False, seed=seed * 100 + i)
         return complete(base_url, model, seq_len, olen, seed=seed * 100 + i)
 
-    with ThreadPoolExecutor(max_workers=n) as pool:
-        list(pool.map(fn, range(n)))
+    if synchronised and mock is None:
+        launch_barrier(base_url, model, n, seq_len, olen, seed)
+    else:
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            list(pool.map(fn, range(n)))
 
     if mock is not None:
         per = mock_intercept + 0.0139 * n * seq_len
@@ -89,10 +102,12 @@ def dispatch(base_url: str, model: str, n: int, seq_len: int, olen: int, seed: i
             it["count"] if it else float("nan"))
 
 
-def measure(base_url, model, n, seq_len, olen, reps, discard, mock, mi) -> tuple[float, int]:
+def measure(base_url, model, n, seq_len, olen, reps, discard, mock, mi,
+           synchronised: bool = False) -> tuple[float, int]:
     costs, splits = [], 0
     for rep in range(-discard, reps):
-        c, st = dispatch(base_url, model, n, seq_len, olen, rep, mock, mi)
+        c, st = dispatch(base_url, model, n, seq_len, olen, rep, mock, mi,
+                         synchronised=synchronised)
         if rep < 0:
             continue
         if c == c:
@@ -140,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             for tag in ("lo", "hi", "mid"):
                 T = cell[f"tokens_{tag}"]
                 seq = T // n
-                c, sp = measure(args.base_url, cfg["model"], n, seq, olen, reps, discard, mock, mi)
+                c, sp = measure(args.base_url, cfg["model"], n, seq, olen, reps, discard, mock, mi,
+                               synchronised=cfg.get("synchronised_launch", False))
                 got[tag] = (T, c, sp)
                 pts.append({"bucket": b, "n": n, "point": tag, "tokens": T,
                             "seq_len": seq, "cost_ms": c, "splits": sp})

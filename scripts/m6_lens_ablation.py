@@ -89,11 +89,24 @@ def main(argv: list[str] | None = None) -> int:
     conf = meta["config"]
     rows = pq.read_table(src / "points.parquet").to_pylist()
 
+    # A capture from before a control existed has no opinion on it, and
+    # start_run must not launder that silence into "controlled and passing."
+    # These three were promoted to CONTROLLED_VARS after some early m5
+    # sessions ran (gpu_memory_utilization in session 25; the other two with
+    # the M2 MoE arms) -- backfilled here with the values that were actually
+    # in force throughout, same figures used when the configs/ files
+    # themselves were backfilled, not guessed fresh for this script.
+    controlled = dict(conf.get("controlled", {}))
+    controlled.setdefault("gpu_memory_utilization", 0.92)
+    controlled.setdefault("MODEL_IMPL_TYPE", "auto")
+    controlled.setdefault("MOE_ROUTE_PADDING_TO_EXPERT0", False)
+
     cfg = {"experiment": "m6_lens_ablation", "dimension": "D2", "mode": "offline",
            "source_run": src.name, "source_glob": args.capture_glob,
-           "model": conf.get("model"), "controlled": conf.get("controlled", {}),
+           "model": conf.get("model"), "controlled": controlled,
            "note_source": ("Re-analysis of one captured m5 run; no new measurement, so "
-                           "every controlled variable is inherited verbatim from it.")}
+                           "every controlled variable is inherited verbatim from it, "
+                           "backfilled where the source predates a control's addition.")}
     run = start_run("m6_lens_ablation", cfg, results_root=args.results_root)
     status, err = "ok", None
     try:
