@@ -16,8 +16,9 @@ the same instrument, on a GPU.
 
 **This assumption does not hold in the stacks we measured.** A batch placed just
 above a compiled entry costs
-approximately what the entry below it costs. On TPU it falls 3–5% under the lower
-entry. On GPU, padding a batch from 8 up to a captured 16 costs 67 µs, which is
+approximately what the entry below it costs. On TPU, padding a request slot costs
+under 0.7 µs against 27.5 µs if it were paid. On GPU, padding a batch from 8 up to
+a captured 16 costs 67 µs, which is
 0.6% of the step. **The two architectures are compared on the request dimension only.**
 CUDA-graph capture quantizes batch size, so the GPU arms vary batch size and
 establish request-padding parity; the token dimension, on which this paper's
@@ -39,7 +40,7 @@ zero at batch 16, and it is the one dimension on which an intervention can pay.
 **On that dimension, ladder design pays — and the effective variable is placement
 rather than shape count.** A fourteen-shape ladder that adds one entry the default
 lacks reduces end-to-end latency by 12.1% at the prompt length that straddles it,
-by 0.2% at a length it does not, and boots at the stack's default memory fraction
+by 0.1% at a length it does not, and boots at the stack's default memory fraction
 with unchanged key–value cache capacity. A twenty-one-shape ladder achieves the
 same reduction and additionally fails to start above a memory fraction of 0.85
 against a 0.92 default, which costs 8.8% of cache capacity and 53% more startup
@@ -102,7 +103,7 @@ in response, and §6 reports what the asymmetry does and does not license.
 
 **Contributions.**
 
-1. **The premise, measured** (§4.1, §4.2, §8). Padding a batch up to a compiled or
+1. **The premise, measured** (§4.1, §4.2, §4.9). Padding a batch up to a compiled or
    captured entry is close to free on a TPU ladder and on CUDA-graph capture
    alike; what shape coverage costs is warmup. The GPU comparison covers the
    request dimension, which is the dimension graph capture quantizes.
@@ -641,23 +642,34 @@ The benefit, however, is bought by a different variable than the cost. The
 padding-gap lever changes the spacing law and the shape count together, so the
 measurements above attribute a benefit and a price to the same parameter without
 separating them. Every cost scales with cardinality: warmup, resident executables,
-and the headroom that sets the boot cliff. Two intermediate gaps separate them ([tab:placement]),
-all measured at 0.92 in one session:
+and the headroom that sets the boot cliff. Two intermediate gaps separate them ([tab:placement]).
+The default, gap-1024 and gap-2048 rows are measured together, at 0.92, in one
+server boot; the gap-512 row is not remeasured here and repeats the twenty-one-shape
+values already established in [tab:ladder21], from a different boot the day before:
 
-Table: Separating placement from cardinality. Shape count ranges from 10 to 21 while the benefit follows only whether an entry falls between the prompt and the next default entry. {#tab:placement}
+Table: Separating placement from cardinality. Shape count ranges from 10 to 21 while the benefit follows only whether an entry falls between the prompt and the next default entry. Gap 512 is carried over from [tab:ladder21] rather than measured in this boot; see the note below the table. {#tab:placement}
 | ladder | shapes | 1200 pads to | 3000 pads to | prompt 1200 | prompt 3000 |
 |---|---|---|---|---|---|
 | default | 10 | 2048 | 4096 | 215.4 ms | 297.2 ms |
 | gap 1024 | 14 | 2048 | **3072** | 210.9 ms | **256.5 ms** |
-| gap 512 | 21 | **1536** | **3072** | 188.2 ms | 253.7 ms |
+| gap 512 † | 21 | **1536** | **3072** | 188.2 ms | 253.7 ms |
 | gap 2048 | 11 | 2048 | 4096 | 214.1 ms | 296.1 ms |
+
+† Reused from [tab:ladder21]'s boot, not this one. That boot's own default arm read
+206.0 ms at prompt 1200 and 289.9 ms at prompt 3000 — 9.4 ms and 7.3 ms below this
+boot's default row for a nominally identical configuration, in line with the
+4–11 ms between-instance offsets [tab:isolated] measures directly. Any comparison
+that mixes the gap-512 row with a value from this table's own boot carries that
+much additional, uncorrected uncertainty; the −12.1% figure below does not, since
+default and gap-1024 are both this boot's own measurements.
 
 Against the ten-shape ladder, and correcting by the prompt-300 cell, the
 fourteen-shape ladder is +0.2 ms at prompt 1200 and −36.0 ms, or −12.1%, at prompt
-3000. It gains exactly where it places an entry the default lacks, at 3072, and
-nowhere else: it has no entry at 1536, so prompt 1200 is unaffected. The
-eleven-shape ladder places nothing new near either prompt and tracks the default at
-both. Shape count ranges from 10 to 21 across these arms while the benefit depends
+3000 — both figures from arms measured in this same boot. It gains exactly where it
+places an entry the default lacks, at 3072, and nowhere else: it has no entry at
+1536, so prompt 1200 is unaffected. The eleven-shape ladder places nothing new near
+either prompt and tracks the default at both. Shape count ranges from 10 to 21
+across these arms while the benefit depends
 only on whether a boundary falls between the prompt and the next default entry.
 
 ##### Feasibility at the default memory fraction
@@ -1133,6 +1145,53 @@ batch ≈ 240 to ≈ 120. That yields a registered prediction — under W8 the
 token-dimension paid share at a fixed boundary rises — which **has not been run**.
 It is future work rather than a result, and nothing above depends on it.
 
+### 4.9 The request-dimension result replicates on GPU
+
+§4.1's request-dimension finding was measured on TPU. Whether it holds on another
+architecture is testable rather than assumed: same vLLM 0.25.0, same instrument,
+an L4 (23 GB, TP=1) in place of the v5e:
+
+Table: GPU control on an L4: CUDA-graph capture against eager execution. The increments are the measurement; the levels differ by a constant launch overhead. {#tab:gpu}
+| arm | n=8 | n=9 | n=16 | 8→9 | 8→16 | startup |
+|---|---|---|---|---|---|---|
+| CUDA graphs on | 10.605 | 10.887 | 12.298 | **0.283** | **1.693** | 118.7 s |
+| `--enforce-eager` | 19.934 | 20.150 | 21.618 | **0.215** | **1.684** | 10.7 s |
+
+**The increments are the measurement; the levels are not.** Eager execution pays a
+constant per-operation launch overhead, so the levels differ by roughly 9.3 ms
+throughout, and that constant cancels in any increment. It cancels to within 9 µs on
+the 8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
+requires: the two arms measure the same underlying work plus an offset, so their
+difference isolates what capture adds.
+
+On that basis, padding a batch from 8 up to the captured entry at 16 costs
+approximately **67 µs**, being the 0.283 ms increment with graphs against 0.215 ms
+without. That is 0.6% of a 10.9 ms step, or 4.0% of the nominal padding implied by
+rounding 9 up to 16.
+
+**This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
+CUDA path captures a graph per batch size, so what these arms vary is the request
+dimension, which the TPU results explain with a data-structure argument (§4.1) and
+where no proposed optimization was going to pay. The token dimension, where this
+paper locates the only surviving effect, is not reached: no arm here varies tokens
+per step at fixed batch. The cross-architecture statement this table supports is
+therefore that **request-dimension padding is close to free on both architectures**,
+not that the premise is false on both. Whether a GPU stack pays for token padding as
+a TPU stack does is untested, and is the experiment that would make the
+cross-architecture claim general.
+
+The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
+intervals of roughly ±50 percentage points, so this table cannot resolve a
+difference between the architectures; what both support is that the paid share is
+small on each. These remain single measurements: three batch points, one GPU, no
+repeats.
+
+**What is paid is the capture, and it is paid at startup.** Enabling graphs costs
+108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
+That is precisely the quantity BucketServe and LAPS manage when they write that the
+number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
+compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.
+
 ---
 
 ## 5. Optimizations designed against these measurements
@@ -1386,49 +1445,15 @@ objection. It concerns which dimension the padding occupies — the request
 dimension is free (§4.1) and per-request length padding does not exist (§4.2) —
 and, for the token dimension where it is real, which objective converts to time.
 
-We also measured the cross-architecture comparison rather than asserting it. Same vLLM 0.25.0, same instrument,
-an L4 (23 GB, TP=1) in place of the v5e:
-
-Table: GPU control on an L4: CUDA-graph capture against eager execution. The increments are the measurement; the levels differ by a constant launch overhead. {#tab:gpu}
-| arm | n=8 | n=9 | n=16 | 8→9 | 8→16 | startup |
-|---|---|---|---|---|---|---|
-| CUDA graphs on | 10.605 | 10.887 | 12.298 | **0.283** | **1.693** | 118.7 s |
-| `--enforce-eager` | 19.934 | 20.150 | 21.618 | **0.215** | **1.684** | 10.7 s |
-
-**The increments are the measurement; the levels are not.** Eager execution pays a
-constant per-operation launch overhead, so the levels differ by roughly 9.3 ms
-throughout, and that constant cancels in any increment. It cancels to within 9 µs on
-the 8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
-requires: the two arms measure the same underlying work plus an offset, so their
-difference isolates what capture adds.
-
-On that basis, padding a batch from 8 up to the captured entry at 16 costs
-approximately **67 µs**, being the 0.283 ms increment with graphs against 0.215 ms
-without. That is 0.6% of a 10.9 ms step, or 4.0% of the nominal padding implied by
-rounding 9 up to 16.
-
-**This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
-CUDA path captures a graph per batch size, so what these arms vary is the request
-dimension, which the TPU results explain with a data-structure argument (§4.1) and
-where no proposed optimization was going to pay. The token dimension, where this
-paper locates the only surviving effect, is not reached: no arm here varies tokens
-per step at fixed batch. The cross-architecture statement this table supports is
-therefore that **request-dimension padding is close to free on both architectures**,
-not that the premise is false on both. Whether a GPU stack pays for token padding as
-a TPU stack does is untested, and is the experiment that would make the
-cross-architecture claim general.
-
-The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
-intervals of roughly ±50 percentage points, so this table cannot resolve a
-difference between the architectures; what both support is that the paid share is
-small on each. These remain single measurements: three batch points, one GPU, no
-repeats.
-
-**What is paid is the capture, and it is paid at startup.** Enabling graphs costs
-108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
-That is precisely the quantity BucketServe and LAPS manage when they write that the
-number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
-compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.
+The cross-architecture comparison itself — same vLLM 0.25.0, same instrument, an L4
+in place of the v5e — is measured rather than asserted, and is reported as a result
+in §4.9 rather than as related work: it finds request-dimension padding close to
+free on both architectures, with the same caveats of scope (one GPU, no repeats)
+that apply to the TPU measurements it parallels. Enabling CUDA-graph capture there
+costs 108 s of initialization, which is precisely the quantity BucketServe and LAPS
+manage when they write that the number of graphs must be limited, and it is a
+warmup cost — the TPU analogue is XLA compilation, at 5–30 minutes for the first
+bucket and 30–120 s per additional one.
 
 **How, then, do prior bucketing techniques achieve their reported speedups?** If
 the padding premise is false on
