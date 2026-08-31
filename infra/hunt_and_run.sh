@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# hunt_and_run.sh — retry for capacity every 30 min; on success run the M2 arms
+# hunt_and_run.sh — retry for capacity every 30 min; on success run the arms
+#                    script named by ARMS_SCRIPT (default: run_review_arms.sh)
 #                   and tear down, without waiting for anyone to notice.
 # =============================================================================
 # A slice that appears at 03:00 and idles until someone looks at it costs the
@@ -56,10 +57,10 @@ for cycle in $(seq 1 "$CYCLES"); do
     continue
   fi
 
-  log "SLICE in $zone on cycle $cycle -- running the M2 arms"
+  log "SLICE in $zone on cycle $cycle -- running ${ARMS_SCRIPT:-run_review_arms.sh}"
   ZONE="$zone" bash "$HERE/deploy.sh" >>"$LOG" 2>&1 \
-    || log "deploy reported a problem; continuing, run_m2_arms will surface it"
-  ZONE="$zone" bash "$HERE/run_m2_arms.sh" 2>&1 | tee -a "$LOG"
+    || log "deploy reported a problem; continuing, the arms script will surface it"
+  ZONE="$zone" bash "$HERE/${ARMS_SCRIPT:-run_review_arms.sh}" 2>&1 | tee -a "$LOG"
   log "arms finished; tearing down via trap"
   exit 0   # EXIT trap performs teardown + sweep
 done
