@@ -92,6 +92,13 @@ def main(argv: list[str] | None = None) -> int:
     # the contract is that provenance is stated.
     controlled = dict(runs[0][0].get("controlled", {}))
     controlled.setdefault("ATTN_BUCKETIZED_NUM_REQS", False)
+    # Same reasoning, three controls later: gpu_memory_utilization,
+    # MODEL_IMPL_TYPE and MOE_ROUTE_PADDING_TO_EXPERT0 joined CONTROLLED_VARS
+    # after the captured e05 runs. Backfilled with the values in force
+    # throughout -- 0.92, "auto", False -- not defaulted silently.
+    controlled.setdefault("gpu_memory_utilization", 0.92)
+    controlled.setdefault("MODEL_IMPL_TYPE", "auto")
+    controlled.setdefault("MOE_ROUTE_PADDING_TO_EXPERT0", False)
     cfg = {"experiment": "h1_headroom", "dimension": "D2", "source_glob": args.capture_glob,
            "n_runs": len(runs), "mode": "offline", "controlled": controlled,
            "model": runs[0][0].get("model"),

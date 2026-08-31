@@ -23,7 +23,7 @@ xprof, and that is scoped separately in `m10_profile.py`.
 WHAT THIS DECIDES. If decode at n=1-2 sits at the memory-bandwidth roof, the
 per-step cost is a fixed weight-load floor that batch size cannot amortise away,
 and padding a request dimension into that floor is free -- which is exactly what
-SS4.1 measures and never explains. If the measured time instead sits far from
+§4.1 measures and never explains. If the measured time instead sits far from
 both roofs, the bandwidth story is wrong and the paper should not tell it.
 
     measured ~= bytes/peak_bw at low n, pulling away as n grows
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             if all(r["bound_by"] == "memory" for r in rows):
                 print("[m9] Every batch size is memory-bound by this model: the step reads the "
                       "whole weight set regardless of n, so cost is dominated by a floor that "
-                      "batch size does not move. That is the mechanism behind SS4.5's 2.4x "
+                      "batch size does not move. That is the mechanism behind §4.5's 2.4x "
                       "step-cost rise over a 32x batch rise, and behind padding on the request "
                       "dimension being free -- there is nothing to pay until the floor is left.")
             r1 = next((r for r in rows if r["n"] == 1), None)

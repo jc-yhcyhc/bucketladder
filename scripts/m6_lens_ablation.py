@@ -4,7 +4,7 @@ M6 — is the LENS reproduction measuring its MODEL, or only its FIT PROTOCOL?
 
 Review question Q4/M6, and it is the sharpest criticism the draft received:
 
-  "At n=1-2 the paper independently establishes (SS4.3, flatness 0.97) that the
+  "At n=1-2 the paper independently establishes (§4.3, flatness 0.97) that the
    within-bucket curve is nearly flat -- under which ANY two-point fit is
    near-perfect, including a constant. The reported 0.0-0.6% error there is
    therefore weak evidence that the model form transfers."
@@ -16,7 +16,7 @@ answer, and it can only come out one of two ways:
                                    n=1-2 result IS evidence the form transfers
   constant-only is comparable   -> it is not, and the paper must say so; the
                                    defensible claim narrows to the LOCALISATION
-                                   of the error, which is what SS4.2 actually shows
+                                   of the error, which is what §4.2 actually shows
 
 Two ablations, both over the same captured points, both offline:
 

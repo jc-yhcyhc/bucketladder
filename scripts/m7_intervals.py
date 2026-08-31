@@ -5,17 +5,17 @@ M7 — confidence intervals on every load-bearing number, and Q1's disagreement.
 Review finding M7: "Statistical reporting is thin for a paper whose entire
 contribution is measurement. Exactly one p-value appears. No confidence intervals
 accompany 85%, 24%, 16%, 35.9%, 5.23%, 2.4x, 13x, or the boundary-wise paid
-shares. SS4.6 establishes a decode run-to-run spread of up to 4% -- which is
+shares. §4.6 establishes a decode run-to-run spread of up to 4% -- which is
 larger than several differences the paper treats as signal."
 
-Correct, and acting on it is not cosmetic: it changes what SS4.1 is entitled to
+Correct, and acting on it is not cosmetic: it changes what §4.1 is entitled to
 say. Bootstrapping the medians it rests on shows the n=8 decode cell is far
 noisier than the others, and the interval on the quantity the argument turns on
 does not exclude what the argument rejects.
 
-Also answers Q1, which asked why SS4.1 and SS4.5 disagree by 31% on the same
+Also answers Q1, which asked why §4.1 and §4.5 disagree by 31% on the same
 n=8 -> n=16 decode ratio. They do not disagree; they are different workloads, and
-the paper failed to say so adjacent to either table. Worse, SS4.1 itself pooled
+the paper failed to say so adjacent to either table. Worse, §4.1 itself pooled
 two runs that disagree about n=9 by 20% -- found while answering the review, and
 the same error class as the other six.
 
@@ -86,20 +86,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     controlled = dict(base.get("controlled", {}))
     controlled.setdefault("ATTN_BUCKETIZED_NUM_REQS", False)
+    # Same reasoning, three controls later: gpu_memory_utilization,
+    # MODEL_IMPL_TYPE and MOE_ROUTE_PADDING_TO_EXPERT0 joined CONTROLLED_VARS
+    # after session4's e02_stock_baseline ran. Backfilled with the values in
+    # force throughout -- 0.92, "auto", False -- not defaulted silently.
+    controlled.setdefault("gpu_memory_utilization", 0.92)
+    controlled.setdefault("MODEL_IMPL_TYPE", "auto")
+    controlled.setdefault("MOE_ROUTE_PADDING_TO_EXPERT0", False)
     cfg = {"experiment": "m7_intervals", "dimension": "D3", "mode": "offline", "bootstrap_resamples": B,
            "seed": SEED, "controlled": controlled, "model": base.get("model"),
            "note_varies": ("ATTN_BUCKETIZED_NUM_REQS is False in three of the four arms and "
                            "True in the fourth BY DESIGN -- comparing them is the point. Every "
                            "other controlled variable is identical across the arms; prompt_len "
                            "and output_len are workload, not controlled vars, and differ between "
-                           "the SS4.1 and SS4.5 runs, which is what Q1 asked about."),
+                           "the §4.1 and §4.5 runs, which is what Q1 asked about."),
            "note_scope": ("Bootstrap over run-to-run repeats within a single captured run. "
                           "It quantifies measurement noise, NOT between-run drift, which "
                           "the arms comparison below reports separately.")}
     run = start_run("m7_intervals", cfg, results_root=args.results_root)
     status, err = "ok", None
     try:
-        # --- the three runs SS4.1's argument has been drawn from ---------------
+        # --- the three runs §4.1's argument has been drawn from ---------------
         arms = [
             ("session4-dense-r3", "session4-qwen3/results/e02_stock_baseline/*", 3, None),
             ("session4-dense-r21", "session4-qwen3/results/e02_stock_baseline/*", 21, None),
@@ -142,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         save_table(run, "decode_cells", cells)
         save_table(run, "n9_position", positions)
 
-        print("[m7] --- SS4.1: decode cells with bootstrap 95% CIs ---")
+        print("[m7] --- §4.1: decode cells with bootstrap 95% CIs ---")
         print(f"[m7] {'arm':<22} {'n':>3} {'obs':>4} {'median':>9} {'95% CI':>20} {'width':>7}")
         for c in cells:
             print(f"[m7] {c['arm']:<22} {c['n']:>3} {c['n_obs']:>4} {c['median_ms']:>8.2f}ms "
@@ -151,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         wide = [c for c in cells if c["ci_width_pct"] > 15 and c["n_obs"] >= 21]
         if wide:
             ns = sorted({c["n"] for c in wide})
-            print(f"[m7] NOTE: at 21 repeats the wide cells are n={ns}. SS4.6 reported "
+            print(f"[m7] NOTE: at 21 repeats the wide cells are n={ns}. §4.6 reported "
                   f"decode run-to-run spread as 1.00-1.04x; these cells are far wider "
                   f"than that, so that figure does not describe every cell.")
 
@@ -167,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             if not any(p["excludes_zero_padding"] for p in good):
                 print("[m7] No arm excludes zero padding either -- consistent with the claim, "
                       "but the interval is wide enough that this comparison ALONE cannot "
-                      "carry SS4.1. The load-bearing evidence is the paired flag on/off "
+                      "carry §4.1. The load-bearing evidence is the paired flag on/off "
                       "experiment and the source reading; this is corroboration, and the "
                       "paper must present it as such.")
             spread = max(p["position_pct"] for p in good) - min(p["position_pct"] for p in good)
@@ -176,14 +183,14 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- Q1: the two tables are different workloads ----------------------
         q1: list[dict[str, Any]] = []
-        for tag, glb, reps in (("SS4.1", "session7-m1m2/results/e02_stock_baseline/*", 21),
-                               ("SS4.5", "session12-regime/results/e02_stock_baseline/*", 0)):
+        for tag, glb, reps in (("§4.1", "session7-m1m2/results/e02_stock_baseline/*", 21),
+                               ("§4.5", "session12-regime/results/e02_stock_baseline/*", 0)):
             for rid, conf, rows in load(glb):
                 if conf.get("repeats", 0) < reps:
                     continue
-                if tag == "SS4.5" and conf.get("output_len") != 64:
+                if tag == "§4.5" and conf.get("output_len") != 64:
                     continue
-                if tag == "SS4.1" and conf["controlled"].get("ATTN_BUCKETIZED_NUM_REQS"):
+                if tag == "§4.1" and conf["controlled"].get("ATTN_BUCKETIZED_NUM_REQS"):
                     continue
                 g = {n: [r["decode_ms"] for r in rows if r["concurrency"] == n] for n in (8, 16)}
                 if not all(g.values()):
@@ -195,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                            "ms_per_step_n16": m16 / ol, "ratio_n8_to_n16": m16 / m8})
                 break
         save_table(run, "q1_configs", q1)
-        print("[m7] --- Q1: why SS4.1 and SS4.5 report different n=8->n=16 ratios ---")
+        print("[m7] --- Q1: why §4.1 and §4.5 report different n=8->n=16 ratios ---")
         for r in q1:
             print(f"[m7] {r['section']:<6} prompt_len={r['prompt_len']:<5} output_len={r['output_len']:<3} "
                   f"n=8 {r['ms_per_step_n8']:5.2f} ms/step  n=16 {r['ms_per_step_n16']:5.2f}  "
