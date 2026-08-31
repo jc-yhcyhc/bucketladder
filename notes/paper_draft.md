@@ -70,7 +70,7 @@ in response, and §6 reports what the asymmetry does and does not license.
 
 **Contributions.**
 
-1. **The premise, measured** (§4.1, §4.2, §4.9). Padding a batch up to a compiled or
+1. **The premise, measured** (§4.1, §4.2, §4.5). Padding a batch up to a compiled or
    captured entry is close to free on a TPU ladder and on CUDA-graph capture
    alike; what shape coverage costs is paid at boot, not per step. The GPU comparison covers the
    request dimension, which is the dimension graph capture quantizes.
@@ -84,13 +84,13 @@ in response, and §6 reports what the asymmetry does and does not license.
    established by reducing the compiled slot count by a factor of 32 for a −0.9%
    change. The memory-bandwidth explanation that the same data invites is tested
    and rejected.
-4. **Ladder design as placement rather than cardinality** (§4.3, §4.6): a
+4. **Ladder design as placement rather than cardinality** (§4.3, Appendix §10.3): a
    fourteen-shape ladder placed against the workload reduces end-to-end latency by
    12.1% at no memory cost, while a uniformly finer ladder achieves the same
    reduction and additionally costs 8.8% of cache capacity and 53% more startup.
    The choice can be made offline from a length distribution, predicting the
    measured result to within 5%.
-5. **When ladder placement pays, and when it does not** (§4.4, §4.5, §4.6). The
+5. **When ladder placement pays, and when it does not** (Appendix §10.1, Appendix §10.2, Appendix §10.3). The
    reduction is a latency gain below saturation rather than added capacity: median
    latency falls 46% just below the knee, while sustained throughput rises 2.6% at
    it. Enabling prefix caching, which production vLLM does by default, shortens the
@@ -120,10 +120,10 @@ what executes only while that prompt prefills alone in its step. At the two
 concurrent requests of §4.3 it does, and the evidence is internal to the
 measurement: two cells saving 512 and 1024 padded tokens agree on cost per padded
 token to within 1%, which co-scheduling would not produce, since a packed step
-would save a different amount in each cell. §4.4 measures where that ceases to hold
-and §4.6 restores it deliberately by staggering arrivals.
+would save a different amount in each cell. Appendix §10.1 measures where that ceases to hold
+and Appendix §10.3 restores it deliberately by staggering arrivals.
 
-Prefix caching is disabled and asserted, except in §4.5
+Prefix caching is disabled and asserted, except in Appendix §10.2
 where it is the treatment. Chunked prefill, `max_model_len`,
 `max_num_batched_tokens`, tensor-parallel size, `gpu_memory_utilization`,
 `XLA_FLAGS` and `ATTN_BUCKETIZED_NUM_REQS` are recorded. Every run parses the
@@ -169,15 +169,15 @@ configuration file and therefore fixed before any result is seen. The requiremen
 exists because a mechanism stated only in prose cannot be rejected by any check in
 this pipeline, whereas a number can. Three such predictions failed during this
 work, and each produced a result its confirmation would not have: the sharding
-ablation yielded a two-term cost model bounding per-step fixed overhead (§4.8), the
+ablation yielded a two-term cost model bounding per-step fixed overhead (Appendix §10.4), the
 model-scale ablation established that the regime map is set by batch size and dtype
-rather than by parameter count (§4.8), and the concurrency sweep identified that
+rather than by parameter count (Appendix §10.4), and the concurrency sweep identified that
 padding migrates from individual requests to the packed step under chunked prefill
-(§4.4).
+(Appendix §10.1).
 
 **Statistics.** Medians over repeats, with 95% confidence intervals from 10,000
 bootstrap resamples. Intervals are reported wherever a claim depends on the size of
-a difference, because §4.7 establishes that some cells are far noisier than others.
+a difference, because §4.4 establishes that some cells are far noisier than others.
 
 **Models.** Qwen3-4B is the primary model; SmolLM2-1.7B (head dimension 64,
 multi-head attention) and TinyLlama-1.1B (head dimension 64, grouped-query
@@ -653,192 +653,7 @@ shapes the workload's prompt distribution straddles**. Cardinality is what the
 stack charges for; placement is what latency responds to. A badly placed boundary
 is an executable that the compiler pays to produce and the scheduler never uses.
 
-### 4.4 The benefit does not decay with concurrency, contrary to a registered prediction
-
-Because padding is paid at small batch and free at large (§4.2), the benefit of
-§4.3 appears as though it should be conditional on load. That reasoning predicts a
-crossing, and it was registered before measurement: the difference should shrink
-monotonically and reach zero between n=4 and n=16. Sweeping concurrency from 1 to
-16 on both ladders, in both arm orders, does not support it. Placebo-corrected
-differences in milliseconds, negative where the finer ladder is faster:
-
-Table: Placebo-corrected latency difference against concurrency, in milliseconds. Negative values favour the finer ladder. {#tab:conc}
-| prompt | n=1 | n=2 | n=4 | n=8 | n=16 |
-|---|---|---|---|---|---|
-| 1200 | −9.9 | −18.0 | −8.9 | −16.2 | −23.0 |
-| 3000 | −18.7 | −37.3 | −21.5 | −50.4 | −37.0 |
-
-There is no crossing. End-to-end latency is 3.5% to 12% lower at every concurrency
-sampled, the effect is non-monotone rather than decaying, and at n=16 it is larger
-in absolute terms than at n=1.
-
-##### Why the prediction failed
-
-The reason the prediction failed is visible in what the stack executes. The
-prediction reasoned about an individual request's padding shrinking as more
-requests share a step. Under chunked prefill the scheduler admits requests in waves
-and packs them, and the size of the packed step, rather than any request's length,
-selects the compiled shape. Snapshotting the `iteration_tokens_total` histogram
-around one n=16 cell shows a single repeat costing about three prefill steps,
-landing in (256,512], (512,1024] and (2048,4096], alongside 93 decode steps of at
-most 16 tokens. The two arms produce near-identical step distributions, differing
-only in which compiled shape those steps round up to. Padding is therefore
-transferred from individual requests to the packed step rather than eliminated.
-
-##### Tension with the paid-share curve
-
-This is in tension with §4.2, which finds the paid share falling to
-indistinguishable from zero by batch 16. The two measurements differ in what is
-held fixed: §4.2 varies batch size at a fixed boundary and attributes padding per
-request, while this sweep varies offered concurrency and allows the scheduler to
-choose step composition. If both are correct, the reconciliation is that
-per-request padding vanishes while per-step padding does not, and that a ladder
-acts on the second. Testing this requires padded tokens per packed step, which the
-available instrument cannot supply: `iteration_tokens_total` bins on powers of two,
-which is coarser than the ladder spacing under comparison. A step recorded in
-(2048,4096] pads to 2048, 2560, 3072, 3584 or 4096 depending on where in that bin
-it falls, and the two ladders differ precisely inside the bin.
-
-##### A defect in the control cell
-
-One design defect bounds these results. Prompt 300 was intended as a placebo at
-every concurrency, on the reasoning that it pads to 512 on both ladders. The step
-histogram shows this holds only while each request prefills in its own dispatch: at
-n≥4 the packed step lands where the ladders differ, so the cell is treated rather
-than inert. Its measured difference is correspondingly unstable across arm orders
-at n=8 and n=16 (−6.0 against −27.7 ms, and −1.5 against −17.2 ms) where the
-treated cells are stable. The n≥4 figures above are therefore floors on the effect
-rather than unbiased estimates, and arm order is their only control.
-
-##### An isolated-dispatch control
-
-The defect above is that concurrency does two things at once: it makes the regime
-realistic, and it lets the scheduler co-schedule prefills. Only the second breaks
-the control. Releasing requests on a 120 ms stagger separates them: a 3000-token
-prefill takes roughly 90 ms here, so each prefill runs alone in its step, while a
-32-token decode takes about 160 ms, so requests still overlap in decode and the
-concurrency is real.
-
-Isolation was verified rather than assumed. Scraping the step-size histogram
-around eight staggered requests at prompt 300 shows **eight separate prefill steps,
-all in the (256, 512] bin**; the same eight released as a burst produce three
-steps, in (256,512], (512,1024] and (1024,2048]. The stagger therefore restores
-the per-request ladder mapping the control depends on.
-
-Table: Ladder difference with prefills isolated by a 120 ms arrival stagger. Prompt 300 pads to 512 on both ladders and measures the offset between server instances; 1200 pads to 2048 on both and should show no effect. {#tab:isolated}
-| n | prompt 300 (offset) | prompt 1200, corrected | prompt 3000, corrected |
-|---|---|---|---|
-| 4 | −11.2 ms | +8.2 ms | **−65.8 ms** |
-| 8 | −9.7 ms | +1.2 ms | **−108.1 ms** |
-| 16 | −4.5 ms | +2.7 ms | **−98.1 ms** |
-
-A registered prediction that the control cell would return to zero was wrong: it
-shows a stable offset of 4 to 11 ms. Because 300 tokens pads to 512 on both
-ladders once prefills are isolated, and the histogram confirms they are, no ladder
-effect can reach that cell, so the offset is a difference between server instances
-and is exactly the quantity a control exists to measure. Subtracting it, prompt
-1200 sits at zero as the ladders predict, since both pad it to 2048, and prompt
-3000 carries a large reduction that does not decay through n=16. Intervals here are
-±0.7 ms rather than floors.
-
-The effect under isolation is substantially larger than under burst arrival, at 66
-to 108 ms against the 18 to 50 ms of the table above. That is the same mechanism
-seen from the other side: a packed step amortizes one padding charge across several
-requests, while an isolated prefill pays its own in full. **The claim that the
-benefit does not decay through n=16 therefore holds at interval level under
-isolated dispatch, and as a floor under burst arrival.**
-
-The sign survives this; the magnitude does not. The placebo's spread across arm
-orders at n=8 and n=16 is approximately 20 ms, comparable to several treated
-differences in the same table, so no n≥4 magnitude is resolvable at interval level.
-What is resolvable is direction: the raw differences at n=16 are −32.2 and −46.3 ms,
-and subtracting even the most extreme placebo estimate observed leaves both
-negative in both arm orders. The absence of a crossing is established at n=1 and
-n=2, where the placebo is valid; above that it is an observation with a floor.
-
-### 4.5 The gain is a latency reduction below saturation, not additional capacity
-
-The results above are latencies at fixed, small concurrency, while the cost of a
-longer ladder is denominated in cache tokens. A deployment choosing whether to
-spend memory on shapes requires the conversion. [tab:load] sweeps offered load open-loop against both ladders, at the stock 0.92
-fraction where both boot, with 60 requests per rate at prompt 3000:
-
-Table: Sustained goodput and latency against offered load, both ladders at the stock memory fraction. {#tab:load}
-| offered req/s | goodput (default → gap1024) | p50 ms | p95 ms |
-|---|---|---|---|
-| 2 | 2.30 → 2.30 | 286 → 246 | 504 → 318 |
-| 4 | 4.59 → 4.59 | 326 → 256 | 758 → 496 |
-| 8 | 9.03 → 9.08 | **974 → 529** | **1622 → 996** |
-| 12 | 12.45 → 12.68 | 2088 → 1895 | 3471 → 3093 |
-| 16 | 13.45 → 13.84 | 2571 → 2275 | 3570 → 3418 |
-| 24 | **14.03 → 14.40** | 3026 → 2921 | 3881 → 3727 |
-
-Both ladders knee between 8 and 12 req/s and saturate near 14. Sustained goodput
-rises from 14.03 to 14.40 req/s, or 2.6%, so the padding removed was not entirely
-slack. But 2.6% is far short of what "padded tokens are real arithmetic" implies
-for a 25% reduction in the prefill shape, and it is not where the effect is
-concentrated. The effect is concentrated just below the knee: at 8 req/s the
-placement ladder is 46% faster at p50 and 39% faster at p95.
-
-That shape is consistent with §4.2 and repairs part of the tension in §4.4. A
-saturated server packs prefills to the `max_num_batched_tokens` budget, so padding
-is amortized across a full step and the ladder has little influence, which is what
-the paid-share curve predicts. Below saturation the steps are smaller and closer to
-per-request, and the ladder entry accounts for most of the step's cost. §4.4's
-persistent benefit was measured under burst arrival at fixed concurrency, which
-loads the server differently from a steady arrival process at the same nominal
-rate.
-
-For the fourteen-shape ladder this trade is favorable, since it costs no capacity
-at all: four additional compiled shapes reduce tail latency by up to 46% in the
-regime most interactive deployments run in. For the twenty-one-shape ladder, which
-costs 8.8% of capacity, the same arithmetic argues against it, since surrendering
-8.8% of the cache to gain 2.6% in sustained throughput is an unfavorable exchange
-at saturation.
-
-### 4.6 Prefix caching moves the target the ladder is placed against
-
-Prefix caching is disabled elsewhere in this work, and production vLLM enables it
-by default. It removes already-computed prefix tokens from the prefill, so the step
-lands on a different compiled shape than the request's length implies, which bears
-directly on a recommendation about where to place entries.
-
-Testing this requires a workload with a cacheable prefix. Requests built from
-independent token sequences share nothing, so a cache cannot hit them, and an
-experiment run against such a workload would report caching having no effect while
-saying nothing about production. Here every request shares a fixed 2048-token
-prefix and varies only its 952-token tail, which is the structure of a system
-prompt or a few-shot preamble. Prompt 3000, two concurrent requests ([tab:apc]):
-
-Table: Ladder placement with and without prefix caching, over a workload sharing a 2048-token prefix. {#tab:apc}
-| ladder | caching | e2e | prompt tokens cached |
-|---|---|---|---|
-| default (10) | off | 292.5 ms | 0 |
-| gap 1024 (14) | off | 256.6 ms | 0 |
-| default (10) | **on** | 181.5 ms | +43,008 |
-| gap 1024 (14) | **on** | 178.5 ms | +43,008 |
-
-##### Effect of prefix caching on the placement benefit
-
-The placement benefit falls from 35.9 ms, or 12.3%, to 3.0 ms, or 1.7%. A
-prediction registered before measurement anticipated this, and for the stated
-reason: with 2048 tokens cached the server prefills approximately 952, which pads
-to 1024 on both ladders, while the two ladders differ only at 3072 against 4096.
-The entry chosen in §4.3 is no longer the entry the step uses. The cached-token
-counter is the arm's own evidence that the treatment applied, since 43,008 is
-exactly 21 × 2048, so twenty-one of twenty-two requests hit the prefix and the
-first populated it.
-
-The mechanism is unchanged and the operating point has moved. Caching does not make
-padded tokens cheap; it removes tokens from the prefill, and a ladder placed
-against prompt length is then placed against the wrong distribution. **Entries
-should therefore be placed against the distribution of uncached prefill lengths.**
-This also bounds §4.3 and §4.5, which are measured with caching disabled and so
-describe workloads with little prefix reuse. On this workload caching is worth
-considerably more than the ladder: 292.5 ms to 181.5 ms, a 38% reduction, against
-the 12.3% the best placement achieves without it.
-
-### 4.7 A ladder can be chosen offline from a length distribution
+### 4.4 A ladder can be chosen offline from a length distribution
 
 §4.3's placement was chosen by knowing two prompt lengths in advance, which is an
 existence proof rather than a method. A method begins from a length distribution,
@@ -943,7 +758,7 @@ and the real token count in that step, so a running counter of their difference
 gives the realized padded share exactly, without sampling. Re-selection is
 warranted when that realized share exceeds what the offline model predicts for the
 ladder in use by more than the margin that would justify a restart. We note that
-`iteration_tokens_total` is not a substitute for this counter: §4.4 shows its
+`iteration_tokens_total` is not a substitute for this counter: Appendix §10.1 shows its
 power-of-two bins are coarser than the ladder spacing being compared. We have not
 built this controller, and report it as the natural operational form of the result
 rather than as a contribution.
@@ -955,7 +770,542 @@ spacing. At gap 256 this inserts an entry at 768, which a reading of "powers of 
 then linear" does not predict. The predictions above were computed from the
 corrected rule, and each arm re-reads the ladder its server printed.
 
-### 4.8 Supporting ablations and controls
+### 4.5 The request-dimension result replicates on GPU
+
+§4.1's request-dimension finding was measured on TPU. Whether it holds on another
+architecture is testable rather than assumed: same vLLM 0.25.0, same instrument,
+an L4 (23 GB, TP=1) in place of the v5e:
+
+Table: GPU control on an L4: CUDA-graph capture against eager execution. The increments are the measurement; the levels differ by a constant launch overhead. {#tab:gpu}
+| arm | n=8 | n=9 | n=16 | 8→9 | 8→16 | startup |
+|---|---|---|---|---|---|---|
+| CUDA graphs on | 10.605 | 10.887 | 12.298 | **0.283** | **1.693** | 118.7 s |
+| `--enforce-eager` | 19.934 | 20.150 | 21.618 | **0.215** | **1.684** | 10.7 s |
+
+**The increments are the measurement; the levels are not.** Eager execution pays a
+constant per-operation launch overhead, so the levels differ by roughly 9.3 ms
+throughout, and that constant cancels in any increment. It cancels to within 9 µs on
+the 8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
+requires: the two arms measure the same underlying work plus an offset, so their
+difference isolates what capture adds.
+
+On that basis, padding a batch from 8 up to the captured entry at 16 costs
+approximately **67 µs**, being the 0.283 ms increment with graphs against 0.215 ms
+without. That is 0.6% of a 10.9 ms step, or 4.0% of the nominal padding implied by
+rounding 9 up to 16.
+
+**This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
+CUDA path captures a graph per batch size, so what these arms vary is the request
+dimension, which the TPU results explain with a data-structure argument (§4.1) and
+where no proposed optimization was going to pay. The token dimension, where this
+paper locates the only surviving effect, is not reached: no arm here varies tokens
+per step at fixed batch. The cross-architecture statement this table supports is
+therefore that **request-dimension padding is close to free on both architectures**,
+not that the premise is false on both. Whether a GPU stack pays for token padding as
+a TPU stack does is untested, and is the experiment that would make the
+cross-architecture claim general.
+
+The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
+intervals of roughly ±50 percentage points, so this table cannot resolve a
+difference between the architectures; what both support is that the paid share is
+small on each.
+
+[tab:gpu] is one measurement per arm. Repeating each arm 20 times on a fresh L4 and
+bootstrapping the position-of-n=9 statistic (10,000 resamples, median-based, the
+same convention as every other interval in this paper) resolves what the single
+measurement could not: with graphs, position is **16.0% [15.0%, 17.1%]** — an
+interval that excludes both 0% and 100%, meaning the small batch-padding cost this
+table shows is real and repeatable rather than noise, not merely "closer to free
+than to paid." Under `--enforce-eager`, position is **0.7% [−9.6%, 11.1%]** — an
+interval that excludes 100% and *includes* 0%, meaning eager execution is
+statistically indistinguishable from fully free. Both conclusions match the single
+measurement's direction (17%, 1%); what the repeats add is knowing that graphs'
+17% was not noise dressed as a small effect, and that eager's 1% could have been.
+
+**What is paid is the capture, and it is paid at startup.** Enabling graphs costs
+108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
+That is precisely the quantity BucketServe and LAPS manage when they write that the
+number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
+compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.
+
+---
+
+## 5. Optimizations designed against these measurements
+
+Five interventions were designed against the compiled-shape premise. Each
+rejection below identifies a dimension the measurements show carries no cost:
+
+- **Ladder placed against the workload** — works: −12.1% at n=2 and −46% p50
+  below the knee, at full memory; beats BucketServe's objective by 1.61 ms at
+  equal shape count; −1.7% once prefix caching is on (§4.3–§4.4; prefix caching
+  in Appendix §10.3).
+- **Bucket-aware admission control** — premise false (§4.2).
+- **Ladder redesign on the request dimension** — D1 does not exist; D3 inert by
+  default.
+- **Last-chunk decomposition** — 20.6% worse measured (51.06 vs 42.33 ms).
+- **Bucket-aligned step packing** — implemented twice: inert, then
+  output-corrupting.
+
+The one that works targets the single dimension the measurements leave open, and
+the rejections are informative rather than incidental. Three of them address the
+request dimension or per-request length padding, where §4.1 and §4.2 find no cost
+to recover, so their failure is what those sections predict; the fourth
+restructures work the stack already packs. The token dimension is the only place
+where the premise was not refuted by measurement, and the only place where an
+intervention produced a gain — though not for the reason expected, since the payoff
+was predicted to be confined to low concurrency and was not (Appendix §10.1).
+
+A second positive measurement — release timing saving 26% of TPU time against stock
+at 25 req/s (p=0.001, six paired seeds) — is dynamic batching rather than a shape
+effect, reported as a re-measurement rather than a contribution. It is also a
+low-load effect that reverses to an 11.7% penalty by 70 req/s, and is not free once
+harness overhead is accounted for; Appendix §10.5 has the full arrival-rate sweep,
+the cost accounting, and the bucket-aligned-packing correctness failure the last
+bullet above draws on.
+
+---
+
+## 6. Validation, and what it does not cover
+
+Every reported quantity is produced under a configuration contract that aborts a
+run when a controlled variable is left undeclared, is tied to a run identifier, and
+is recomputed from captured data by a script that exits non-zero if it disagrees
+with the text. §2 states the registered-prediction requirement that accompanies it.
+
+**No equivalent validation applies to explanations.** A proposed mechanism can be
+written, accepted, cited by later sections, and carried across successive drafts
+without any stage of the process being able to contradict it. Two instances in this
+paper show the consequence. The bandwidth account of free request padding persisted
+through four sessions of work before §4.1's utilization measurement refuted it, and
+it was never supported by evidence so much as never confronted with any. The
+control cell of Appendix §10.1 was chosen on the reasoning that a 300-token prompt pads
+identically on both ladders, which is true only while each request prefills alone;
+one scrape of the executed step distribution settled it, after both arms had run.
+
+The consequence for a reader is that the measurements in §4 and the mechanisms
+offered for them do not carry the same weight, and we present them accordingly.
+Two qualifications keep that statement honest.
+
+First, survival is not uniform. §4.2's paid-share table survived the discovery that
+its rows were measured over different boundary sets as an *ordinal* claim; the
+cardinal values did not. Appendix §10.1's rows above n=2 survive as floors rather than
+estimates under burst arrival, and only the isolated-dispatch control recovers
+interval-level statements. A value that reproduces while its interpretation is
+withdrawn has not survived in the sense the word usually carries.
+
+Second, the asymmetry is partly a property of what can be checked rather than of
+what is true. A measurement has a value a script can recompute; a mechanism does
+not, so it is never submitted to the check at all, and passing no check is not the
+same as passing one. Our own record limits the stronger reading: four of the errors
+we caught were instrument-definition failures, in which an analysis measured
+something other than its target, and those corrupt numbers rather than explanations.
+No guardrail here covers that class, so we cannot bound residual error in the
+measurements either.
+
+## 7. Limitations
+
+**One TPU slice, one GPU, one primary model.** A v5litepod-4 with a 4B model, and a
+single L4 for the control. The sharding objection is answered by the TP=1/2/4
+ablation (Appendix §10.4), which finds request padding cheap at every sharding, but model
+scale and multi-host topology are unmeasured, and both change the fixed costs
+within which padding can be absorbed. Appendix §10.4 argues analytically that the regime map
+is a function of batch size and dtype rather than parameter count, for dense
+weight-stationary decode only.
+
+**The strongest single number is the least well supported.** The ~85% paid share at
+n≤2 rests on one boundary and carries no interval (§4.2).
+
+**Prefix caching is measured but not swept.** Appendix §10.3 tests it at one prefix length,
+2048 of 3000 tokens, on one workload shape. This is enough to show that the
+placement target moves and not enough to say where it lands for a given amount of
+prefix reuse. Everything outside Appendix §10.3 is measured with caching disabled and so
+describes workloads with little prefix sharing.
+
+**No production trace.** §4.2's four length distributions are parametric families
+matched on mean length, not a trace of real traffic. They establish that padded
+share varies by a factor of four with distribution shape at equal offered tokens,
+and that dispersion does not order it, but the figures belong to those families
+rather than to any deployment. Appendix §10.3 further shows that any such figure depends on
+how much prefix reuse a workload has, since caching changes the length actually
+prefilled.
+
+**The ladder benefit has no measured upper bound in concurrency.** Appendix §10.1 sweeps 1 to
+16 and finds no crossing, so we cannot say where a finer ladder ceases to pay, only
+that it has not ceased by 16. Above n=4 that experiment has no valid placebo, so
+those rows are floors on the effect rather than unbiased estimates.
+
+**The recommendation is mediated by version-pinned internal flags.**
+`VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to
+vLLM and `tpu-inference` 0.25.0, and a scheduler or compilation refactor upstream
+could change the ladder they produce, or remove them. The measurements would
+survive such a change, since they characterize a mechanism rather than an
+interface, but the operational advice is pinned to this version. §4.4's rule
+mitigates this only partly: it states which ladder to want, while the flags are how
+one currently asks for it.
+
+**Cost per padded token on a mixture-of-experts model is unmeasured.** No slice
+was available: `v5litepod-4` capacity was refused in thirteen zones across three
+continents, on both on-demand and spot pricing, over a full day of half-hourly
+attempts. What the implementation settles is the direction, not the magnitude: a
+padded token is dispatched to real experts and can activate one no real token
+needed, which the sign of this effect survives but its size does not. Appendix
+§10.6 has the full source-reading account, the mitigation flag the backend ships
+disabled, and why it
+fails open.
+
+**A published diagnosis of the `gpt-oss-20b` failure was wrong.** An earlier
+draft attributed its refusal to initialize at TP=4 to a parameter axis of size
+six. No axis of that size appears in its configuration. Its weights are MXFP4,
+whose 4-bit values are packed in blocks of 32, and 2880/4 = 720 is not a multiple
+of 32, so a block would straddle two chips. TP=2 divides cleanly but cannot run
+on this hardware: the device mesh is built as (data, tensor) over every visible
+chip, so the product of the two must equal the slice's four, and any data-parallel
+degree above one disables the flag above. With no two-chip topology offered and
+single-chip quota at zero, that model has no configuration available to it here.
+`llama4` remains out of reach at 109B parameters.
+
+**The GPU control is inference-tier hardware.** The L4 has neither the compute
+throughput nor the memory bandwidth of the accelerators most production serving
+runs on, and the arithmetic-intensity ridge sits at a different point there than at
+v5e's ~240 FLOP/byte. Since the ridge is what sets the batch size at which token
+padding stops mattering (Appendix §10.4), the batch thresholds reported here should not be
+transferred to other hardware without re-measurement.
+
+**Prefill step cost above n=16 is not isolable**, and at n=16 the clean sample is
+7–11 dispatches per arm.
+
+**The n=4 convergence is unexplained and is not an operator effect.** An
+operator-level profile shows every category of device time moving smoothly through
+n=4. The three observations that appear to converge there are not independent:
+LENS's failure and the paid-share drop are the same quantity described twice.
+
+**The GPU control is one point rather than a curve.** Startup was measured at
+vLLM's default capture set, and the number of captured shapes was not varied, which
+is precisely the axis BucketServe and LAPS trade along.
+
+**Co-located prefill and decode only.** On a disaggregated deployment the padding
+question divides in two, and Appendix §10.4's finding that variance is a prefill phenomenon
+is the asymmetry that motivates disaggregation.
+
+---
+
+## 8. Related work
+
+**Pope et al.** derive the memory-bound to compute-bound transition for transformer
+inference on TPU analytically; §4.1's byte accounting is a measured instance of that
+regime rather than a discovery. We do not claim that the weight-load floor explains
+free request padding, since §4.1 tests that account and rejects it.
+
+**RPA** is the technique this work validates: per-request padding costing nothing is
+what its ragged-tiling design predicts, though it does not discuss the request-count
+dimension, report cost against batch size, or quantify how much padding survives it.
+**LENS** (Appendix §10.4) supplies the model form; we supply the hardware it was not tested on
+and the ablation showing that its length term is not what carries its reported
+accuracy.
+
+**PagedAttention/vLLM** is the stack measured throughout; **Orca**'s iteration-level
+scheduling produces the per-step batches; **Sarathi-Serve** introduced the chunked
+prefill that §4.2 controls for. **DistServe** and **Splitwise** disaggregate prefill
+from decode, which is the architectural response to the finding that variance is a
+prefill phenomenon, and which bounds our advice to co-located deployments.
+**Vidur** established simulator-fidelity validation as the standard for
+simulation-based serving studies; our holdout discipline follows it.
+
+**SGLang** and **TensorRT-LLM** implement their own shape and graph handling, with
+different capture policies and, in TensorRT-LLM's case, an ahead-of-time engine
+build with explicit optimization profiles. Nothing here is measured on either, and
+the claims should be read as applying to vLLM-style designs, in which shapes are
+compiled or captured from a ladder the serving loop rounds up to.
+
+**BucketServe** and **LAPS** manage length-bucketing overhead on GPU. §4.4 runs
+BucketServe's own ladder-design objective on this stack rather than arguing
+against it: solved globally and given the same shape budget, its ladder is 1.61 ms
+slower than one chosen to minimize absolute padded tokens, and both are about
+15 ms faster than the stock ladder. Their ladder design is therefore effective,
+and our disagreement with these systems is narrower than a premise-level
+objection. It concerns which dimension the padding occupies — the request
+dimension is free (§4.1) and per-request length padding does not exist (§4.2) —
+and, for the token dimension where it is real, which objective converts to time.
+
+The cross-architecture comparison itself — same vLLM 0.25.0, same instrument, an L4
+in place of the v5e — is measured rather than asserted, and is reported as a result
+in §4.5 rather than as related work: it finds request-dimension padding close to
+free on both architectures, with the same caveats of scope (one GPU, no repeats)
+that apply to the TPU measurements it parallels. Enabling CUDA-graph capture there
+costs 108 s of initialization, which is precisely the quantity BucketServe and LAPS
+manage when they write that the number of graphs must be limited, and it is a
+warmup cost — the TPU analogue is XLA compilation, at 5–30 minutes for the first
+bucket and 30–120 s per additional one.
+
+**How, then, do prior bucketing techniques achieve their reported speedups?** If
+the padding premise is false on
+both architectures, systems reporting end-to-end improvements from bucketing are
+improving something else, and §5 supplies a candidate from our own data. A positive
+measurement in this work — release timing saving 26% of TPU time at 25 req/s — is
+dynamic batching, an arrival-and-composition effect rather than a shape effect.
+Bucketing schemes change which requests occupy a step together, and that is worth
+something independent of padding. We place weight on the mechanism rather than the
+magnitude, because the magnitude is the weaker half: the saving costs latency once
+the harness overhead inflating the baseline is removed, and it reverses at high load
+(§5). The defensible claim is the negative one — **a bucketing result that does not
+control for batch composition cannot distinguish a shape effect from a scheduling
+one** — and it rests on the premise measurements of §4.1 and §4.2.
+
+---
+
+## 9. Conclusion
+
+Two accelerator families reach the same design by different routes: XLA compiles a
+ladder of shapes, and CUDA captures a graph per batch size. Both round every step up
+to the nearest entry, and the optimization literature treats that rounding as a cost
+to be recovered. It is not, on either. A batch just above an entry costs what the
+entry below costs, because a ragged attention kernel does almost no work for slots
+holding no key–value blocks — under 0.7 µs per slot, against 27.5 µs if it were paid
+— and a captured graph does not care that part of its batch is unused.
+
+What shape coverage costs is a boot-time budget, and only part of it amortizes.
+Enabling CUDA-graph capture costs 108 seconds of startup, and XLA compiles the
+first TPU bucket in 5–30 minutes; a persistent compilation cache erases most of
+that on every restart after the first (§4.3). What does not amortize is memory
+headroom: a finer ladder can raise the fraction the compiler needs before the
+server will start at all, at the cost of key–value capacity, and no cache reuse
+fixes that (§4.3). That is the quantity BucketServe and LAPS manage when they write
+that the number of graphs must be limited, and it is a startup and
+memory-footprint budget rather than a throughput one. Reducing the number of
+shapes is worth doing for time-to-serve and resident executables. Routing requests
+to avoid run-time padding is not worth doing.
+
+The exception is the token dimension, where padded tokens are real arithmetic: the
+paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero by
+16, and is around 85% at batch ≤2 — a figure resting on a single boundary with no
+interval, and the least well supported number here. That low-batch regime is
+interactive serving, tight-latency deployments, and the prefill half of any
+disaggregated system, and it is where the ladder buys something.
+
+**The variable that pays is placement, not shape count.** A fourteen-shape ladder
+adding a single entry the default lacks reduces end-to-end latency by 12.1% at the
+prompt length that straddles it, gains nothing at a length it does not, and boots at
+the stock memory fraction with unchanged cache capacity. A twenty-one-shape ladder
+achieves the same reduction and will not start above a memory fraction of 0.85,
+costing 8.8% of cache capacity and 53% more startup. Every cost measured scales with
+cardinality. The ladder can be chosen offline: expected padding computed from a
+length distribution predicted the measured reduction to within 5%, so the design
+rule is the finest ladder that still boots, with entries placed against the
+distribution the server actually prefills.
+
+Two conditions bound that advice. The gain is a latency reduction below saturation
+rather than additional capacity: median latency falls 46% just below the knee,
+while sustained throughput rises 2.6% at it. And prefix caching, which production
+vLLM enables by default, reduces the gain from 12.3% to 1.7% by shortening the
+prefill onto a different compiled entry, so entries must be placed against uncached
+prefill lengths rather than prompt lengths.
+
+Three predictions registered before measurement failed, and each failure was worth
+more than a confirmation. That record is the paper's methodological result: every reported measurement has
+survived revision while four of the last five retractions were claims about
+mechanism, because a measurement passes through machinery that can reject it and
+an explanation does not. The remedy adopted here is
+to require that a mechanism emit a falsifiable number before hardware is
+provisioned. It is cheap, and it is the practice we would most recommend carrying
+into other measurement work.
+
+---
+
+## 10. Appendix
+
+Supporting material not required to evaluate the paper's four core results
+(§3, §4.1–§4.3, and their offline design rule in §4.4): the registered-prediction
+concurrency sweep, the deployment-value bounds, the prefix-caching interaction, the
+supporting ablations §4.1's mechanism draws on, the release-timing measurement in
+full, and the mixture-of-experts source-reading account. Section numbers below
+restart at 10.1 for this reason, not because the content is new.
+
+### 10.1 The benefit does not decay with concurrency, contrary to a registered prediction
+
+Because padding is paid at small batch and free at large (§4.2), the benefit of
+§4.3 appears as though it should be conditional on load. That reasoning predicts a
+crossing, and it was registered before measurement: the difference should shrink
+monotonically and reach zero between n=4 and n=16. Sweeping concurrency from 1 to
+16 on both ladders, in both arm orders, does not support it. Placebo-corrected
+differences in milliseconds, negative where the finer ladder is faster:
+
+Table: Placebo-corrected latency difference against concurrency, in milliseconds. Negative values favour the finer ladder. {#tab:conc}
+| prompt | n=1 | n=2 | n=4 | n=8 | n=16 |
+|---|---|---|---|---|---|
+| 1200 | −9.9 | −18.0 | −8.9 | −16.2 | −23.0 |
+| 3000 | −18.7 | −37.3 | −21.5 | −50.4 | −37.0 |
+
+There is no crossing. End-to-end latency is 3.5% to 12% lower at every concurrency
+sampled, the effect is non-monotone rather than decaying, and at n=16 it is larger
+in absolute terms than at n=1.
+
+##### Why the prediction failed
+
+The reason the prediction failed is visible in what the stack executes. The
+prediction reasoned about an individual request's padding shrinking as more
+requests share a step. Under chunked prefill the scheduler admits requests in waves
+and packs them, and the size of the packed step, rather than any request's length,
+selects the compiled shape. Snapshotting the `iteration_tokens_total` histogram
+around one n=16 cell shows a single repeat costing about three prefill steps,
+landing in (256,512], (512,1024] and (2048,4096], alongside 93 decode steps of at
+most 16 tokens. The two arms produce near-identical step distributions, differing
+only in which compiled shape those steps round up to. Padding is therefore
+transferred from individual requests to the packed step rather than eliminated.
+
+##### Tension with the paid-share curve
+
+This is in tension with §4.2, which finds the paid share falling to
+indistinguishable from zero by batch 16. The two measurements differ in what is
+held fixed: §4.2 varies batch size at a fixed boundary and attributes padding per
+request, while this sweep varies offered concurrency and allows the scheduler to
+choose step composition. If both are correct, the reconciliation is that
+per-request padding vanishes while per-step padding does not, and that a ladder
+acts on the second. Testing this requires padded tokens per packed step, which the
+available instrument cannot supply: `iteration_tokens_total` bins on powers of two,
+which is coarser than the ladder spacing under comparison. A step recorded in
+(2048,4096] pads to 2048, 2560, 3072, 3584 or 4096 depending on where in that bin
+it falls, and the two ladders differ precisely inside the bin.
+
+##### A defect in the control cell
+
+One design defect bounds these results. Prompt 300 was intended as a placebo at
+every concurrency, on the reasoning that it pads to 512 on both ladders. The step
+histogram shows this holds only while each request prefills in its own dispatch: at
+n≥4 the packed step lands where the ladders differ, so the cell is treated rather
+than inert. Its measured difference is correspondingly unstable across arm orders
+at n=8 and n=16 (−6.0 against −27.7 ms, and −1.5 against −17.2 ms) where the
+treated cells are stable. The n≥4 figures above are therefore floors on the effect
+rather than unbiased estimates, and arm order is their only control.
+
+##### An isolated-dispatch control
+
+The defect above is that concurrency does two things at once: it makes the regime
+realistic, and it lets the scheduler co-schedule prefills. Only the second breaks
+the control. Releasing requests on a 120 ms stagger separates them: a 3000-token
+prefill takes roughly 90 ms here, so each prefill runs alone in its step, while a
+32-token decode takes about 160 ms, so requests still overlap in decode and the
+concurrency is real.
+
+Isolation was verified rather than assumed. Scraping the step-size histogram
+around eight staggered requests at prompt 300 shows **eight separate prefill steps,
+all in the (256, 512] bin**; the same eight released as a burst produce three
+steps, in (256,512], (512,1024] and (1024,2048]. The stagger therefore restores
+the per-request ladder mapping the control depends on.
+
+Table: Ladder difference with prefills isolated by a 120 ms arrival stagger. Prompt 300 pads to 512 on both ladders and measures the offset between server instances; 1200 pads to 2048 on both and should show no effect. {#tab:isolated}
+| n | prompt 300 (offset) | prompt 1200, corrected | prompt 3000, corrected |
+|---|---|---|---|
+| 4 | −11.2 ms | +8.2 ms | **−65.8 ms** |
+| 8 | −9.7 ms | +1.2 ms | **−108.1 ms** |
+| 16 | −4.5 ms | +2.7 ms | **−98.1 ms** |
+
+A registered prediction that the control cell would return to zero was wrong: it
+shows a stable offset of 4 to 11 ms. Because 300 tokens pads to 512 on both
+ladders once prefills are isolated, and the histogram confirms they are, no ladder
+effect can reach that cell, so the offset is a difference between server instances
+and is exactly the quantity a control exists to measure. Subtracting it, prompt
+1200 sits at zero as the ladders predict, since both pad it to 2048, and prompt
+3000 carries a large reduction that does not decay through n=16. Intervals here are
+±0.7 ms rather than floors.
+
+The effect under isolation is substantially larger than under burst arrival, at 66
+to 108 ms against the 18 to 50 ms of the table above. That is the same mechanism
+seen from the other side: a packed step amortizes one padding charge across several
+requests, while an isolated prefill pays its own in full. **The claim that the
+benefit does not decay through n=16 therefore holds at interval level under
+isolated dispatch, and as a floor under burst arrival.**
+
+The sign survives this; the magnitude does not. The placebo's spread across arm
+orders at n=8 and n=16 is approximately 20 ms, comparable to several treated
+differences in the same table, so no n≥4 magnitude is resolvable at interval level.
+What is resolvable is direction: the raw differences at n=16 are −32.2 and −46.3 ms,
+and subtracting even the most extreme placebo estimate observed leaves both
+negative in both arm orders. The absence of a crossing is established at n=1 and
+n=2, where the placebo is valid; above that it is an observation with a floor.
+
+### 10.2 The gain is a latency reduction below saturation, not additional capacity
+
+The results above are latencies at fixed, small concurrency, while the cost of a
+longer ladder is denominated in cache tokens. A deployment choosing whether to
+spend memory on shapes requires the conversion. [tab:load] sweeps offered load open-loop against both ladders, at the stock 0.92
+fraction where both boot, with 60 requests per rate at prompt 3000:
+
+Table: Sustained goodput and latency against offered load, both ladders at the stock memory fraction. {#tab:load}
+| offered req/s | goodput (default → gap1024) | p50 ms | p95 ms |
+|---|---|---|---|
+| 2 | 2.30 → 2.30 | 286 → 246 | 504 → 318 |
+| 4 | 4.59 → 4.59 | 326 → 256 | 758 → 496 |
+| 8 | 9.03 → 9.08 | **974 → 529** | **1622 → 996** |
+| 12 | 12.45 → 12.68 | 2088 → 1895 | 3471 → 3093 |
+| 16 | 13.45 → 13.84 | 2571 → 2275 | 3570 → 3418 |
+| 24 | **14.03 → 14.40** | 3026 → 2921 | 3881 → 3727 |
+
+Both ladders knee between 8 and 12 req/s and saturate near 14. Sustained goodput
+rises from 14.03 to 14.40 req/s, or 2.6%, so the padding removed was not entirely
+slack. But 2.6% is far short of what "padded tokens are real arithmetic" implies
+for a 25% reduction in the prefill shape, and it is not where the effect is
+concentrated. The effect is concentrated just below the knee: at 8 req/s the
+placement ladder is 46% faster at p50 and 39% faster at p95.
+
+That shape is consistent with §4.2 and repairs part of the tension in Appendix §10.1. A
+saturated server packs prefills to the `max_num_batched_tokens` budget, so padding
+is amortized across a full step and the ladder has little influence, which is what
+the paid-share curve predicts. Below saturation the steps are smaller and closer to
+per-request, and the ladder entry accounts for most of the step's cost. Appendix §10.1's
+persistent benefit was measured under burst arrival at fixed concurrency, which
+loads the server differently from a steady arrival process at the same nominal
+rate.
+
+For the fourteen-shape ladder this trade is favorable, since it costs no capacity
+at all: four additional compiled shapes reduce tail latency by up to 46% in the
+regime most interactive deployments run in. For the twenty-one-shape ladder, which
+costs 8.8% of capacity, the same arithmetic argues against it, since surrendering
+8.8% of the cache to gain 2.6% in sustained throughput is an unfavorable exchange
+at saturation.
+
+### 10.3 Prefix caching moves the target the ladder is placed against
+
+Prefix caching is disabled elsewhere in this work, and production vLLM enables it
+by default. It removes already-computed prefix tokens from the prefill, so the step
+lands on a different compiled shape than the request's length implies, which bears
+directly on a recommendation about where to place entries.
+
+Testing this requires a workload with a cacheable prefix. Requests built from
+independent token sequences share nothing, so a cache cannot hit them, and an
+experiment run against such a workload would report caching having no effect while
+saying nothing about production. Here every request shares a fixed 2048-token
+prefix and varies only its 952-token tail, which is the structure of a system
+prompt or a few-shot preamble. Prompt 3000, two concurrent requests ([tab:apc]):
+
+Table: Ladder placement with and without prefix caching, over a workload sharing a 2048-token prefix. {#tab:apc}
+| ladder | caching | e2e | prompt tokens cached |
+|---|---|---|---|
+| default (10) | off | 292.5 ms | 0 |
+| gap 1024 (14) | off | 256.6 ms | 0 |
+| default (10) | **on** | 181.5 ms | +43,008 |
+| gap 1024 (14) | **on** | 178.5 ms | +43,008 |
+
+##### Effect of prefix caching on the placement benefit
+
+The placement benefit falls from 35.9 ms, or 12.3%, to 3.0 ms, or 1.7%. A
+prediction registered before measurement anticipated this, and for the stated
+reason: with 2048 tokens cached the server prefills approximately 952, which pads
+to 1024 on both ladders, while the two ladders differ only at 3072 against 4096.
+The entry chosen in §4.3 is no longer the entry the step uses. The cached-token
+counter is the arm's own evidence that the treatment applied, since 43,008 is
+exactly 21 × 2048, so twenty-one of twenty-two requests hit the prefix and the
+first populated it.
+
+The mechanism is unchanged and the operating point has moved. Caching does not make
+padded tokens cheap; it removes tokens from the prefill, and a ladder placed
+against prompt length is then placed against the wrong distribution. **Entries
+should therefore be placed against the distribution of uncached prefill lengths.**
+This also bounds §4.3 and Appendix §10.2, which are measured with caching disabled and so
+describe workloads with little prefix reuse. On this workload caching is worth
+considerably more than the ladder: 292.5 ms to 181.5 ms, a 38% reduction, against
+the 12.3% the best placement achieves without it.
+
+### 10.4 Supporting ablations and controls
 
 ##### A published latency predictor
 
@@ -1112,93 +1462,7 @@ batch ≈ 240 to ≈ 120. That yields a registered prediction — under W8 the
 token-dimension paid share at a fixed boundary rises — which **has not been run**.
 It is future work rather than a result, and nothing above depends on it.
 
-### 4.9 The request-dimension result replicates on GPU
-
-§4.1's request-dimension finding was measured on TPU. Whether it holds on another
-architecture is testable rather than assumed: same vLLM 0.25.0, same instrument,
-an L4 (23 GB, TP=1) in place of the v5e:
-
-Table: GPU control on an L4: CUDA-graph capture against eager execution. The increments are the measurement; the levels differ by a constant launch overhead. {#tab:gpu}
-| arm | n=8 | n=9 | n=16 | 8→9 | 8→16 | startup |
-|---|---|---|---|---|---|---|
-| CUDA graphs on | 10.605 | 10.887 | 12.298 | **0.283** | **1.693** | 118.7 s |
-| `--enforce-eager` | 19.934 | 20.150 | 21.618 | **0.215** | **1.684** | 10.7 s |
-
-**The increments are the measurement; the levels are not.** Eager execution pays a
-constant per-operation launch overhead, so the levels differ by roughly 9.3 ms
-throughout, and that constant cancels in any increment. It cancels to within 9 µs on
-the 8→16 step, at 1.693 against 1.684 ms, which is the control this comparison
-requires: the two arms measure the same underlying work plus an offset, so their
-difference isolates what capture adds.
-
-On that basis, padding a batch from 8 up to the captured entry at 16 costs
-approximately **67 µs**, being the 0.283 ms increment with graphs against 0.215 ms
-without. That is 0.6% of a 10.9 ms step, or 4.0% of the nominal padding implied by
-rounding 9 up to 16.
-
-**This tests one of the three dimensions, and it is the one least in doubt.** vLLM's
-CUDA path captures a graph per batch size, so what these arms vary is the request
-dimension, which the TPU results explain with a data-structure argument (§4.1) and
-where no proposed optimization was going to pay. The token dimension, where this
-paper locates the only surviving effect, is not reached: no arm here varies tokens
-per step at fixed batch. The cross-architecture statement this table supports is
-therefore that **request-dimension padding is close to free on both architectures**,
-not that the premise is false on both. Whether a GPU stack pays for token padding as
-a TPU stack does is untested, and is the experiment that would make the
-cross-architecture claim general.
-
-The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
-intervals of roughly ±50 percentage points, so this table cannot resolve a
-difference between the architectures; what both support is that the paid share is
-small on each.
-
-[tab:gpu] is one measurement per arm. Repeating each arm 20 times on a fresh L4 and
-bootstrapping the position-of-n=9 statistic (10,000 resamples, median-based, the
-same convention as every other interval in this paper) resolves what the single
-measurement could not: with graphs, position is **16.0% [15.0%, 17.1%]** — an
-interval that excludes both 0% and 100%, meaning the small batch-padding cost this
-table shows is real and repeatable rather than noise, not merely "closer to free
-than to paid." Under `--enforce-eager`, position is **0.7% [−9.6%, 11.1%]** — an
-interval that excludes 100% and *includes* 0%, meaning eager execution is
-statistically indistinguishable from fully free. Both conclusions match the single
-measurement's direction (17%, 1%); what the repeats add is knowing that graphs'
-17% was not noise dressed as a small effect, and that eager's 1% could have been.
-
-**What is paid is the capture, and it is paid at startup.** Enabling graphs costs
-108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
-That is precisely the quantity BucketServe and LAPS manage when they write that the
-number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
-compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.
-
----
-
-## 5. Optimizations designed against these measurements
-
-Five interventions were designed against the compiled-shape premise. Each
-rejection below identifies a dimension the measurements show carries no cost:
-
-- **Ladder placed against the workload** — works: −12.1% at n=2 and −46% p50
-  below the knee, at full memory; beats BucketServe's objective by 1.61 ms at
-  equal shape count; −1.7% once prefix caching is on (§4.3–§4.7).
-- **Bucket-aware admission control** — premise false (§4.2).
-- **Ladder redesign on the request dimension** — D1 does not exist; D3 inert by
-  default.
-- **Last-chunk decomposition** — 20.6% worse measured (51.06 vs 42.33 ms).
-- **Bucket-aligned step packing** — implemented twice: inert, then
-  output-corrupting.
-
-The one that works targets the single dimension the measurements leave open, and
-the rejections are informative rather than incidental. Three of them address the
-request dimension or per-request length padding, where §4.1 and §4.2 find no cost
-to recover, so their failure is what those sections predict; the fourth
-restructures work the stack already packs. The token dimension is the only place
-where the premise was not refuted by measurement, and the only place where an
-intervention produced a gain — though not for the reason expected, since the payoff
-was predicted to be confined to low concurrency and was not (§4.4).
-
-A second positive measurement — release timing saving 26% of TPU time against stock
-at 25 req/s (p=0.001, six paired seeds) — is dynamic batching rather than a shape
-effect, and is reported as a re-measurement rather than as a contribution.
+### 10.5 Release timing, in full: the low-load effect, its cost, and the packing bug
 
 **It is a low-load effect that reverses.** Swept across arrival rate against stock,
 positive being a saving:
@@ -1241,90 +1505,7 @@ after the scheduling loop leaves the request's bookkeeping untouched, so deferre
 tokens are skipped rather than rescheduled, and the step is cheaper because it does
 less work.
 
----
-
-## 6. Validation, and what it does not cover
-
-Every reported quantity is produced under a configuration contract that aborts a
-run when a controlled variable is left undeclared, is tied to a run identifier, and
-is recomputed from captured data by a script that exits non-zero if it disagrees
-with the text. §2 states the registered-prediction requirement that accompanies it.
-
-**No equivalent validation applies to explanations.** A proposed mechanism can be
-written, accepted, cited by later sections, and carried across successive drafts
-without any stage of the process being able to contradict it. Two instances in this
-paper show the consequence. The bandwidth account of free request padding persisted
-through four sessions of work before §4.1's utilization measurement refuted it, and
-it was never supported by evidence so much as never confronted with any. The
-control cell of §4.4 was chosen on the reasoning that a 300-token prompt pads
-identically on both ladders, which is true only while each request prefills alone;
-one scrape of the executed step distribution settled it, after both arms had run.
-
-The consequence for a reader is that the measurements in §4 and the mechanisms
-offered for them do not carry the same weight, and we present them accordingly.
-Two qualifications keep that statement honest.
-
-First, survival is not uniform. §4.2's paid-share table survived the discovery that
-its rows were measured over different boundary sets as an *ordinal* claim; the
-cardinal values did not. §4.4's rows above n=2 survive as floors rather than
-estimates under burst arrival, and only the isolated-dispatch control recovers
-interval-level statements. A value that reproduces while its interpretation is
-withdrawn has not survived in the sense the word usually carries.
-
-Second, the asymmetry is partly a property of what can be checked rather than of
-what is true. A measurement has a value a script can recompute; a mechanism does
-not, so it is never submitted to the check at all, and passing no check is not the
-same as passing one. Our own record limits the stronger reading: four of the errors
-we caught were instrument-definition failures, in which an analysis measured
-something other than its target, and those corrupt numbers rather than explanations.
-No guardrail here covers that class, so we cannot bound residual error in the
-measurements either.
-
-## 7. Limitations
-
-**One TPU slice, one GPU, one primary model.** A v5litepod-4 with a 4B model, and a
-single L4 for the control. The sharding objection is answered by the TP=1/2/4
-ablation (§4.8), which finds request padding cheap at every sharding, but model
-scale and multi-host topology are unmeasured, and both change the fixed costs
-within which padding can be absorbed. §4.8 argues analytically that the regime map
-is a function of batch size and dtype rather than parameter count, for dense
-weight-stationary decode only.
-
-**The strongest single number is the least well supported.** The ~85% paid share at
-n≤2 rests on one boundary and carries no interval (§4.2).
-
-**Prefix caching is measured but not swept.** §4.6 tests it at one prefix length,
-2048 of 3000 tokens, on one workload shape. This is enough to show that the
-placement target moves and not enough to say where it lands for a given amount of
-prefix reuse. Everything outside §4.6 is measured with caching disabled and so
-describes workloads with little prefix sharing.
-
-**No production trace.** §4.2's four length distributions are parametric families
-matched on mean length, not a trace of real traffic. They establish that padded
-share varies by a factor of four with distribution shape at equal offered tokens,
-and that dispersion does not order it, but the figures belong to those families
-rather than to any deployment. §4.6 further shows that any such figure depends on
-how much prefix reuse a workload has, since caching changes the length actually
-prefilled.
-
-**The ladder benefit has no measured upper bound in concurrency.** §4.4 sweeps 1 to
-16 and finds no crossing, so we cannot say where a finer ladder ceases to pay, only
-that it has not ceased by 16. Above n=4 that experiment has no valid placebo, so
-those rows are floors on the effect rather than unbiased estimates.
-
-**The recommendation is mediated by version-pinned internal flags.**
-`VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to
-vLLM and `tpu-inference` 0.25.0, and a scheduler or compilation refactor upstream
-could change the ladder they produce, or remove them. The measurements would
-survive such a change, since they characterize a mechanism rather than an
-interface, but the operational advice is pinned to this version. §4.7's rule
-mitigates this only partly: it states which ladder to want, while the flags are how
-one currently asks for it.
-
-**Cost per padded token on a mixture-of-experts model is unmeasured.** No slice
-was available: `v5litepod-4` capacity was refused in thirteen zones across three
-continents, on both on-demand and spot pricing, over a full day of half-hourly
-attempts. The obstacle is capacity rather than budget or design.
+### 10.6 Mixture-of-experts padding, from source
 
 What the implementation settles is the direction. In `tpu-inference` 0.25.0 a
 padded token entering the fused expert kernel carries whatever the routing
@@ -1335,10 +1516,10 @@ token pays too, and which therefore leaves the paid *share* unchanged, that shar
 being a ratio. The second is that a padded token can activate an expert no real
 token in the step required, adding a group to the grouped matmul that would not
 otherwise run. That second term grows as the batch shrinks, which is exactly
-where padded share is already highest (§4.2), and it is the quantity §4.8's
-arithmetic-intensity argument already names as the reason that argument does not
-extend to these models: bytes there scale with distinct experts touched, and
-padding is a way of touching more of them. The backend carries a flag,
+where padded share is already highest (§4.2), and it is the quantity Appendix
+§10.4's arithmetic-intensity argument already names as the reason that argument
+does not extend to these models: bytes there scale with distinct experts touched,
+and padding is a way of touching more of them. The backend carries a flag,
 `MOE_ROUTE_PADDING_TO_EXPERT0`, that collapses padding onto a single expert at
 zero weight; it ships disabled, is inert when attention is data-parallel, and
 fails open, serving the unmitigated path if it cannot read the step's valid-token
@@ -1349,158 +1530,3 @@ percent of a padded token's cost or sixty decides whether that flag is an
 operational recommendation or a footnote, and no reading of the source answers
 it.
 
-**A published diagnosis of the `gpt-oss-20b` failure was wrong.** An earlier
-draft attributed its refusal to initialize at TP=4 to a parameter axis of size
-six. No axis of that size appears in its configuration. Its weights are MXFP4,
-whose 4-bit values are packed in blocks of 32, and 2880/4 = 720 is not a multiple
-of 32, so a block would straddle two chips. TP=2 divides cleanly but cannot run
-on this hardware: the device mesh is built as (data, tensor) over every visible
-chip, so the product of the two must equal the slice's four, and any data-parallel
-degree above one disables the flag above. With no two-chip topology offered and
-single-chip quota at zero, that model has no configuration available to it here.
-`llama4` remains out of reach at 109B parameters.
-
-**The GPU control is inference-tier hardware.** The L4 has neither the compute
-throughput nor the memory bandwidth of the accelerators most production serving
-runs on, and the arithmetic-intensity ridge sits at a different point there than at
-v5e's ~240 FLOP/byte. Since the ridge is what sets the batch size at which token
-padding stops mattering (§4.8), the batch thresholds reported here should not be
-transferred to other hardware without re-measurement.
-
-**Prefill step cost above n=16 is not isolable**, and at n=16 the clean sample is
-7–11 dispatches per arm.
-
-**The n=4 convergence is unexplained and is not an operator effect.** An
-operator-level profile shows every category of device time moving smoothly through
-n=4. The three observations that appear to converge there are not independent:
-LENS's failure and the paid-share drop are the same quantity described twice.
-
-**The GPU control is one point rather than a curve.** Startup was measured at
-vLLM's default capture set, and the number of captured shapes was not varied, which
-is precisely the axis BucketServe and LAPS trade along.
-
-**Co-located prefill and decode only.** On a disaggregated deployment the padding
-question divides in two, and §4.8's finding that variance is a prefill phenomenon
-is the asymmetry that motivates disaggregation.
-
----
-
-## 8. Related work
-
-**Pope et al.** derive the memory-bound to compute-bound transition for transformer
-inference on TPU analytically; §4.1's byte accounting is a measured instance of that
-regime rather than a discovery. We do not claim that the weight-load floor explains
-free request padding, since §4.1 tests that account and rejects it.
-
-**RPA** is the technique this work validates: per-request padding costing nothing is
-what its ragged-tiling design predicts, though it does not discuss the request-count
-dimension, report cost against batch size, or quantify how much padding survives it.
-**LENS** (§4.8) supplies the model form; we supply the hardware it was not tested on
-and the ablation showing that its length term is not what carries its reported
-accuracy.
-
-**PagedAttention/vLLM** is the stack measured throughout; **Orca**'s iteration-level
-scheduling produces the per-step batches; **Sarathi-Serve** introduced the chunked
-prefill that §4.2 controls for. **DistServe** and **Splitwise** disaggregate prefill
-from decode, which is the architectural response to the finding that variance is a
-prefill phenomenon, and which bounds our advice to co-located deployments.
-**Vidur** established simulator-fidelity validation as the standard for
-simulation-based serving studies; our holdout discipline follows it.
-
-**SGLang** and **TensorRT-LLM** implement their own shape and graph handling, with
-different capture policies and, in TensorRT-LLM's case, an ahead-of-time engine
-build with explicit optimization profiles. Nothing here is measured on either, and
-the claims should be read as applying to vLLM-style designs, in which shapes are
-compiled or captured from a ladder the serving loop rounds up to.
-
-**BucketServe** and **LAPS** manage length-bucketing overhead on GPU. §4.7 runs
-BucketServe's own ladder-design objective on this stack rather than arguing
-against it: solved globally and given the same shape budget, its ladder is 1.61 ms
-slower than one chosen to minimize absolute padded tokens, and both are about
-15 ms faster than the stock ladder. Their ladder design is therefore effective,
-and our disagreement with these systems is narrower than a premise-level
-objection. It concerns which dimension the padding occupies — the request
-dimension is free (§4.1) and per-request length padding does not exist (§4.2) —
-and, for the token dimension where it is real, which objective converts to time.
-
-The cross-architecture comparison itself — same vLLM 0.25.0, same instrument, an L4
-in place of the v5e — is measured rather than asserted, and is reported as a result
-in §4.9 rather than as related work: it finds request-dimension padding close to
-free on both architectures, with the same caveats of scope (one GPU, no repeats)
-that apply to the TPU measurements it parallels. Enabling CUDA-graph capture there
-costs 108 s of initialization, which is precisely the quantity BucketServe and LAPS
-manage when they write that the number of graphs must be limited, and it is a
-warmup cost — the TPU analogue is XLA compilation, at 5–30 minutes for the first
-bucket and 30–120 s per additional one.
-
-**How, then, do prior bucketing techniques achieve their reported speedups?** If
-the padding premise is false on
-both architectures, systems reporting end-to-end improvements from bucketing are
-improving something else, and §5 supplies a candidate from our own data. A positive
-measurement in this work — release timing saving 26% of TPU time at 25 req/s — is
-dynamic batching, an arrival-and-composition effect rather than a shape effect.
-Bucketing schemes change which requests occupy a step together, and that is worth
-something independent of padding. We place weight on the mechanism rather than the
-magnitude, because the magnitude is the weaker half: the saving costs latency once
-the harness overhead inflating the baseline is removed, and it reverses at high load
-(§5). The defensible claim is the negative one — **a bucketing result that does not
-control for batch composition cannot distinguish a shape effect from a scheduling
-one** — and it rests on the premise measurements of §4.1 and §4.2.
-
----
-
-## 9. Conclusion
-
-Two accelerator families reach the same design by different routes: XLA compiles a
-ladder of shapes, and CUDA captures a graph per batch size. Both round every step up
-to the nearest entry, and the optimization literature treats that rounding as a cost
-to be recovered. It is not, on either. A batch just above an entry costs what the
-entry below costs, because a ragged attention kernel does almost no work for slots
-holding no key–value blocks — under 0.7 µs per slot, against 27.5 µs if it were paid
-— and a captured graph does not care that part of its batch is unused.
-
-What shape coverage costs is a boot-time budget, and only part of it amortizes.
-Enabling CUDA-graph capture costs 108 seconds of startup, and XLA compiles the
-first TPU bucket in 5–30 minutes; a persistent compilation cache erases most of
-that on every restart after the first (§4.3). What does not amortize is memory
-headroom: a finer ladder can raise the fraction the compiler needs before the
-server will start at all, at the cost of key–value capacity, and no cache reuse
-fixes that (§4.3). That is the quantity BucketServe and LAPS manage when they write
-that the number of graphs must be limited, and it is a startup and
-memory-footprint budget rather than a throughput one. Reducing the number of
-shapes is worth doing for time-to-serve and resident executables. Routing requests
-to avoid run-time padding is not worth doing.
-
-The exception is the token dimension, where padded tokens are real arithmetic: the
-paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero by
-16, and is around 85% at batch ≤2 — a figure resting on a single boundary with no
-interval, and the least well supported number here. That low-batch regime is
-interactive serving, tight-latency deployments, and the prefill half of any
-disaggregated system, and it is where the ladder buys something.
-
-**The variable that pays is placement, not shape count.** A fourteen-shape ladder
-adding a single entry the default lacks reduces end-to-end latency by 12.1% at the
-prompt length that straddles it, gains nothing at a length it does not, and boots at
-the stock memory fraction with unchanged cache capacity. A twenty-one-shape ladder
-achieves the same reduction and will not start above a memory fraction of 0.85,
-costing 8.8% of cache capacity and 53% more startup. Every cost measured scales with
-cardinality. The ladder can be chosen offline: expected padding computed from a
-length distribution predicted the measured reduction to within 5%, so the design
-rule is the finest ladder that still boots, with entries placed against the
-distribution the server actually prefills.
-
-Two conditions bound that advice. The gain is a latency reduction below saturation
-rather than additional capacity: median latency falls 46% just below the knee,
-while sustained throughput rises 2.6% at it. And prefix caching, which production
-vLLM enables by default, reduces the gain from 12.3% to 1.7% by shortening the
-prefill onto a different compiled entry, so entries must be placed against uncached
-prefill lengths rather than prompt lengths.
-
-Three predictions registered before measurement failed, and each failure was worth
-more than a confirmation. That record is the paper's methodological result: every reported measurement has
-survived revision while four of the last five retractions were claims about
-mechanism, because a measurement passes through machinery that can reject it and
-an explanation does not. The remedy adopted here is
-to require that a mechanism emit a falsifiable number before hardware is
-provisioned. It is cheap, and it is the practice we would most recommend carrying
-into other measurement work.
