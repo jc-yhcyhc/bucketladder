@@ -1,4 +1,4 @@
-# Shape Coverage Is a Warmup Cost: Compiled-Shape Padding in Production TPU and GPU Serving
+# Shape Coverage Is a Boot-Time Cost: Compiled-Shape Padding in Production TPU and GPU Serving
 
 Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
 (JAX 0.10.2, tensor-parallel degree TP=4), with an NVIDIA L4 for the GPU control.
@@ -7,77 +7,44 @@ Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
 
 ## Abstract
 
-Accelerator serving stacks execute a fixed set of compiled or captured shapes and
-round every step up to one of them. A family of proposed optimizations — length
-bucketing, shape-aware admission control, ladder design — assumes that rounding up
-means paying for the shape that was rounded up to. This paper measures what is
-actually paid, on a production TPU stack and, using the same serving framework and
-the same instrument, on a GPU.
+Accelerator serving stacks round every step up to a compiled or captured
+shape, on the assumption that rounding up means paying for the shape
+rounded up to — the premise behind length bucketing, shape-aware
+admission control, and ladder design. We measure what is actually paid,
+on production TPU and GPU stacks, and **find it false on two of the
+three dimensions shape coverage quantizes.**
 
-**This assumption does not hold in the stacks we measured.** A batch placed just
-above a compiled entry costs
-approximately what the entry below it costs. On TPU, padding a request slot costs
-under 0.7 µs against 27.5 µs if it were paid. On GPU, padding a batch from 8 up to
-a captured 16 costs 67 µs, which is
-0.6% of the step. **The two architectures are compared on the request dimension only.**
-CUDA-graph capture quantizes batch size, so the GPU arms vary batch size and
-establish request-padding parity; the token dimension, on which this paper's
-recommendation rests, is measured on TPU alone. Compilation overhead is instead
-incurred as a static
-startup cost: enabling CUDA-graph capture costs 108 s of initialization, and XLA, the compiler
-that turns a TPU model into fixed-shape executables, takes 5 to 30 minutes over
-the first bucket of a ladder. Neither is a
-per-step cost.
+Per-request prompt-length padding **does not exist**. Request-slot
+padding is **free** — under 0.7 µs per padded slot against 27.5 µs if
+paid, because the attention kernel does no work for unused slots — and a
+GPU control replicates this at 67 µs (0.6% of the step) on the one
+dimension both architectures share; the token dimension is TPU-only.
+Token padding is **the exception**: real arithmetic, paid at 23.1% of
+nominal at batch 4 and indistinguishable from zero at batch 16.
 
-The three quantized dimensions behave differently, and separating them is the
-paper's organizing claim. Per-request prompt-length padding **does not exist**: the
-stack has no such ladder. Request-slot padding is **free**, at under 0.7 µs per
-padded slot against 27.5 µs if it were paid, because the Ragged Paged Attention
-(RPA) kernel does no work for slots holding no key–value blocks. Token padding is
-**real arithmetic**, paid at 23.1% of nominal at batch 4 and indistinguishable from
-zero at batch 16, and it is the one dimension on which an intervention can pay.
+**On that dimension, ladder design still pays, and the effective
+variable is placement, not shape count.** One entry added where the
+workload needs it cuts latency 12.1% at the straddling prompt length, at
+no memory cost, while a uniformly finer ladder buys nothing further and
+fails to boot near the stock memory fraction. Chosen offline from a
+length distribution, a placement predicts the gain to within 5% and
+beats BucketServe's own objective by 1.61 ms at equal shape count. The
+gain is a latency reduction below saturation (46% at the knee), not
+added capacity (2.6% at saturation), and shrinks from 12.3% to 1.7% once
+prefix caching is on.
 
-**On that dimension, ladder design pays — and the effective variable is placement
-rather than shape count.** A fourteen-shape ladder that adds one entry the default
-lacks reduces end-to-end latency by 12.1% at the prompt length that straddles it,
-by 0.1% at a length it does not, and boots at the stack's default memory fraction
-with unchanged key–value cache capacity. A twenty-one-shape ladder achieves the
-same reduction and additionally fails to start above a memory fraction of 0.85
-against a 0.92 default, which costs 8.8% of cache capacity and 53% more startup
-time. Every cost measured scales with the number of compiled shapes; the benefit
-depends only on whether a boundary falls between the prompt length and the next
-entry. A ladder can be chosen offline: expected padding computed from a length
-distribution predicted the measured reduction to within 5%, and a ladder chosen
-this way is 1.61 ms faster than one chosen by BucketServe's published objective at
-equal shape count, because that objective minimizes relative rather than absolute
-padding.
-
-Two measurements bound what that reduction is worth in deployment. Swept against
-offered load, it reduces median latency by 46% just below saturation but increases
-sustained throughput by only 2.6% at saturation, making it a latency optimization
-for under-saturated serving rather than a capacity one. With prefix caching
-enabled, as production vLLM ships it, the same placement yields 1.7% instead of
-12.3%, because caching shortens the prefill onto a different compiled entry.
-
-A prediction registered before measurement held that this benefit would decay with
-concurrency and vanish by batch 16. It does not: latency remains 3.5–12% lower
-across concurrencies 1 to 16. Under chunked prefill the scheduler assembles steps
-against a token budget rather than a compiled shape, so padding moves from
-individual requests to the packed step rather than being eliminated.
-
-Every reported quantity is produced under automated validation: a configuration
-contract that aborts a run when a controlled variable is undeclared, and a
-recomputation script that regenerates each figure from captured data and fails on
-disagreement. The mechanisms proposed to account for those quantities receive no
-equivalent scrutiny, and §6 reports what follows from that, including two of our
-own explanations that were withdrawn while the measurements behind them stood.
+**What shape coverage costs is not run-time padding but a one-time boot
+cost**, amortized by a persistent cache. Every number here regenerates
+from captured data by a script that fails on disagreement; the
+mechanisms proposed to explain them receive no equivalent check.
 
 ---
 
 ## 1. Introduction
 
-A GPU serving stack resolves kernel shapes at runtime; a TPU stack cannot. XLA
-compiles for fixed shapes, and recompiling per request is impossible at serving
+A GPU serving stack resolves kernel shapes at runtime; a TPU stack cannot. XLA,
+the compiler that turns a TPU model into fixed-shape executables, compiles for
+fixed shapes, and recompiling per request is impossible at serving
 latencies, so vLLM's TPU backend precompiles a ladder of shapes and rounds every
 step up to one of them. vLLM's CUDA path does something structurally similar for a
 different reason: it captures one CUDA graph per batch size from a fixed set and
@@ -94,7 +61,7 @@ This paper presents an empirical evaluation of run-time shape-padding overhead. 
 TPU serving stack, isolate the mechanism responsible for each, and repeat the
 central measurement on a GPU using the same framework and instrument. Run-time
 padding proves close to free on both, and the cost of shape coverage proves to be a
-warmup charge that neither system measures.
+boot-time charge that neither system measures.
 
 A second theme shaped what was measured. Our measurements have proved durable and
 our explanations have not: no reported number has been withdrawn, while four of the
@@ -105,13 +72,13 @@ in response, and §6 reports what the asymmetry does and does not license.
 
 1. **The premise, measured** (§4.1, §4.2, §4.9). Padding a batch up to a compiled or
    captured entry is close to free on a TPU ladder and on CUDA-graph capture
-   alike; what shape coverage costs is warmup. The GPU comparison covers the
+   alike; what shape coverage costs is paid at boot, not per step. The GPU comparison covers the
    request dimension, which is the dimension graph capture quantizes.
 2. **The request ladder reported by the TPU stack differs from the one its
    attention kernel executes** (§4.1). This can be confirmed directly from the
    source code, by a paired hardware experiment, and from the compiler-emitted
    kernel name.
-   It is absent from the RPA paper, from LENS, and from vendor documentation.
+   It is absent from the RPA (Ragged Paged Attention) paper, from LENS, and from vendor documentation.
 3. **A mechanism for free request padding** (§4.1): the ragged kernel performs
    under 0.7 µs of work per padded slot, against 27.5 µs if it were paid,
    established by reducing the compiled slot count by a factor of 32 for a −0.9%
@@ -1481,12 +1448,17 @@ entry below costs, because a ragged attention kernel does almost no work for slo
 holding no key–value blocks — under 0.7 µs per slot, against 27.5 µs if it were paid
 — and a captured graph does not care that part of its batch is unused.
 
-What shape coverage costs is warmup. Enabling CUDA-graph capture costs 108 seconds
-of startup, and XLA compiles the first TPU bucket in 5–30 minutes. That is the
-quantity BucketServe and LAPS manage when they write that the number of graphs must
-be limited, and it is a startup and memory-footprint budget rather than a throughput
-one. Reducing the number of shapes is worth doing for time-to-serve and resident
-executables. Routing requests to avoid run-time padding is not worth doing.
+What shape coverage costs is a boot-time budget, and only part of it amortizes.
+Enabling CUDA-graph capture costs 108 seconds of startup, and XLA compiles the
+first TPU bucket in 5–30 minutes; a persistent compilation cache erases most of
+that on every restart after the first (§4.3). What does not amortize is memory
+headroom: a finer ladder can raise the fraction the compiler needs before the
+server will start at all, at the cost of key–value capacity, and no cache reuse
+fixes that (§4.3). That is the quantity BucketServe and LAPS manage when they write
+that the number of graphs must be limited, and it is a startup and
+memory-footprint budget rather than a throughput one. Reducing the number of
+shapes is worth doing for time-to-serve and resident executables. Routing requests
+to avoid run-time padding is not worth doing.
 
 The exception is the token dimension, where padded tokens are real arithmetic: the
 paid share is 23.1% of nominal at batch 4, falls to indistinguishable from zero by
