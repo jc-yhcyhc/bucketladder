@@ -1150,8 +1150,19 @@ cross-architecture claim general.
 The comparison is also a bound rather than an equality. §4.1's TPU statistic carries
 intervals of roughly ±50 percentage points, so this table cannot resolve a
 difference between the architectures; what both support is that the paid share is
-small on each. These remain single measurements: three batch points, one GPU, no
-repeats.
+small on each.
+
+[tab:gpu] is one measurement per arm. Repeating each arm 20 times on a fresh L4 and
+bootstrapping the position-of-n=9 statistic (10,000 resamples, median-based, the
+same convention as every other interval in this paper) resolves what the single
+measurement could not: with graphs, position is **16.0% [15.0%, 17.1%]** — an
+interval that excludes both 0% and 100%, meaning the small batch-padding cost this
+table shows is real and repeatable rather than noise, not merely "closer to free
+than to paid." Under `--enforce-eager`, position is **0.7% [−9.6%, 11.1%]** — an
+interval that excludes 100% and *includes* 0%, meaning eager execution is
+statistically indistinguishable from fully free. Both conclusions match the single
+measurement's direction (17%, 1%); what the repeats add is knowing that graphs'
+17% was not noise dressed as a small effect, and that eager's 1% could have been.
 
 **What is paid is the capture, and it is paid at startup.** Enabling graphs costs
 108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
