@@ -133,13 +133,11 @@ where it is the treatment. Chunked prefill, `max_model_len`,
 `XLA_FLAGS` and `ATTN_BUCKETIZED_NUM_REQS` are recorded. Every run's own
 configuration is checked against the fixed set of required values before any
 hardware work starts, and aborts if a controlled variable is missing or
-undeclared-and-wrong. The check has rejected three runs in which a config's own
-declared value had drifted, and one in which a control was varied deliberately
-and declared. This check is over the configuration as declared, not as executed:
-it does not compare against what the live server reports at boot, which is a real
-gap, not a hedge — Appendix §10.12 reports a run whose live `max_model_len` was
-4096 while its own config declared 8192, undetected by this check for exactly
-that reason.
+undeclared-and-wrong — three runs rejected for a drifted declared value, one for
+an undeclared deliberate variation. This is a check over the configuration as
+declared, not as executed: it does not compare against what the live server
+reports, a real gap Appendix §10.12 hits directly (`max_model_len` declared 8192,
+served 4096, undetected for exactly that reason).
 
 **Units and instrument scope.** All timings are measured server-side, as
 differences between Prometheus histogram snapshots taken before and after each
@@ -473,17 +471,16 @@ that mixes the gap-512 row with a value from this table's own boot carries that
 much additional, uncorrected uncertainty; the −12.1% figure below does not, since
 default and gap-1024 are both this boot's own measurements.
 
-Against the ten-shape ladder, the raw differences read directly from the table
-above are −4.5 ms at prompt 1200 and −40.7 ms at prompt 3000. Both are corrected
-by +4.7 ms — a between-instance offset measured from this boot's own prompt-300
-placebo cell, not shown in the table above since only prompts 1200 and 3000
-appear there — giving +0.2 ms at prompt 1200 and −36.0 ms (−12.1%) at prompt
-3000, both from arms in this same boot: the fourteen-shape ladder gains exactly
-where it places an entry the default lacks, at 3072, and nowhere else — no entry
-at 1536 leaves prompt 1200 unaffected, and the eleven-shape ladder, placing
-nothing new near either prompt, tracks the default at both. Shape count ranges
-from 10 to 21 across these arms while the benefit depends only on whether a
-boundary falls between the prompt and the next default entry.
+Against the ten-shape ladder, the raw table differences are −4.5 ms at prompt
+1200 and −40.7 ms at prompt 3000; both are corrected by +4.7 ms — this boot's own
+prompt-300 placebo offset, not itself shown above since only prompts 1200 and
+3000 appear there — giving +0.2 ms and −36.0 ms (−12.1%), both from this same
+boot: the fourteen-shape ladder gains exactly where it places an entry the
+default lacks, at 3072, and nowhere else — no entry at 1536 leaves prompt 1200
+unaffected, and the eleven-shape ladder, placing nothing new near either prompt,
+tracks the default at both. Shape count ranges from 10 to 21 while the benefit
+depends only on whether a boundary falls between the prompt and the next default
+entry.
 
 ##### Feasibility at the default memory fraction
 
@@ -563,16 +560,15 @@ from prompt lengths and begin at 208, and a ladder without small entries pads a
 two-token decode step to 208. Both arms therefore spend the same number of shapes,
 fourteen, and differ only in where the ten free entries sit.
 
-At equal shape count (fourteen), replaying the same sampled lengths as
-[tab:fit]'s workload, the stock ladder (10 shapes) pads 602 tokens/req for a mean
-end-to-end of 226.2 ms; gap-1024 pads 389 tokens/req for 215.6 ms; BucketServe's
-relative-waste objective pads 328 tokens/req for 209.0 ms; and the padded-token
-objective pads **248** tokens/req for **207.4 ms**. The stock and gap-1024 rows
-here read 6.4 and 2.9 ms above [tab:fit]'s own values for nominally the same
-arms — inside the 4–11 ms between-instance offset [tab:isolated] measures
-directly, and a caution the next comparison inherits: it is precise only if these
-four rows were measured together rather than assembled across boots, which this
-account does not establish.
+At equal shape count (fourteen), replaying [tab:fit]'s sampled lengths, the stock
+ladder (10 shapes) pads 602 tokens/req for a mean end-to-end of 226.2 ms; gap-1024
+pads 389 tokens/req for 215.6 ms; BucketServe's relative-waste objective pads 328
+tokens/req for 209.0 ms; and the padded-token objective pads **248** tokens/req
+for **207.4 ms**. The stock and gap-1024 rows here read 6.4 and 2.9 ms above
+[tab:fit]'s own values for nominally the same arms — inside the 4–11 ms
+between-instance offset [tab:isolated] measures — a caution the next comparison
+inherits: it is precise only if these four rows were measured together, which
+this account does not establish.
 
 **The padded-token objective is faster by 1.61 ms, with a 95% interval of
 [1.04, 2.17] and p < 0.001** over nine replays per arm. Both ladder-design
@@ -648,6 +644,12 @@ rather than being a genuinely intermediate cost.
 That is precisely the quantity BucketServe and LAPS manage when they write that the
 number of graphs must be limited, and it is a warmup cost. The TPU analogue is XLA
 compilation: 5–30 minutes for the first bucket and 30–120 s per additional one.
+
+The launch sets no compilation-config override, so vLLM's V1 default applies —
+piecewise capture, attention excluded since paged-KV-cache indexing is
+graph-unsafe — which, unconfirmed by a surviving log but if unmodified, would
+make this a shared mechanism with §4.1's ragged kernel rather than a coincidental
+analogy: neither captured path sees the padded slots.
 
 ---
 
@@ -830,12 +832,11 @@ compiled or captured from a ladder the serving loop rounds up to.
 
 **Shape-polymorphic and bounded-dynamic-shape compilation** — XLA's dynamic
 dimensions, `torch.compile`'s dynamic shapes, TensorRT's optimization profiles —
-are the alternative to a fixed ladder: compile once, accept a shape range at run
-time, and remove the boot-time cost a ladder pays for coverage. Our finding argues
-against investing there for this workload, not for it: run-time padding is close
-to free on two of three dimensions, and the cost a ladder pays is boot-time, which
-a persistent cache already amortizes across restarts — dynamic shapes would trade
-a cost that already shrinks for compilation flexibility this workload does not
+are the alternative to a fixed ladder, removing the boot-time cost a ladder pays
+for coverage. Our finding argues against investing there for this workload: with
+run-time padding close to free on two of three dimensions and the ladder's own
+cost already boot-time and already shrinking under a persistent cache, dynamic
+shapes trade a cost that already amortizes for flexibility this workload does not
 need.
 
 **BucketServe** and **LAPS** manage length-bucketing overhead on GPU; LAPS is
@@ -1339,6 +1340,21 @@ percent of a padded token's cost or sixty decides whether that flag is an
 operational recommendation or a footnote, and no reading of the source answers
 it.
 
+**Verified against the pinned wheel directly** (`tpu_inference==0.25.0`, not
+inferred): `jax.lax.top_k` runs on every row's real router logits before the
+flag does anything — `topk_indices = jnp.where(token_valid, topk_indices, 0)`,
+weight forced to 0, happens strictly after selection, gated on the same
+`query_start_loc`-derived boundary §10.6's main text already describes. The flag
+neutralizes a padded row's *dispatch*, not its routing computation, confirming
+the existing description rather than correcting it. What this does not settle:
+whether a padded row's *input* to that computation is a fixed, deterministic
+value (a pad-token embedding, reproducible run to run) or carries forward
+whatever a KV-cache slot held from a previous occupant, which would make routing
+for that row depend on request history rather than being a pure function of the
+current step's real inputs. That traces buffer-reuse semantics this source dive
+did not reach, and is a correctness question, not only a cost one, independent
+of the magnitude bound above.
+
 **A bound from public routing facts, not from source or hardware.** Qwen3-30B-A3B
 routes among 128 experts, 8 per token, trained with the standard load-balancing
 auxiliary loss that GShard, Switch Transformer and ST-MoE all use, minimized
@@ -1402,6 +1418,30 @@ compute-bound nor the memory-bound account is supported. One use of the roofline
 remains valid, namely byte accounting: the step reads 2.01 GB of weights regardless
 of batch size. Achieved bandwidth, however, is computed as bytes divided by
 measured time, and therefore restates the step time from which it is derived.
+
+**Does low utilization mean most of the step is unaccounted-for overhead?** Not by
+the evidence this paper has. Low MFU and HBM utilization are claims about
+efficiency relative to the chip's peak, not claims that device time goes
+unexplained: §10.4's operator profile ([tab:ops]) accounts for essentially all
+device time as attention, collectives and matmul/fusion (98.8–99.0% of the total
+at every n it covers), leaving little room for a large, separate dispatch-overhead
+category at those batch sizes. That table stops at n=16, though, short of n=64
+where the roofline account above is cleanest, so this bound is suggestive rather
+than a direct measurement of the same cell. Separately, the TP ablation's fixed
+non-sharding term (`F`, 38% of the TP=4 step at n=1) is a different decomposition
+— by TP-scaling, not by operator category — and this paper does not establish
+whether `F` sits inside one of [tab:ops]'s categories or represents time neither
+table's method would see; doing so needs a per-operator profile at the same n and
+TP the ablation measures, which was not collected. The discriminating experiment
+in §4.1 defends the request dimension against this specifically regardless: a
+32× reduction in compiled slots moves the fixed term 2%, which bounds the
+per-slot cost directly rather than inferring it from a utilization ratio, so §4.1
+does not depend on this budget being closed. The abstract's and conclusion's
+general framing does, to the extent a reader takes "free" as a property of the
+hardware rather than of this stack's measured overhead profile — which is why §7
+already scopes the claim to one slice, one GPU and one primary model, and why
+that scope should be read as load-bearing here specifically, not only as a
+general caveat.
 
 ### 10.8 Measurable range and the request launcher
 
