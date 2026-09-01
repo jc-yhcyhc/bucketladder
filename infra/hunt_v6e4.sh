@@ -21,13 +21,27 @@
 # =============================================================================
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Every one of config.env's own `: "${VAR:=default}"` lines pre-empts any
+# fallback this script tries to apply AFTER sourcing it, because by then
+# "unset" and "set by config.env's own default" are indistinguishable. Bit
+# twice live already (MODEL, then TPU_NAME -- the second one wrongly named
+# a real, billing v6e-4 resource "bucketladder-tpu", colliding with the v5e
+# hunt's own name, until caught by re-reading the log's own "name=" line
+# and torn down by hand). Every caller-overridable var this script cares
+# about is now captured BEFORE sourcing config.env, not after.
+_bl_caller_model="${MODEL:-}"
+_bl_caller_name="${TPU_NAME:-}"
 # shellcheck source=./config.env
 source "$HERE/config.env"
+if [[ -z "$_bl_caller_model" ]]; then
+  export MODEL=Qwen/Qwen3-4B   # a capacity probe has no business needing gated-repo credentials
+fi
+NAME="${_bl_caller_name:-bucketladder-tpu-v6e4}"
+unset _bl_caller_model _bl_caller_name
 
 CYCLES="${CYCLES:-12}"
 PERIOD_MIN="${PERIOD_MIN:-15}"
 LOG="${LOG:-/tmp/hunt_v6e4.log}"
-NAME="${TPU_NAME:-bucketladder-tpu-v6e4}"
 ZONES="${ZONES:-europe-west4-a europe-west4-b europe-west4-c asia-northeast1-b asia-northeast1-c us-west4-a us-central1-a us-central1-b us-east5-a us-east5-b us-south1-a us-west1-c}"
 
 log() { echo "[$(date -u '+%m-%d %H:%M:%S')] [hunt_v6e4] $*" | tee -a "$LOG"; }

@@ -12,8 +12,32 @@ NAME="${TPU_NAME:-bucketladder-tpu}"
 ACCEL="${ACCELERATOR_TYPE:-v5litepod-4}"
 ZONES="${ZONES:-us-west4-a us-central1-a us-east5-a us-south1-a}"
 
-exists() { gcloud compute tpus tpu-vm describe "$NAME" --zone="$1" \
-             --format='value(state)' 2>/dev/null | grep -q .; }
+# Found live, 2026-09-01: a second, concurrent hunt for a different
+# accelerator (v6e-4) reused the default name "bucketladder-tpu" by mistake
+# (a bug in that script, since fixed), and THIS check -- which only asked
+# "does something named $NAME exist", never "is it the $ACCEL we're
+# actually trying to create" -- read that unrelated v6e-4 resource as its
+# own successful create. The hunt then ran deploy.sh and an experiment
+# script against the wrong hardware generation (it failed at the SSH/patch
+# stage before anything booted, so nothing was corrupted, but that was luck,
+# not this check working). exists() now verifies acceleratorType too, so a
+# same-named resource of the WRONG type is treated as a collision to warn
+# about, not a success to act on.
+exists() {
+  local state accel
+  state=$(gcloud compute tpus tpu-vm describe "$NAME" --zone="$1" \
+            --format='value(state)' 2>/dev/null)
+  [[ -z "$state" ]] && return 1
+  accel=$(gcloud compute tpus tpu-vm describe "$NAME" --zone="$1" \
+            --format='value(acceleratorType)' 2>/dev/null)
+  if [[ "$accel" != "$ACCEL" ]]; then
+    echo "[provision] WARNING: '$NAME' exists in $1 but as '$accel', not the" \
+         "'$ACCEL' this run wants -- not treating it as this run's success," \
+         "and NOT deleting it either. Resolve the name collision by hand." >&2
+    return 1
+  fi
+  return 0
+}
 
 for z in $ZONES; do
   # Never start a create while one already exists anywhere in the list.

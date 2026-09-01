@@ -22,19 +22,38 @@
 # =============================================================================
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BUG FOUND LIVE, 2026-09-01, three of them in this one launch, in order:
+#
+# 1. config.env was not sourced at all originally. Without it $PROJECT is
+#    empty in THIS script's own scope (create_tpu.sh sources config.env in
+#    its own subshell, which does not propagate back), so exists_in()'s
+#    `--project="$PROJECT"` expanded to `--project=` -- an invalid empty
+#    value gcloud rejects, silently swallowed by `2>/dev/null`. Result:
+#    exists_in() returned false even after a real, billing create succeeded
+#    (confirmed via BILLING HAS STARTED in the log and a direct out-of-band
+#    `gcloud ... describe` moments later), and the loop moved on to try
+#    more zones instead of stopping.
+# 2. create_tpu.sh's preflight hard-fails outside --check/--dry-run when
+#    MODEL defaults to the gated meta-llama repo with no HF_TOKEN present,
+#    identically in every zone. Fixed with `: "${MODEL:=Qwen/Qwen3-4B}"` --
+#    which didn't work, because that sets MODEL in this shell without
+#    exporting it, so the child `bash create_tpu.sh` calls below never saw
+#    it.
+# 3. Fixing (2) with `export MODEL="${MODEL:-Qwen/Qwen3-4B}"` STILL didn't
+#    work: config.env is sourced first (to fix bug 1) and its own
+#    `: "${MODEL:=meta-llama/...}"` already assigns the gated default into
+#    this shell before that line runs, so `${MODEL:-Qwen/Qwen3-4B}` sees
+#    MODEL as already "set" (to the wrong thing) and never falls back. The
+#    caller's original value has to be captured BEFORE sourcing config.env,
+#    since afterward "unset" and "set by config.env's own default" are
+#    indistinguishable.
+_bl_caller_model="${MODEL:-}"
 # shellcheck source=./config.env
 source "$HERE/config.env"
-# BUG FOUND LIVE, 2026-09-01: this line was missing on first run. Without it
-# $PROJECT is empty in THIS script's own scope (create_tpu.sh sources
-# config.env in its own subshell, which does not propagate back), so
-# exists_in()'s `--project="$PROJECT"` expanded to `--project=` -- an
-# invalid empty value gcloud rejects, silently swallowed by `2>/dev/null`.
-# The result: exists_in() returned false even after a real, billing create
-# succeeded (confirmed via BILLING HAS STARTED in the log and a direct
-# out-of-band `gcloud ... describe` a moment later), and the loop moved on
-# to try more zones instead of stopping -- exactly the failure mode
-# provision_first_available.sh's own comments warn about. Caught by manually
-# cross-checking the log against a direct API query, not by this script.
+if [[ -z "$_bl_caller_model" ]]; then
+  export MODEL=Qwen/Qwen3-4B   # a capacity probe has no business needing gated-repo credentials
+fi
+unset _bl_caller_model
 
 CYCLES="${CYCLES:-12}"
 PERIOD_MIN="${PERIOD_MIN:-15}"
