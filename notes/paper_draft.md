@@ -1,4 +1,4 @@
-# Shape Coverage Is a Boot-Time Cost: Compiled-Shape Padding in Production TPU and GPU Serving
+# Shape Coverage Is a Boot-Time Memory Cost: Compiled-Shape Padding in TPU and GPU Serving
 
 Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
 (JAX 0.10.2, tensor-parallel degree TP=4), with an NVIDIA L4 for the GPU control.
@@ -11,7 +11,7 @@ Accelerator serving stacks round every step up to a compiled or captured
 shape, on the assumption that rounding up means paying for the shape
 rounded up to — the premise behind length bucketing, shape-aware
 admission control, and ladder design. We measure what is actually paid,
-on one production TPU slice and one GPU (stack above), and **find it
+on one TPU slice and one GPU (stack above), and **find it
 false there on two of the three dimensions shape coverage quantizes.**
 
 Per-request prompt-length padding **does not exist**. Request-slot
@@ -27,7 +27,7 @@ variable is placement, not shape count.** One entry added where the
 workload needs it cuts latency 12.1% at the straddling prompt length, at
 no memory cost, while a uniformly finer ladder buys nothing further and
 fails to boot near the stock memory fraction. Chosen offline from a
-length distribution, a placement predicts the gain to within 5% and
+length distribution, a placement predicts the gain to within 6% and
 beats BucketServe's own objective by 1.61 ms at equal shape count. The
 gain is a latency reduction below saturation (46% at the knee), not
 added capacity (2.6% at saturation), and shrinks from 12.3% to 1.7% once
@@ -88,7 +88,7 @@ response; §6 reports what that asymmetry does and does not license.
    12.1% at no memory cost, while a uniformly finer ladder achieves the same
    reduction and additionally costs 8.8% of cache capacity and 53% more startup.
    The choice can be made offline from a length distribution, predicting the
-   measured result to within 5%.
+   measured result to within 6%.
 5. **When ladder placement pays, and when it does not** (Appendix §10.1–§10.3): a
    latency gain below saturation rather than added capacity — median latency falls
    46% just below the knee, sustained throughput rises 2.6% at it — and one that
@@ -130,11 +130,16 @@ ceases to hold and Appendix §10.3 restores it deliberately by staggering arriva
 Prefix caching is disabled and asserted, except in Appendix §10.2
 where it is the treatment. Chunked prefill, `max_model_len`,
 `max_num_batched_tokens`, tensor-parallel size, `gpu_memory_utilization`,
-`XLA_FLAGS` and `ATTN_BUCKETIZED_NUM_REQS` are recorded. Every run parses the
-server's own engine-configuration line and aborts if any controlled variable
-disagrees with the configuration it reports. The check has rejected three runs in
-which a controlled variable had drifted, and one in which a control was varied
-deliberately and declared.
+`XLA_FLAGS` and `ATTN_BUCKETIZED_NUM_REQS` are recorded. Every run's own
+configuration is checked against the fixed set of required values before any
+hardware work starts, and aborts if a controlled variable is missing or
+undeclared-and-wrong. The check has rejected three runs in which a config's own
+declared value had drifted, and one in which a control was varied deliberately
+and declared. This check is over the configuration as declared, not as executed:
+it does not compare against what the live server reports at boot, which is a real
+gap, not a hedge — Appendix §10.12 reports a run whose live `max_model_len` was
+4096 while its own config declared 8192, undetected by this check for exactly
+that reason.
 
 **Units and instrument scope.** All timings are measured server-side, as
 differences between Prometheus histogram snapshots taken before and after each
@@ -402,7 +407,8 @@ Table: Ten-shape against twenty-one-shape ladder at two concurrent requests. Pro
 | 3000 | 4096 | **3072** | 1024 | 289.9 ms | 253.7 ms | **−36.2 ms** [−36.5, −36.0] |
 
 The two treated cells agree on cost per padded token to within 1%, at 34.9 and
-35.3 µs, while the two placebo cells differ by +0.5 ms in total — the principal
+35.3 µs, while the two placebo cells differ by +0.5 ms on average (+0.8 and +0.1
+ms) — the principal
 evidence for the effect, since an arm-level offset (one server instance running
 uniformly slower) would produce a constant difference between the arms and
 therefore a per-token figure inversely proportional to tokens saved, whereas a
@@ -467,14 +473,17 @@ that mixes the gap-512 row with a value from this table's own boot carries that
 much additional, uncorrected uncertainty; the −12.1% figure below does not, since
 default and gap-1024 are both this boot's own measurements.
 
-Against the ten-shape ladder, correcting by the prompt-300 cell, the
-fourteen-shape ladder is +0.2 ms at prompt 1200 and −36.0 ms (−12.1%) at prompt
-3000 — both from arms in this same boot — gaining exactly where it places an
-entry the default lacks, at 3072, and nowhere else: no entry at 1536 leaves prompt
-1200 unaffected, and the eleven-shape ladder, placing nothing new near either
-prompt, tracks the default at both. Shape count ranges from 10 to 21 across these
-arms while the benefit depends only on whether a boundary falls between the
-prompt and the next default entry.
+Against the ten-shape ladder, the raw differences read directly from the table
+above are −4.5 ms at prompt 1200 and −40.7 ms at prompt 3000. Both are corrected
+by +4.7 ms — a between-instance offset measured from this boot's own prompt-300
+placebo cell, not shown in the table above since only prompts 1200 and 3000
+appear there — giving +0.2 ms at prompt 1200 and −36.0 ms (−12.1%) at prompt
+3000, both from arms in this same boot: the fourteen-shape ladder gains exactly
+where it places an entry the default lacks, at 3072, and nowhere else — no entry
+at 1536 leaves prompt 1200 unaffected, and the eleven-shape ladder, placing
+nothing new near either prompt, tracks the default at both. Shape count ranges
+from 10 to 21 across these arms while the benefit depends only on whether a
+boundary falls between the prompt and the next default entry.
 
 ##### Feasibility at the default memory fraction
 
@@ -492,8 +501,10 @@ never uses.
 ### 4.4 A ladder can be chosen offline from a length distribution
 
 §4.3's placement was chosen by knowing two prompt lengths in advance, which is an
-existence proof rather than a method. A method begins from a length distribution,
-selects a ladder without reference to latency, and is then correct.
+existence proof rather than a method. A method begins from a length distribution
+and selects a ladder without reference to latency; what follows tests that
+procedure on the one workload and feasible set available here, not a general
+claim that it always finds the right ladder.
 
 We sampled 120 prompts from a lognormal distribution (median 1200, σ=0.9) and
 replayed the same lengths against every ladder, pairing the arms on workload. Each
@@ -510,7 +521,7 @@ Table: Ladders selected offline from a lognormal length distribution, with predi
 
 ##### Predictive accuracy of the offline model
 
-The offline model predicted the measured result to within 5%: 7.5 ms predicted
+The offline model predicted the measured result to within 5.3%: 7.5 ms predicted
 against 7.1 ms measured. Inverting it gives 33.3 µs per padded token against the
 34.9–35.3 µs of §4.3, and the two workloads share nothing, since §4.3 used two
 fixed lengths straddling known entries and this a heavy-tailed mixture over the
@@ -552,15 +563,20 @@ from prompt lengths and begin at 208, and a ladder without small entries pads a
 two-token decode step to 208. Both arms therefore spend the same number of shapes,
 fourteen, and differ only in where the ten free entries sit.
 
-At equal shape count (fourteen) on the same replayed workload, the stock ladder
-(10 shapes) pads 602 tokens/req for a mean end-to-end of 226.2 ms; gap-1024 pads
-389 tokens/req for 215.6 ms; BucketServe's relative-waste objective pads 328
-tokens/req for 209.0 ms; and the padded-token objective pads **248** tokens/req
-for **207.4 ms**.
+At equal shape count (fourteen), replaying the same sampled lengths as
+[tab:fit]'s workload, the stock ladder (10 shapes) pads 602 tokens/req for a mean
+end-to-end of 226.2 ms; gap-1024 pads 389 tokens/req for 215.6 ms; BucketServe's
+relative-waste objective pads 328 tokens/req for 209.0 ms; and the padded-token
+objective pads **248** tokens/req for **207.4 ms**. The stock and gap-1024 rows
+here read 6.4 and 2.9 ms above [tab:fit]'s own values for nominally the same
+arms — inside the 4–11 ms between-instance offset [tab:isolated] measures
+directly, and a caution the next comparison inherits: it is precise only if these
+four rows were measured together rather than assembled across boots, which this
+account does not establish.
 
 **The padded-token objective is faster by 1.61 ms, with a 95% interval of
 [1.04, 2.17] and p < 0.001** over nine replays per arm. Both ladder-design
-objectives beat the stock ladder by roughly 15 ms, so the disagreement between
+objectives beat the stock ladder by roughly 17–19 ms, so the disagreement between
 them is small next to the decision to design a ladder at all. The direction is
 what the cost model predicts: relative waste treats a 10-token overshoot on a
 100-token request as equal to a 1000-token overshoot on a 10,000-token request,
@@ -576,7 +592,7 @@ counter that would trigger it, and a correction to how a padding gap maps to a
 ladder — is Appendix §10.11. We have not built that controller, and report it as
 the operational form of the result rather than as a contribution.
 
-### 4.5 The request-dimension result replicates on GPU
+### 4.5 The request dimension is small on GPU too, within a wide bound
 
 §4.1's request-dimension finding was measured on TPU. Whether it holds on another
 architecture is testable rather than assumed: same vLLM 0.25.0, same instrument,
@@ -620,9 +636,12 @@ interval that excludes both 0% and 100%, meaning the small batch-padding cost th
 table shows is real and repeatable rather than noise, not merely "closer to free
 than to paid." Under `--enforce-eager`, position is **0.7% [−9.6%, 11.1%]** — an
 interval that excludes 100% and *includes* 0%, meaning eager execution is
-statistically indistinguishable from fully free. Both conclusions match the single
-measurement's direction (17%, 1%); what the repeats add is knowing that graphs'
-17% was not noise dressed as a small effect, and that eager's 1% could have been.
+statistically indistinguishable from fully free. The single measurements point the
+same direction — 16.7% and 12.8%, both far from fully paid — though eager's single
+value sits outside its own repeated interval, which an n=1 sample does not
+resolve; what the repeats add is knowing that graphs' small effect is real and
+repeatable rather than noise, and that eager's is not distinguishable from zero
+rather than being a genuinely intermediate cost.
 
 **What is paid is the capture, and it is paid at startup.** Enabling graphs costs
 108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
@@ -809,17 +828,30 @@ build with explicit optimization profiles. Nothing here is measured on either, a
 the claims should be read as applying to vLLM-style designs, in which shapes are
 compiled or captured from a ladder the serving loop rounds up to.
 
-**BucketServe** and **LAPS** manage length-bucketing overhead on GPU. §4.4 runs
-BucketServe's own ladder-design objective on this stack rather than arguing
-against it: solved globally and given the same shape budget, its ladder is 1.61 ms
-slower than one chosen to minimize absolute padded tokens, and both are about
-15 ms faster than the stock ladder. Their ladder design is therefore effective,
-and our disagreement with these systems is narrower than a premise-level
-objection — it concerns which dimension the padding occupies (the request
-dimension is free, §4.1, and per-request length padding does not exist, §4.2),
-and, for the token dimension where it is real, which objective converts to time.
-The cross-architecture comparison itself is measured rather than asserted, and is
-reported as a result in §4.5 rather than as related work.
+**Shape-polymorphic and bounded-dynamic-shape compilation** — XLA's dynamic
+dimensions, `torch.compile`'s dynamic shapes, TensorRT's optimization profiles —
+are the alternative to a fixed ladder: compile once, accept a shape range at run
+time, and remove the boot-time cost a ladder pays for coverage. Our finding argues
+against investing there for this workload, not for it: run-time padding is close
+to free on two of three dimensions, and the cost a ladder pays is boot-time, which
+a persistent cache already amortizes across restarts — dynamic shapes would trade
+a cost that already shrinks for compilation flexibility this workload does not
+need.
+
+**BucketServe** and **LAPS** manage length-bucketing overhead on GPU; LAPS is
+compared against by argument in this section, not run, since no artifact was
+available. §4.4 runs BucketServe's own ladder-design objective on this stack
+rather than arguing against it — an objective-level comparison, not a
+reimplementation of their system: solved globally and given the same shape
+budget, its ladder is 1.61 ms slower than one chosen to minimize absolute padded
+tokens, and both are about 17–19 ms faster than the stock ladder. Their ladder
+design is therefore effective, and our disagreement with these systems is
+narrower than a premise-level objection — it concerns which dimension the
+padding occupies (the request dimension is free, §4.1, and per-request length
+padding does not exist, §4.2), and, for the token dimension where it is real,
+which objective converts to time. The cross-architecture comparison itself is
+measured rather than asserted, and is reported as a result in §4.5 rather than as
+related work.
 
 **How, then, do prior bucketing techniques achieve their reported speedups?** If
 the padding premise is false on both architectures, systems reporting end-to-end
@@ -853,10 +885,12 @@ LAPS manage by limiting graph count. Reducing shape count is worth doing for
 time-to-serve; routing requests to avoid run-time padding is not.
 
 The exception is the token dimension: real arithmetic, paid at 23.1% of nominal at
-batch 4, indistinguishable from zero by 16, and around 85% at batch ≤2 — the least
-well supported number here, resting on a single boundary with no interval — and
-that low-batch regime (interactive serving, tight-latency deployments, the
-prefill half of any disaggregated system) is where the ladder buys something.
+batch 4, indistinguishable from zero by 16, and substantial at low batch — 55–75%
+at n=1 across three boundaries with intervals on a second TPU generation
+(Appendix §10.12), better-supported evidence than the single-boundary,
+interval-free ~85% point estimate at n≤2 on the first — and that low-batch regime
+(interactive serving, tight-latency deployments, the prefill half of any
+disaggregated system) is where the ladder buys something.
 **The variable that pays is placement, not shape count.** A fourteen-shape ladder
 adding one entry the default lacks reduces end-to-end latency by 12.1% at the
 prompt length that straddles it, gains nothing at a length it does not, and boots
