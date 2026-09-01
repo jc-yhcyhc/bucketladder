@@ -11,8 +11,8 @@ Accelerator serving stacks round every step up to a compiled or captured
 shape, on the assumption that rounding up means paying for the shape
 rounded up to — the premise behind length bucketing, shape-aware
 admission control, and ladder design. We measure what is actually paid,
-on production TPU and GPU stacks, and **find it false on two of the
-three dimensions shape coverage quantizes.**
+on one production TPU slice and one GPU (stack above), and **find it
+false there on two of the three dimensions shape coverage quantizes.**
 
 Per-request prompt-length padding **does not exist**. Request-slot
 padding is **free** — under 0.7 µs per padded slot against 27.5 µs if
@@ -100,9 +100,15 @@ response; §6 reports what that asymmetry does and does not license.
    measurements predict — those aimed at the request dimension or per-request
    length padding cannot pay, since §4.1 and §4.2 find no cost there to recover.
 
-**Scope.** Primarily a measurement study; its single intervention (§4.3) is set
-through a documented environment variable rather than a patch, so the measurement
-does not depend on a modified scheduler's correctness.
+**Scope.** This paper carries two separable contributions, not one continuous
+argument: (a) a falsification of the runtime-padding-cost premise on two of the
+three dimensions (§4.1, §4.2, §4.5) — the well-supported half, resting on
+discriminating experiments rather than fits; and (b) a placement heuristic for
+the one dimension where the premise survives (§4.3, §4.4) — useful and already
+deployable, but a static offline recipe rather than an adaptive system, and
+weaker evidence than (a). It is primarily a measurement study; its one
+intervention is set through a documented environment variable rather than a
+patch, so the measurement does not depend on a modified scheduler's correctness.
 
 ---
 
@@ -826,10 +832,11 @@ rests on the premise measurements of §4.1 and §4.2.
 
 ## 9. Conclusion
 
-Two accelerator families reach the same design by different routes: XLA compiles a
-ladder of shapes, and CUDA captures a graph per batch size. Both round every step
-up to the nearest entry, and the optimization literature treats that rounding as a
-cost to be recovered. It is not, on either — a batch just above an entry costs
+The two accelerator families tested here reach the same design by different
+routes: XLA compiles a ladder of shapes, and CUDA captures a graph per batch
+size. Both round every step up to the nearest entry, and the optimization
+literature treats that rounding as a cost to be recovered. It is not, on
+either of the two chips measured — a batch just above an entry costs
 what the entry below costs, because a ragged attention kernel does almost no work
 for slots holding no key–value blocks (under 0.7 µs per slot, against 27.5 µs if
 it were paid), and a captured graph does not care that part of its batch is
@@ -1431,8 +1438,35 @@ decision is arithmetic over a sample of recent lengths, while applying it requir
 a restart and a cold compile, measured here at 285 s for ten shapes. Re-selection
 is therefore a daily or weekly action rather than a continuous control loop.
 
-The signal that should trigger it is already available to the server and costs
-nothing to maintain. A server knows both the compiled shape it selected for a step
+**How much drift a stale ladder tolerates before re-selection matters** is
+answerable offline, without hardware, since the object under test is the
+selection model itself rather than a live server: fit a ladder once against a
+sampling-window workload (median 1200, σ=0.9, matching §4.4), then evaluate that
+same, now-stale ladder against deployment-window workloads whose median has
+drifted by a stated factor, using the same DP and the 35 µs/padded-token
+constant §4.3 measured. Compared against a ladder freshly re-fit to each
+drifted workload:
+
+Table: A ladder fit once, evaluated stale against workloads whose median has drifted, against one freshly re-fit to each. {#tab:drift}
+| deployment median drift | stale ladder's gain | fresh ladder's gain | % of fresh retained |
+|---|---|---|---|
+| 0.6× (720) | 9.9 ms | 10.6 ms | 94% |
+| 1.0× (1200, no drift) | 17.9 ms | 18.2 ms | 98% |
+| 1.7× (2040) | 27.9 ms | 29.1 ms | 96% |
+| 4.0× (4800) | 39.9 ms | 42.9 ms | 93% |
+
+(`scripts/o10_drift_sensitivity.py`, self-tested; a model computation, not a
+hardware measurement.) The stale ladder retains 93–99% of the achievable gain
+across a 4× range in median prompt length, which is more drift than a daily or
+weekly reselection cadence should ever accumulate against realistic diurnal
+prompt-length patterns. This does not validate the 35 µs/token constant at a
+drifted workload's shapes — only hardware measurement could — but it says the
+*selection procedure* degrades gracefully, which is the half of the review
+question this paper can answer without a slice.
+
+The signal that should trigger re-selection anyway is already available to the
+server and costs nothing to maintain. A server knows both the compiled shape it
+selected for a step
 and the real token count in that step, so a running counter of their difference
 gives the realized padded share exactly, without sampling. Re-selection is
 warranted when that realized share exceeds what the offline model predicts for the
