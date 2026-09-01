@@ -35,8 +35,20 @@ echo "[boot] $MODEL TP=$TP in $ZONE (max ${MAX_WAIT}s)"
 
 # Clear anything from a previous arm. A half-dead process holds the TPU lockfile
 # and the next boot fails for a reason that has nothing to do with the model.
+#
+# BUG FOUND LIVE, 2026-09-01: `pkill -f "vllm serve"` killed the SSH session
+# running it, every time, on a brand-new v6e-4 slice with nothing even running
+# yet -- reproduced in isolation, down to the single command. The command sent
+# over `--command=` is itself a shell invocation whose own argv contains the
+# literal string "vllm serve" (the pattern is embedded in the command line
+# that runs pkill), so pkill matched its own parent process, not just an
+# actual vllm target -- pkill excludes its own PID, never its ancestors. The
+# fix is the standard one: bracket the first character so the invoking
+# command's own literal text no longer matches the pattern, while a real
+# `vllm serve` process (whose argv contains an actual "v", not literal
+# brackets) still does.
 ssh_try 'cd ~/bucketladder 2>/dev/null; bash infra/serve_remote.sh stop >/dev/null 2>&1
-pkill -9 -f "vllm serve" 2>/dev/null; sleep 10
+pkill -9 -f "[v]llm serve" 2>/dev/null; sleep 10
 rm -f /tmp/vllm_warmup.log /tmp/libtpu_lockfile 2>/dev/null; echo cleared' >/dev/null \
   || { echo "[boot] FAIL: could not reach the VM to clean up"; exit 2; }
 

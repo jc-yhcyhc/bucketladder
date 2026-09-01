@@ -1,2 +1,5 @@
 DEADMAN Tue Aug 11 23:23:11 UTC 2026
 [deadman] Thu Aug 13 00:36:10 UTC 2026 DECLINED: 'bucketladder-tpu' was created 2026-08-13T00:01:38.498884387Z, not 2026-08-12T21:34:22.411288704Z
+[deadman] Tue Sep  1 20:03:38 UTC 2026 DECLINED: 'bucketladder-tpu-v6e4' was created 2026-09-01T19:51:35.667810690Z, not 2026-09-01T19:40:59.504929830Z
+[deadman] Tue Sep  1 20:36:54 UTC 2026 tore down 'bucketladder-tpu-v6e4' created 2026-09-01T19:51:35.667810690Z
+[deadman] Tue Sep  1 20:45:04 UTC 2026 DECLINED: 'bucketladder-tpu-v6e4' was created 2026-09-01T20:39:01.689422728Z, not 2026-09-01T19:51:35.667810690Z

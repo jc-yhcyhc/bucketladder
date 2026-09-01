@@ -52,8 +52,13 @@ hard_stop() {
   for i in $(seq 1 12); do
     [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health 2>/dev/null)" != "200" ]] && return 0
     sleep 5
-    (( i == 4 )) && pkill -f "vllm serve" 2>/dev/null
-    (( i == 8 )) && pkill -9 -f "vllm serve" 2>/dev/null
+    # Bracketed pattern, not "vllm serve": see infra/boot_and_poll.sh's note
+    # from 2026-09-01 -- when a command containing this exact pkill pattern is
+    # invoked inline (e.g. over `ssh --command=...`), the invoking process's
+    # own argv contains the literal search text, so unbracketed pkill -f can
+    # kill its own parent instead of (or as well as) any real target.
+    (( i == 4 )) && pkill -f "[v]llm serve" 2>/dev/null
+    (( i == 8 )) && pkill -9 -f "[v]llm serve" 2>/dev/null
   done
   echo "WARNING: port 8000 still healthy after hard_stop" >&2
   return 1
