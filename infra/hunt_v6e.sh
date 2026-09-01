@@ -22,6 +22,19 @@
 # =============================================================================
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./config.env
+source "$HERE/config.env"
+# BUG FOUND LIVE, 2026-09-01: this line was missing on first run. Without it
+# $PROJECT is empty in THIS script's own scope (create_tpu.sh sources
+# config.env in its own subshell, which does not propagate back), so
+# exists_in()'s `--project="$PROJECT"` expanded to `--project=` -- an
+# invalid empty value gcloud rejects, silently swallowed by `2>/dev/null`.
+# The result: exists_in() returned false even after a real, billing create
+# succeeded (confirmed via BILLING HAS STARTED in the log and a direct
+# out-of-band `gcloud ... describe` a moment later), and the loop moved on
+# to try more zones instead of stopping -- exactly the failure mode
+# provision_first_available.sh's own comments warn about. Caught by manually
+# cross-checking the log against a direct API query, not by this script.
 
 CYCLES="${CYCLES:-12}"
 PERIOD_MIN="${PERIOD_MIN:-15}"
