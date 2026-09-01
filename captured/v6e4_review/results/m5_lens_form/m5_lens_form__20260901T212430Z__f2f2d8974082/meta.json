@@ -1,0 +1,126 @@
+{
+  "config": {
+    "cells": [
+      {
+        "bucket": 512,
+        "n": 8,
+        "tokens_hi": 512,
+        "tokens_lo": 320,
+        "tokens_mid": 384
+      },
+      {
+        "bucket": 1024,
+        "n": 8,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 2048,
+        "n": 8,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 4096,
+        "n": 8,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 8192,
+        "n": 8,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      },
+      {
+        "bucket": 1024,
+        "n": 16,
+        "tokens_hi": 1024,
+        "tokens_lo": 640,
+        "tokens_mid": 768
+      },
+      {
+        "bucket": 2048,
+        "n": 16,
+        "tokens_hi": 2048,
+        "tokens_lo": 1280,
+        "tokens_mid": 1536
+      },
+      {
+        "bucket": 4096,
+        "n": 16,
+        "tokens_hi": 4096,
+        "tokens_lo": 2560,
+        "tokens_mid": 3072
+      },
+      {
+        "bucket": 8192,
+        "n": 16,
+        "tokens_hi": 8192,
+        "tokens_lo": 5120,
+        "tokens_mid": 6144
+      }
+    ],
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "MODEL_IMPL_TYPE": "auto",
+      "MOE_ROUTE_PADDING_TO_EXPERT0": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "gpu_memory_utilization": 0.92,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "MLSys review: 'Extend the LENS reproduction to n=8 and n=16. The failure is at your endpoint, and \"LENS's protocol is specified over bucket structure\" does not answer whether the length term recovers above 4.' session12-regime already measured n=8/16/32, but with the plain thread-pool launcher, so every cell there splits (M8's arrival-race problem) and m6_lens_ablation.py's splits==0 filter drops all of it. This config reruns the same cells under the barrier launcher m1_boundary.py and m14 already validated for exactly this failure mode, so the n=8/16 result is not confounded with the launcher that produced it.",
+    "dimension": "D2",
+    "experiment": "e16_lens_n8_n16",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_dropped": "bucket 8192 at n=1 is dropped: an 8192-token prompt plus one output token exceeds max_model_len.",
+    "note_points": "lo sits just inside the bucket where in-bucket padding is greatest, hi exactly at the edge where there is none -- LENS's two calibration points. mid is the holdout.",
+    "note_single_step": "Every total is <=8192 so the dispatch is one step; step count is verified per dispatch and split cells are excluded from the fit rather than averaged, because a split smears the quantity being fitted.",
+    "output_len": 1,
+    "repeats": 25,
+    "synchronised_launch": true,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "f2f2d8974082",
+  "duration_sec": 41.708,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m5_lens_form",
+  "finished_at": "2026-09-01T21:25:11.791538+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-b2e1f703-w-0",
+    "platform": "Linux-6.8.0-1015-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m5_lens_form__20260901T212430Z__f2f2d8974082",
+  "started_at": "2026-09-01T21:24:30.069599+00:00",
+  "status": "ok",
+  "tables": [
+    "points",
+    "fits",
+    "verdict"
+  ]
+}

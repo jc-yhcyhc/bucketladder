@@ -1,0 +1,87 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "MODEL_IMPL_TYPE": "auto",
+      "MOE_ROUTE_PADDING_TO_EXPERT0": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "gpu_memory_utilization": 0.92,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "MLSys review: the ~85% paid share at n<=2 rests on one boundary with no interval, and it is the largest number in the paper and the one carrying the abstract's headline claim. This measures n=1 across all four D2 boundaries with enough repeats for a real interval, rather than one boundary asserted to generalize.",
+    "dimension": "D2",
+    "edges": [
+      {
+        "n": 1,
+        "name": "512/1024",
+        "seq_len_above": 516,
+        "seq_len_below": 508
+      },
+      {
+        "n": 1,
+        "name": "1024/2048",
+        "seq_len_above": 1028,
+        "seq_len_below": 1020
+      },
+      {
+        "n": 1,
+        "name": "2048/4096",
+        "seq_len_above": 2052,
+        "seq_len_below": 2044
+      },
+      {
+        "n": 1,
+        "name": "4096/8192",
+        "seq_len_above": 4104,
+        "seq_len_below": 4088
+      }
+    ],
+    "experiment": "e14_n1_all_boundaries",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_seq_len": "Each edge's below/above pair straddles that boundary with a fixed 8-token gap, so real tokens move by a shrinking fraction as the boundary grows (1.6% at 512, 0.2% at 4096) while padded tokens double at every edge -- the same discriminating design as m1_boundary, run at n=1 instead of 4/8 and across all four boundaries instead of one.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "prediction_mechanism": "Target: the paid share of nominal padding at n=1, matched to Table 6's n<=2 row (~85%, no interval). Lever: four boundaries instead of one, 15 repeats instead of 9, so the headline figure gets the same interval treatment as every other row in that table.",
+    "repeats": 15,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "778bde56d335",
+  "duration_sec": 4.826,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-09-01T21:23:52.267153+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-b2e1f703-w-0",
+    "platform": "Linux-6.8.0-1015-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260901T212347Z__778bde56d335",
+  "started_at": "2026-09-01T21:23:47.427709+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}

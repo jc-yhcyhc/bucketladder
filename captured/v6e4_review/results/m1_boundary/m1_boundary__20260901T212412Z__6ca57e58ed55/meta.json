@@ -1,0 +1,75 @@
+{
+  "config": {
+    "controlled": {
+      "ATTN_BUCKETIZED_NUM_REQS": false,
+      "MODEL_IMPL_TYPE": "auto",
+      "MOE_ROUTE_PADDING_TO_EXPERT0": false,
+      "VLLM_TPU_BUCKET_PADDING_GAP": "",
+      "XLA_FLAGS": "",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": false,
+      "gpu_memory_utilization": 0.92,
+      "kv_cache_dtype": "auto",
+      "max_model_len": 8192,
+      "max_num_batched_tokens": 8192,
+      "speculative_model": null,
+      "tensor_parallel_size": 4
+    },
+    "description": "Designed confirmation that step token padding is not paid at n>1. Straddles a compiled bucket boundary at fixed batch size and near-fixed per-sequence length, so real work moves ~1.6% while padded work doubles. H1 answered this from a natural experiment; this is the randomised version.",
+    "dimension": "D2",
+    "edges": [
+      {
+        "n": 4,
+        "name": "512/1024",
+        "seq_len_above": 130,
+        "seq_len_below": 128
+      },
+      {
+        "n": 8,
+        "name": "1024/2048",
+        "seq_len_above": 129,
+        "seq_len_below": 128
+      }
+    ],
+    "experiment": "m1_boundary",
+    "mode": "live",
+    "model": "Qwen/Qwen3-4B",
+    "note_prediction": "cost x~1.02 => padding not paid (cost tracks real tokens). cost x~2.0 => padding paid (cost tracks the compiled bucket).",
+    "note_seq_len": "Per-sequence length is near-constant within an edge (128 vs 130) on purpose. Comparing 4x96 against 4x128 would move sequence length by a third, changing attention work materially and destroying the clean prediction that cost is proportional to real tokens.",
+    "note_single_step": "Both edges sit far below max_num_batched_tokens=8192 so the scheduler has no reason to split. Every dispatch records its step count and splits are counted, not averaged over: a split reintroduces exactly the smearing this experiment exists to avoid.",
+    "output_len": 1,
+    "prediction_mechanism": "Target: the share of nominal padding paid at a compiled boundary. Lever: the straddle, which doubles padded tokens while holding real tokens near-fixed, so d(padded)/d(lever) is 2x and d(real)/d(lever) ~ 1 \u2014 the two models the experiment separates predict different costs by construction.",
+    "repeats": 9,
+    "tpu_type": "v5litepod-4",
+    "warmup_discard": 3,
+    "warmup_log_path": "/tmp/vllm_warmup.log"
+  },
+  "config_hash": "6ca57e58ed55",
+  "duration_sec": 1.642,
+  "env": {
+    "TPU_NAME": null,
+    "TPU_TYPE": null,
+    "VLLM_TPU_BUCKET_PADDING_GAP": null,
+    "XLA_FLAGS": null
+  },
+  "experiment": "m1_boundary",
+  "finished_at": "2026-09-01T21:24:13.910034+00:00",
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "host": {
+    "hostname": "t1v-n-b2e1f703-w-0",
+    "platform": "Linux-6.8.0-1015-gcp-x86_64-with-glibc2.35",
+    "python": "3.11.15"
+  },
+  "preempted": false,
+  "run_id": "m1_boundary__20260901T212412Z__6ca57e58ed55",
+  "started_at": "2026-09-01T21:24:12.254351+00:00",
+  "status": "ok",
+  "tables": [
+    "dispatches",
+    "edges",
+    "verdict"
+  ]
+}
