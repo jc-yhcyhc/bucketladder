@@ -708,9 +708,12 @@ single L4 for the control. Appendix §10.4's TP=1/2/4 ablation finds request pad
 cheap at every sharding and argues analytically that the regime map is set by batch
 size and dtype rather than parameter count, for dense weight-stationary decode
 only — but model scale and multi-host topology remain unmeasured, and both change
-the fixed costs padding is absorbed into. **The strongest single number is also
-the least well supported:** the ~85% paid share at n≤2 rests on one boundary and
-carries no interval (§4.2).
+the fixed costs padding is absorbed into. A second TPU generation bounds how much
+of this is chip-specific without resolving it: a v6e-4 spot slice, same stack,
+replicates the token-padding direction at three of four boundaries (Appendix
+§10.12) — a second data point, not a second interval. **The strongest single
+number is also the least well supported:** the ~85% paid share at n≤2 rests on one
+boundary and carries no interval (§4.2).
 
 **Prefix caching is measured but not swept, and there is no production trace.**
 Appendix §10.3 tests caching at one prefix length, 2048 of 3000 tokens, on one
@@ -927,11 +930,15 @@ held fixed: §4.2 varies batch size at a fixed boundary and attributes padding p
 request, while this sweep varies offered concurrency and allows the scheduler to
 choose step composition. If both are correct, the reconciliation is that
 per-request padding vanishes while per-step padding does not, and that a ladder
-acts on the second. Testing this requires padded tokens per packed step, which the
-available instrument cannot supply: `iteration_tokens_total` bins on powers of two,
-which is coarser than the ladder spacing under comparison. A step recorded in
-(2048,4096] pads to 2048, 2560, 3072, 3584 or 4096 depending on where in that bin
-it falls, and the two ladders differ precisely inside the bin.
+acts on the second. Testing this on this data requires padded tokens per packed
+step, which the available instrument cannot supply: `iteration_tokens_total` bins
+on powers of two, which is coarser than the ladder spacing under comparison. A
+step recorded in (2048,4096] pads to 2048, 2560, 3072, 3584 or 4096 depending on
+where in that bin it falls, and the two ladders differ precisely inside the bin.
+A step-scoped instrument built later and run on a second TPU generation supports
+the reconciliation directly rather than resolving this tension on this data:
+Appendix §10.12's per-step overhead stays in a 33–59% band from n=1 to n=15
+rather than falling toward zero the way the per-request measure does.
 
 ##### A defect in the control cell
 
@@ -1515,4 +1522,46 @@ predicts from 80 padded tokens, implying roughly 20 µs per token here against t
 range: the model is accurate where padding is large, which is where ladder design
 is decided, and overestimates the marginal value of removing padding once little
 remains.
+
+### 10.12 A second TPU generation: v6e-4 replicates the token-padding direction
+
+Everything in §4 was measured on one v5litepod-4 slice, which leaves open whether
+the token-padding finding is a property of the mechanism — XLA's ladder, the
+ragged-tile kernel RPA validates — or an artifact of one chip generation. This is
+answerable directly rather than argued analytically, the way §10.4 handles TP and
+model scale: the same stack (vLLM 0.25.0, `tpu-inference` 0.25.0, Qwen3-4B, TP=4)
+provisioned on a v6e-4 spot podslice instead of v5e, same D2/D3 ladder mechanism
+reported at boot (`Prepared token paddings`, `Prepared attn request paddings:
+[256]`), a live completion request confirmed correct output before any
+measurement was taken.
+
+At n=1, the same three boundaries §4.2 establishes on v5e replicate in direction:
+55.4%, 60.4% and 74.5% of nominal padding paid at 512/1024, 1024/2048 and
+2048/4096, against v5e's single-boundary ~85% figure at n≤2. The fourth boundary,
+4096/8192, could not be tested: this boot's `max_model_len` was 4096 rather than
+the 8192 its own config declared — a configuration-forwarding gap caught after the
+fact, since no controlled-variable check in this pipeline verifies a config
+against the live server it actually produced, only against itself — so a
+4104-token prompt exceeds the context window outright, a boot-configuration fact
+rather than a padding measurement, and it does not affect the other three
+boundaries. At n=4, the paid share falls to 6.9% at the 512/1024 boundary, the
+same batch-size pattern §4.2 reports on v5e (23.1% at n=4, falling toward zero by
+n=16); at n=8, every dispatch split across multiple prefill steps under chunked
+prefill and was correctly excluded rather than pooled into a misleading number,
+the same treatment §4.2 applies.
+
+Two results outside §4's four core claims came along with this boot. LENS
+(§10.4's model form) fit against nine clean (bucket, n) cells with a holdout MAPE
+of 0.26% (worst 0.96%) — tighter than the 2.15% LENS reports on its own NPU
+hardware — and its fixed intercept varies by both bucket and batch size, a 7.92×
+spread, meaning the single-threshold crossover assumed elsewhere near 2048 tokens
+is a special case rather than a general rule. And the step-logger instrument
+(§10.1) produced 1757 per-step records on this boot: padded-token overhead
+measured per packed step stays in a 33–59% band from n=1 to n=15 rather than
+falling toward zero the way the per-request measure does — the reconciliation
+§10.1 proposes and, on v5e's own data, could not test.
+
+This is one boot on one v6e-4 slice, not a second full sweep: it establishes
+direction, not a second interval, and the model-scale and multi-host questions §7
+raises remain exactly as open on this generation as on the first.
 
