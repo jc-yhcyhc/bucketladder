@@ -52,8 +52,19 @@ pkill -9 -f "[v]llm serve" 2>/dev/null; sleep 10
 rm -f /tmp/vllm_warmup.log /tmp/libtpu_lockfile 2>/dev/null; echo cleared' >/dev/null \
   || { echo "[boot] FAIL: could not reach the VM to clean up"; exit 2; }
 
+# BUG FOUND LIVE, 2026-09-01: BUCKETLADDER_LOG_STEP_SHAPES, set by the caller
+# (run_review_arms.sh does exactly this) as a LOCAL env var before invoking
+# this script, was never forwarded into the remote `env VAR=val` launch line
+# below -- it only exists in this script's own local shell, and `ssh_try`
+# builds a fresh remote command string that never referenced it. The result:
+# every review-arms run would boot a server with the step-logger patch
+# applied to the source file, but the gate that patch checks
+# (BUCKETLADDER_LOG_STEP_SHAPES) would never be set on the actual server
+# process, so no step logs would ever be produced -- silently. Caught only
+# by testing this path against real hardware for the first time.
 ssh_try "cd ~/bucketladder
-setsid env TP_SIZE=$TP MAX_MODEL_LEN=4096 nohup bash infra/serve_remote.sh start '$MODEL' \
+setsid env TP_SIZE=$TP MAX_MODEL_LEN=4096 BUCKETLADDER_LOG_STEP_SHAPES='${BUCKETLADDER_LOG_STEP_SHAPES:-}' \
+  nohup bash infra/serve_remote.sh start '$MODEL' \
   > /tmp/boot_${TP}.log 2>&1 < /dev/null &
 sleep 5; echo started" >/dev/null \
   || { echo "[boot] FAIL: could not launch"; exit 2; }
