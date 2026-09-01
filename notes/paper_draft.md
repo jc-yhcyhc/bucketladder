@@ -1298,6 +1298,29 @@ percent of a padded token's cost or sixty decides whether that flag is an
 operational recommendation or a footnote, and no reading of the source answers
 it.
 
+**A bound from public routing facts, not from source or hardware.** Qwen3-30B-A3B
+routes among 128 experts, 8 per token, trained with the standard load-balancing
+auxiliary loss that GShard, Switch Transformer and ST-MoE all use, minimized
+under uniform expert utilization (Qwen3 Technical Report, arXiv:2505.09388). Treat
+per-token routing as a first-order i.i.d. uniform 8-of-128 draw — the target that
+loss trains toward, not a measurement of real traffic — and the expected fraction
+of a padded token's 8 dispatches that land on an expert none of `n` real tokens in
+the step already touched is exactly `((128-8)/128)^n`, by linearity of
+expectation (`scripts/o11_moe_padding_bound.py`, self-tested). This reproduces
+both of §10.6's own stated bounds at batch sizes §4.2 tests directly: **60% at
+n=8**, the paper's own upper anchor, and **3% at n≈54**, past every batch size
+this paper measures, with 36% still remaining at n=16. The bound is on how many
+*new matmul groups* a padded token causes, not on microseconds — converting that
+to time needs the fixed per-group launch/weight-load cost against the marginal
+cost inside an already-active group, which is a hardware question this estimate
+cannot answer — and it assumes i.i.d. uniform routing per step, which the
+auxiliary loss trains toward on average but does not guarantee for one step's
+real traffic: correlated routing (similar prompts routing similarly) would push
+the true fraction below this estimate, narrow-domain traffic could push it
+above. What it settles is that the "sixty" anchor is not a worst-case artifact —
+it is what padding's own regime (small batch, where §4.2 shows it is paid at
+all) implies under the routing behavior the architecture is trained to have.
+
 ### 10.7 The memory-bandwidth account, tested and rejected
 
 The memory-bandwidth explanation is tested and rejected. A natural account of
