@@ -574,3 +574,59 @@ if __name__ == "__main__":
         print(f"{len(rows)} usable run(s) (status=ok, not preempted, clean tree)")
         for r in rows:
             print(f"  {r['run_id']:<55} {','.join(r['tables'])}")
+
+
+# ---------------------------------------------------------------------------
+# The configuration as EXECUTED, not as declared
+# ---------------------------------------------------------------------------
+
+# Fields /v1/models reports that correspond to a controlled variable. Keep this
+# small and exact: a field that means something subtly different on the server
+# than in the config would manufacture false aborts, which is worse than the
+# hole this closes.
+SERVED_VS_CONTROLLED: dict[str, str] = {
+    "max_model_len": "max_model_len",
+}
+
+
+def assert_server_matches_config(config: Mapping[str, Any],
+                                 served: Mapping[str, Any]) -> list[str]:
+    """Abort when the live server contradicts the configuration as declared.
+
+    assert_controlled_vars checks a config against the fixed required set --
+    it never contacts a server, so it cannot see a config that was declared
+    correctly and then served differently. That is not hypothetical: Appendix
+    10.12 reports max_model_len declared 8192 and served 4096, undetected,
+    which silently cost the 4096/8192 boundary on that run.
+
+    `served` comes from _client.server_config(). An EMPTY served dict means the
+    check could not run, which is reported to the caller as an "unverified"
+    note rather than swallowed -- the whole point is to stop treating
+    "nothing disagreed" and "nothing was compared" as the same outcome.
+    """
+    if not served:
+        return ["server config unavailable: executed-vs-declared check did NOT run"]
+
+    controlled = config.get("controlled")
+    if not isinstance(controlled, Mapping):
+        raise ControlledVarError(
+            "cannot check the server against a config with no 'controlled' block")
+
+    problems: list[str] = []
+    declared_independent = set(config.get("independent_vars") or {})
+    for served_key, cfg_key in SERVED_VS_CONTROLLED.items():
+        if served_key not in served or cfg_key not in controlled:
+            continue
+        if cfg_key in declared_independent:
+            continue
+        if served[served_key] != controlled[cfg_key]:
+            problems.append(
+                f"{cfg_key}: config declares {controlled[cfg_key]!r}, server is "
+                f"serving {served[served_key]!r}")
+
+    if problems:
+        raise ControlledVarError(
+            "the running server contradicts this run's own configuration; "
+            "refusing to attribute its numbers to a config it did not use:\n  - "
+            + "\n  - ".join(problems))
+    return []

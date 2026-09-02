@@ -54,8 +54,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "sim"))
 
-from _client import complete, complete_mock  # noqa: E402
-from _common import ControlledVarError, finish_run, load_config, save_table, start_run  # noqa: E402
+from _client import complete, complete_mock, server_config  # noqa: E402
+from _common import (ControlledVarError, assert_server_matches_config,  # noqa: E402
+                     finish_run, load_config, save_table, start_run)
 from _metrics import MockMetrics, delta, metrics_available, scrape  # noqa: E402
 from m8_split_barrier import launch_barrier  # noqa: E402
 
@@ -143,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         if not mock and not metrics_available(args.base_url):
             print("[m5] /metrics unavailable — aborting.", file=sys.stderr)
             return 1
+
+        # The config as EXECUTED, not as declared. Raises on disagreement.
+        if not mock:
+            for note in assert_server_matches_config(cfg, server_config(args.base_url)):
+                print(f"[m5] WARNING {note}", file=sys.stderr)
 
         pts: list[dict[str, Any]] = []
         fits: list[dict[str, Any]] = []

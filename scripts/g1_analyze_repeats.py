@@ -11,10 +11,19 @@ one.
 
 Two intervals per arm:
   * per-cell ms_per_step, bootstrapped over the 20 samples directly
-  * the position-of-n=9 statistic (0% = costs what n=8 costs, i.e. free;
-    100% = costs what n=16 costs, i.e. fully paid), bootstrapped by
+  * the position-of-n=9 statistic, (c9 - c8) / (c16 - c8), bootstrapped by
     resampling n=8/9/16 independently and recomputing the ratio each time --
     same shape as paid_share_ci's independent-arm resampling.
+
+    READ THE REFERENCE POINT CAREFULLY. 100% = n=9 costs what n=16 costs,
+    i.e. padding fully paid. But 0% does NOT mean "free": the denominator
+    spans eight added REAL requests and n=9 carries one of them, so a batch
+    with free padding and cost linear in real work sits at 1/8 = 12.5%, not
+    at 0. Reporting a graphs-arm 16.0% as "16% paid" overstates it by an
+    order of magnitude -- the padding-attributable residual is 16.0 - 12.5
+    = 3.5 points, which agrees with the 4.0% obtained by differencing the
+    graphs and eager increments. 0% is the right reference only for a
+    quantity with no real-work term in its denominator, which this is not.
 
 Usage:
   python scripts/g1_analyze_repeats.py results/g1_repeats/g1_graphs_r20.json \\
@@ -127,7 +136,8 @@ def render(results: dict[str, dict]) -> str:
             excludes_100 = p["ci_hi"] < 100.0
             excludes_0 = p["ci_lo"] > 0.0
             L.append(f"      excludes fully-paid (100%): {excludes_100}   "
-                    f"excludes fully-free (0%): {excludes_0}")
+                    f"excludes 0% (NOT the free reference; see module docstring "
+                    f"-- free-with-linear-real-work is 12.5%): {excludes_0}")
     return "\n".join(L) + "\n"
 
 

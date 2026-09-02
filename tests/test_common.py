@@ -19,6 +19,7 @@ from _common import (  # noqa: E402
     CONTROLLED_VARS,
     ControlledVarError,
     assert_controlled_vars,
+    assert_server_matches_config,
     config_hash,
     finish_run,
     load_config,
@@ -460,3 +461,42 @@ def test_save_table_leaves_no_tmp_file(tmp_path):
     save_table(run, "x", [{"a": 1}])
     assert list(run.dir.glob("*.tmp")) == []
     assert (run.dir / "x.parquet").exists()
+
+
+# ---------------------------------------------------------------------------
+# The configuration as EXECUTED, not as declared (Appendix 10.12's hole)
+# ---------------------------------------------------------------------------
+
+def test_server_matching_config_passes():
+    """A server serving what the config declares raises nothing."""
+    assert assert_server_matches_config(
+        good_config(), {"max_model_len": 8192, "model": "test"}) == []
+
+
+def test_server_contradicting_config_aborts():
+    """The exact failure Appendix 10.12 reports: declared 8192, served 4096.
+
+    Before this check existed the run completed and published numbers
+    attributed to a max_model_len the server never used.
+    """
+    with pytest.raises(ControlledVarError) as e:
+        assert_server_matches_config(good_config(), {"max_model_len": 4096})
+    assert "8192" in str(e.value) and "4096" in str(e.value)
+
+
+def test_unreachable_server_reports_unverified_rather_than_passing():
+    """An empty scrape must not read as agreement.
+
+    Returning [] here would rebuild the hole: "nothing disagreed" and
+    "nothing was compared" would again be the same outcome.
+    """
+    notes = assert_server_matches_config(good_config(), {})
+    assert notes and "did NOT run" in notes[0]
+
+
+def test_declared_independent_var_is_exempt_from_server_check():
+    """A control deliberately varied and declared is not a contradiction."""
+    cfg = good_config()
+    cfg["independent_vars"] = {
+        "max_model_len": "the context length IS the sweep in this experiment"}
+    assert assert_server_matches_config(cfg, {"max_model_len": 4096}) == []

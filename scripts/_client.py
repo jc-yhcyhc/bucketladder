@@ -213,3 +213,38 @@ def wait_for_server(base_url: str, timeout: float = 3600.0, poll: float = 15.0) 
             pass
         time.sleep(poll)
     return False
+
+
+def server_config(base_url: str, timeout: float = 30.0) -> dict[str, Any]:
+    """What the LIVE server reports about itself.
+
+    Exists because every controlled-variable check in this pipeline compared a
+    config against the fixed required set and never against the server that
+    config actually produced. Appendix 10.12 caught that in the act: a run
+    whose max_model_len was declared 8192 and served 4096, undetected, which
+    cost a boundary on the v6e replication. /v1/models answers this cheaply
+    and without patching the stack.
+
+    Returns {} when the server does not answer or the payload is not what we
+    expect. Callers MUST treat {} as "unverified", never as "verified clean" --
+    silently passing on an unreachable endpoint would rebuild the same hole
+    this function exists to close.
+    """
+    url = base_url.rstrip("/") + "/v1/models"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            payload = json.load(r)
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return {}
+    entries = payload.get("data") if isinstance(payload, dict) else None
+    if not entries:
+        return {}
+    served = entries[0]
+    if not isinstance(served, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if served.get("id") is not None:
+        out["model"] = served["id"]
+    if served.get("max_model_len") is not None:
+        out["max_model_len"] = served["max_model_len"]
+    return out

@@ -1,4 +1,4 @@
-# Shape Coverage Is a Boot-Time Memory Cost: Compiled-Shape Padding in TPU and GPU Serving
+# Run-Time Shape Padding Is Nearly Free; Coverage Is Paid at Boot: Compiled-Shape Quantization in TPU Serving, with a GPU Control
 
 Stack: vLLM 0.25.0 and `tpu-inference` 0.25.0 on a `v5litepod-4` TPU slice
 (JAX 0.10.2, tensor-parallel degree TP=4), with an NVIDIA L4 for the GPU control.
@@ -23,18 +23,22 @@ Token padding is **the exception**: real arithmetic, paid at 23.1% of
 nominal at batch 4 and indistinguishable from zero at batch 16.
 
 **On that dimension, ladder design still pays, and the effective
-variable is placement, not shape count.** One entry added where the
+variable is placement, not shape count.** At low batch, below
+saturation, and without prefix caching, one entry added where the
 workload needs it cuts latency 12.1% at the straddling prompt length, at
 no memory cost, while a uniformly finer ladder buys nothing further and
 fails to boot near the stock memory fraction. Chosen offline from a
-length distribution, a placement predicts the gain to within 6% and
-beats BucketServe's own objective by 1.61 ms at equal shape count. The
+length distribution, a placement predicts that gain to within 6%. The
 gain is a latency reduction below saturation (46% at the knee), not
 added capacity (2.6% at saturation), and shrinks from 12.3% to 1.7% once
-prefix caching is on.
+prefix caching is on — the regime it pays in is narrow and named here
+rather than reached three appendices later.
 
-**What shape coverage costs is not run-time padding but a one-time boot
-cost**, amortized by a persistent cache. Every number here regenerates
+**What shape coverage costs is not run-time padding but a boot-time
+charge**: compilation and capture time, which a persistent cache largely
+amortizes, and compilation memory headroom, which it does not — though
+the ladder recommended here boots at the stock fraction and pays
+neither. Every number here regenerates
 from captured data by a script that fails on disagreement; the
 mechanisms proposed to explain them receive no equivalent check.
 
@@ -134,10 +138,15 @@ where it is the treatment. Chunked prefill, `max_model_len`,
 configuration is checked against the fixed set of required values before any
 hardware work starts, and aborts if a controlled variable is missing or
 undeclared-and-wrong — three runs rejected for a drifted declared value, one for
-an undeclared deliberate variation. This is a check over the configuration as
-declared, not as executed: it does not compare against what the live server
-reports, a real gap Appendix §10.12 hits directly (`max_model_len` declared 8192,
-served 4096, undetected for exactly that reason).
+an undeclared deliberate variation. That check reads the configuration as
+*declared*. A second one now reads it as *executed*: each run scrapes the live
+server's own `/v1/models` and aborts if what is being served contradicts what the
+run declared. It is narrow — `max_model_len` is the only controlled variable that
+endpoint reports — and it is new, added after Appendix §10.12 demonstrated the
+hole by falling into it (declared 8192, served 4096, undetected, costing that
+run a boundary). An unreachable endpoint is reported as *unverified* rather than
+passing, so that "nothing disagreed" and "nothing was compared" stay
+distinguishable.
 
 **Units and instrument scope.** All timings are measured server-side, as
 differences between Prometheus histogram snapshots taken before and after each
@@ -396,7 +405,7 @@ only, so the placebo cells measure everything that differs between two server bo
 except padding. Qwen3-4B, `v5litepod-4`, TP=4, two concurrent requests,
 `output_len=32`, 18 repeats per cell pooled over both arm orders:
 
-Table: Ten-shape against twenty-one-shape ladder at two concurrent requests. Prompts 300 and 600 pad identically on both ladders and act as controls. {#tab:ladder21}
+Table: Ten-shape against twenty-one-shape ladder at two concurrent requests. Prompts 300 and 600 pad identically on both ladders and act as controls. Intervals are within-boot; the between-boot floor [tab:isolated] measures is 4-11 ms, wider than any interval shown. {#tab:ladder21}
 | prompt | pads to (10 shapes) | pads to (21 shapes) | tokens saved | 10-shape | 21-shape | difference [95% CI] |
 |---|---|---|---|---|---|---|
 | 300 | 512 | 512 | 0 | 149.8 ms | 150.6 ms | +0.8 ms [+0.1, +1.6] |
@@ -455,7 +464,7 @@ The default, gap-1024 and gap-2048 rows are measured together, at 0.92, in one
 server boot; the gap-512 row is not remeasured here and repeats the twenty-one-shape
 values already established in [tab:ladder21], from a different boot the day before:
 
-Table: Separating placement from cardinality. Shape count ranges from 10 to 21 while the benefit follows only whether an entry falls between the prompt and the next default entry. Gap 512 is carried over from [tab:ladder21] rather than measured in this boot; see the note below the table. {#tab:placement}
+Table: Separating placement from cardinality. Shape count ranges from 10 to 21 while the benefit follows only whether an entry falls between the prompt and the next default entry. Gap 512 is carried over from [tab:ladder21] rather than measured in this boot; see the note below the table. Every arm here is one boot, so no interval spans the 4-11 ms between-boot floor. {#tab:placement}
 | ladder | shapes | 1200 pads to | 3000 pads to | prompt 1200 | prompt 3000 |
 |---|---|---|---|---|---|
 | default | 10 | 2048 | 4096 | 215.4 ms | 297.2 ms |
@@ -508,7 +517,7 @@ replayed the same lengths against every ladder, pairing the arms on workload. Ea
 arm's latency was then predicted from its expected padded-token count multiplied by
 the 35 µs per padded token measured in §4.3:
 
-Table: Ladders selected offline from a lognormal length distribution, with predicted and measured latency. {#tab:fit}
+Table: Ladders selected offline from a lognormal length distribution, with predicted and measured latency. One boot per arm; the 4-11 ms between-boot floor is not represented in these figures. {#tab:fit}
 | ladder | shapes | mean padded tok/req | predicted Δ | measured e2e | boots at 0.92? |
 |---|---|---|---|---|---|
 | default | 10 | 602 | — | 219.8 ms | yes |
@@ -527,6 +536,15 @@ supports using the model for design. Ladder design therefore does not require a
 hardware sweep: sample the length distribution, compute expected padding per
 candidate ladder, and multiply by the per-token cost.
 
+**The model is per-request; the mechanism above n=2 is per-step.** This replay
+ran at concurrency 2, where each prompt prefills alone in its step (§2), so
+pricing padded tokens *per request* is correctly specified here — which is why
+the agreement means anything. Appendix §10.1 shows that specification failing
+above n=4, where the packed step selects the shape. The rule is therefore
+validated in the isolated-prefill regime only. That limit coincides with the
+regime the rule is *for*, since §4.2 finds the paid share substantial at low
+batch and near zero by 16 — a coincidence of regimes, not a derivation.
+
 ##### Constraining the objective
 
 The objective must be constrained, since the unconstrained objective is the
@@ -541,47 +559,23 @@ with entries placed against the length distribution.
 
 ##### Comparison against BucketServe's ladder objective
 
-The procedure above minimizes expected padded tokens. BucketServe specifies a
-different objective for the same decision, minimizing expected relative waste,
-`E[1 - S/U_b]`, and derives the condition that a bucket's upper bound should equal
-the conditional expectation of lengths within it. That condition is the Lloyd-Max
-centroid condition, and their paper declines to compute it, describing it as
-computationally expensive in practice. It is a local condition; we instead solve
-their objective globally by dynamic programming over a discretized length axis,
-which is `O(K N^2)` and takes milliseconds, so their objective is given a better
-solution than their own formulation proposes.
-
-Neither ladder is expressible through `VLLM_TPU_BUCKET_PADDING_GAP`, whose family
-is "double while the doubling step is no larger than the gap, then step linearly".
-Both were compiled by patching `get_token_paddings` to accept an explicit ladder,
-which leaves the function unchanged when the variable is unset. Both ladders also
-carry fixed entries at 16, 32, 64 and 128: BucketServe's boundaries are derived
-from prompt lengths and begin at 208, and a ladder without small entries pads a
-two-token decode step to 208. Both arms therefore spend the same number of shapes,
-fourteen, and differ only in where the ten free entries sit.
-
-At equal shape count (fourteen), replaying [tab:fit]'s sampled lengths, the stock
-ladder (10 shapes) pads 602 tokens/req for a mean end-to-end of 226.2 ms; gap-1024
-pads 389 tokens/req for 215.6 ms; BucketServe's relative-waste objective pads 328
-tokens/req for 209.0 ms; and the padded-token objective pads **248** tokens/req
-for **207.4 ms**. The stock and gap-1024 rows here read 6.4 and 2.9 ms above
-[tab:fit]'s own values for nominally the same arms — inside the 4–11 ms
-between-instance offset [tab:isolated] measures — a caution the next comparison
-inherits: it is precise only if these four rows were measured together, which
-this account does not establish.
-
-**The padded-token objective is faster by 1.61 ms, with a 95% interval of
-[1.04, 2.17] and p < 0.001** over nine replays per arm. Both ladder-design
-objectives beat the stock ladder by roughly 17–19 ms, so the disagreement between
-them is small next to the decision to design a ladder at all. The direction is
-what the cost model predicts: relative waste treats a 10-token overshoot on a
-100-token request as equal to a 1000-token overshoot on a 10,000-token request,
-whereas §4.3 prices a padded token at a constant, so absolute padding is the
-quantity that converts to time.
-
-Two qualifications on that comparison — an unresolved low-replay interval, and a
-per-token cost that is not constant across the range — are honest enough to need
-stating, and are given in full in Appendix §10.11.
+BucketServe specifies a different objective for the same decision — minimize
+expected relative waste, `E[1 - S/U_b]` — and derives the Lloyd-Max centroid
+condition for it, which their paper declines to compute, calling it expensive in
+practice. That condition is local; we solve their objective globally by dynamic
+programming over a discretized length axis, `O(K N^2)` and milliseconds, so their
+objective is given a better solution than their own formulation proposes. At
+equal shape count the padded-token objective comes out ahead, and both
+ladder-design objectives beat the stock ladder by far more than they differ from
+each other — the disagreement between objectives is small next to the decision to
+design a ladder at all. The direction is what the cost model predicts: relative
+waste treats a 10-token overshoot on a 100-token request as equal to a
+1000-token overshoot on a 10,000-token one, whereas §4.3 prices a padded token at
+a constant, so absolute padding is the quantity that converts to time. This is an
+objective-level comparison, not a reimplementation of their system, and its
+margin is reported in Appendix §10.14 rather than here because the four arms'
+co-boot provenance is not established and the margin is smaller than the
+between-instance offset [tab:isolated] measures.
 
 Applying the rule under a moving traffic distribution — re-selection cadence, the
 counter that would trigger it, and a correction to how a padding gap maps to a
@@ -625,19 +619,19 @@ so this table cannot resolve a difference between the architectures; what both
 support is that the paid share is small on each.
 
 [tab:gpu] is one measurement per arm. Repeating each arm 20 times on a fresh L4 and
-bootstrapping the position-of-n=9 statistic (10,000 resamples, median-based, the
-same convention as every other interval in this paper) resolves what the single
-measurement could not: with graphs, position is **16.0% [15.0%, 17.1%]** — an
-interval that excludes both 0% and 100%, meaning the small batch-padding cost this
-table shows is real and repeatable rather than noise, not merely "closer to free
-than to paid." Under `--enforce-eager`, position is **0.7% [−9.6%, 11.1%]** — an
-interval that excludes 100% and *includes* 0%, meaning eager execution is
-statistically indistinguishable from fully free. The single measurements point the
-same direction — 16.7% and 12.8%, both far from fully paid — though eager's single
-value sits outside its own repeated interval, which an n=1 sample does not
-resolve; what the repeats add is knowing that graphs' small effect is real and
-repeatable rather than noise, and that eager's is not distinguishable from zero
-rather than being a genuinely intermediate cost.
+bootstrapping the position-of-n=9 statistic — `(c9 − c8) / (c16 − c8)`, 10,000
+resamples, median-based, the same convention as every other interval in this
+paper — resolves what the single measurement could not: with graphs, position is
+**16.0% [15.0%, 17.1%]**; under `--enforce-eager`, **0.7% [−9.6%, 11.1%]**.
+
+**That 16.0% is not 16% of nominal padding paid.** The denominator spans eight
+added *real* requests, of which n=9 carries one, so free-with-linear-real-work
+sits at **12.5%**, not 0%: graphs' residual above the free reference is 3.5
+points, agreeing to within half a point with the 4.0% obtained by differencing
+the arms. §4.2's 23.1% has no real-work term in its denominator at all, so the
+two are not on a common scale and the apparent similarity is an artifact of
+reading both as percentages; Appendix §10.13 works this through. The single
+measurements, 16.7% and 12.8%, point the same way.
 
 **What is paid is the capture, and it is paid at startup.** Enabling graphs costs
 108 s of initialization, 118.7 s against 10.7 s, for a capture set fixed in advance.
@@ -659,9 +653,9 @@ Five interventions were designed against the compiled-shape premise. Each
 rejection below identifies a dimension the measurements show carries no cost:
 
 - **Ladder placed against the workload** — works: −12.1% at n=2 and −46% p50
-  below the knee, at full memory; beats BucketServe's objective by 1.61 ms at
-  equal shape count; −1.7% once prefix caching is on (§4.3–§4.4; prefix caching
-  in Appendix §10.3).
+  below the knee, at full memory; ahead of BucketServe's objective at equal
+  shape count by a margin §4.4 reports but does not establish the provenance of;
+  −1.7% once prefix caching is on (§4.3–§4.4; prefix caching in Appendix §10.3).
 - **Bucket-aware admission control** — premise false (§4.2).
 - **Ladder redesign on the request dimension** — D1 does not exist; D3 inert by
   default.
@@ -724,81 +718,62 @@ cannot bound residual error in the measurements either.
 
 ## 7. Limitations
 
-**One TPU slice, one GPU, one primary model.** A v5litepod-4 with a 4B model, and a
-single L4 for the control. Appendix §10.4's TP=1/2/4 ablation finds request padding
-cheap at every sharding and argues analytically that the regime map is set by batch
-size and dtype rather than parameter count, for dense weight-stationary decode
-only — but model scale and multi-host topology remain unmeasured, and both change
-the fixed costs padding is absorbed into. A second TPU generation bounds how much
-of this is chip-specific without resolving it: a v6e-4 spot slice, same stack,
-replicates the token-padding direction at three of four boundaries (Appendix
-§10.12) — a second data point, not a second interval. **The strongest single
-number is also the least well supported:** the ~85% paid share at n≤2 rests on one
-boundary and carries no interval (§4.2).
+**One TPU slice, one GPU, one primary model.** A v5litepod-4 with a 4B model and
+a single L4. Appendix §10.4's TP=1/2/4 ablation finds request padding cheap at
+every sharding and argues the regime map is set by batch size and dtype rather
+than parameter count, for dense weight-stationary decode only; model scale and
+multi-host topology stay unmeasured, and both change the fixed costs padding is
+absorbed into. A v6e-4 slice replicates the token-padding direction at three of
+four boundaries (Appendix §10.12) — a second data point, not a second interval.
+**The strongest single number is the least well supported:** the ~85% paid share
+at n≤2 rests on one boundary with no interval (§4.2).
+
+**Every ladder interval is within-boot.** [tab:isolated] measures a 4–11 ms
+between-instance floor, wider than any interval in §4.3 or §4.4, and each arm
+there is one boot. The placement result's direction is robust — it survives
+placebo correction and reproduces across arm orders — but its precision is
+reported tighter than the design supports, and three boots per arm would be
+needed to state it honestly as an interval.
 
 **Prefix caching is measured but not swept, and there is no production trace.**
-Appendix §10.3 tests caching at one prefix length, 2048 of 3000 tokens, on one
-workload shape — enough to show that the placement target moves, not enough to
-say where it lands for a given amount of prefix reuse, and everything outside
-Appendix §10.3 is measured with caching disabled and so describes workloads with
-little prefix sharing. §4.2's four length distributions are parametric families
-matched on mean length, not a trace of real traffic. They establish that padded
-share varies by a factor of four with distribution shape at equal offered tokens,
-and that dispersion does not order it, but the figures belong to those families
-rather than to any deployment. Appendix §10.3 further shows that any such figure depends on
-how much prefix reuse a workload has, since caching changes the length actually
-prefilled.
+Appendix §10.3 tests one prefix length, 2048 of 3000 tokens, on one workload
+shape: enough to show the placement target moves, not where it lands for a given
+amount of reuse. Everything outside §10.3 runs with caching disabled and so
+describes workloads with little prefix sharing — and caching is vLLM's default.
+§4.2's four length distributions are parametric families matched on mean length,
+not real traffic.
 
-**The ladder benefit has no measured upper bound in concurrency.** Appendix §10.1
-sweeps 1 to 16 and finds no crossing, so we cannot say where a finer ladder ceases
-to pay, only that it has not ceased by 16; above n=4 that experiment has no valid
-placebo, so those rows are floors on the effect rather than unbiased estimates.
-**The recommendation is also mediated by version-pinned internal flags:**
-`VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to vLLM
-and `tpu-inference` 0.25.0, and an upstream refactor could change the ladder they
-produce or remove them. The measurements survive such a change, since they
-characterize a mechanism rather than an interface, but the operational advice does
-not: §4.4's rule states which ladder to want, and the flags are only how one
-currently asks for it.
+**The ladder benefit has no measured upper bound in concurrency, and the
+recommendation is mediated by version-pinned internal flags.** Appendix §10.1
+sweeps 1 to 16 without a crossing, and above n=4 has no valid placebo, so those
+rows are floors rather than unbiased estimates.
+`VLLM_TPU_BUCKET_PADDING_GAP` and `ATTN_BUCKETIZED_NUM_REQS` are internal to
+vLLM and `tpu-inference` 0.25.0; the measurements survive a refactor, since they
+characterize a mechanism, but the operational advice does not.
 
-**Cost per padded token on a mixture-of-experts model is unmeasured.** No slice
-was available: `v5litepod-4` capacity was refused in thirteen zones across three
-continents, on both on-demand and spot pricing, over a full day of half-hourly
-attempts. What the implementation settles is the direction, not the magnitude: a
-padded token is dispatched to real experts and can activate one no real token
-needed, which the sign of this effect survives but its size does not. Appendix
-§10.6 has the full source-reading account, the mitigation flag the backend ships
-disabled, and why it
-fails open.
+**Mixture-of-experts cost per padded token is unmeasured**, no slice having been
+available — `v5litepod-4` was refused in thirteen zones across three continents,
+on-demand and spot, over a full day. The implementation settles the sign, not
+the size (Appendix §10.6); Appendix §10.6 also bounds the magnitude from public
+routing facts rather than hardware. **`gpt-oss-20b` stayed unmeasured** because
+of MXFP4 block alignment — weights pack 4-bit values in blocks of 32 and
+2880/4 = 720 is not a multiple of 32 at TP=4, while TP=2 cannot run on a
+four-chip mesh. `llama4` is out of reach at 109B.
 
-**`gpt-oss-20b` also stayed unmeasured, for a reason worth stating precisely
-since a prior draft misdiagnosed it as a parameter axis of size six.** The true
-cause is MXFP4 block alignment: weights pack 4-bit values in blocks of 32, and
-2880/4 = 720 is not a multiple of 32 at TP=4. TP=2 divides cleanly but cannot run
-here — the mesh's data-parallel and tensor-parallel degrees must multiply to the
-slice's four chips, and no two-chip topology or single-chip quota is available.
-`llama4` remains out of reach at 109B parameters.
-
-**The GPU control is inference-tier hardware.** The L4 has neither the compute
-throughput nor the memory bandwidth of the accelerators most production serving
-runs on, and the arithmetic-intensity ridge sits at a different point there than at
-v5e's ~240 FLOP/byte. Since the ridge is what sets the batch size at which token
-padding stops mattering (Appendix §10.4), the batch thresholds reported here should not be
-transferred to other hardware without re-measurement.
+**The GPU control is inference-tier, one point rather than a curve, and
+co-located only.** The L4's arithmetic-intensity ridge sits elsewhere than v5e's
+~240 FLOP/byte, and since the ridge sets the batch size at which token padding
+stops mattering (Appendix §10.4), these thresholds should not be transferred
+without re-measurement. Startup was measured at vLLM's default capture set and
+the number of captured shapes was never varied — precisely the axis BucketServe
+and LAPS trade along. On a disaggregated deployment the padding question divides
+in two.
 
 **Prefill step cost above n=16 is not isolable**, and at n=16 the clean sample is
 7–11 dispatches per arm. **The n=4 convergence is unexplained and is not an
-operator effect**: an operator-level profile shows every category of device time
-moving smoothly through n=4, and the three observations that appear to converge
-there are not independent — LENS's failure and the paid-share drop are the same
-quantity described twice.
-
-**The GPU control is one point rather than a curve, and co-located prefill and
-decode only.** Startup was measured at vLLM's default capture set, and the number
-of captured shapes was not varied, which is precisely the axis BucketServe and LAPS
-trade along. On a disaggregated deployment the padding question divides in two,
-and Appendix §10.4's finding that variance is a prefill phenomenon is the asymmetry
-that motivates disaggregation.
+operator effect**: device time moves smoothly through n=4, and the observations
+that appear to converge there are not independent — LENS's failure and the
+paid-share drop are the same quantity twice.
 
 ---
 
@@ -1392,17 +1367,19 @@ model's floating-point work — waiting on memory, mostly. The table also report
 off-chip memory the weights are streamed from. Measured with `prompt_len=256` and
 `output_len=64`:
 
-Table: Utilization against batch size, testing the memory-bandwidth account of free request padding. The account predicts about 49% MFU at n=256. {#tab:roofline}
-| n | 1 | 8 | 32 | 64 | 256 |
-|---|---|---|---|---|---|
-| MFU | 0.3% | 1.7% | 3.6% | 4.4% | **5.1%** |
-| high-bandwidth memory (HBM) utilization | 61.4% | 52.1% | 31.2% | 21.4% | **11.1%** |
+Table: Utilization against batch size, testing the memory-bandwidth account of free request padding. The account predicts about 49% MFU at the n=256 the prediction names; the refutation is stated at n=64, the largest genuinely full batch. {#tab:roofline}
+| n | 1 | 8 | 32 | 64 |
+|---|---|---|---|---|
+| MFU | 0.3% | 1.7% | 3.6% | **4.4%** |
+| high-bandwidth memory (HBM) utilization | 61.4% | 52.1% | 31.2% | **21.4%** |
 
-At n=256 the server has not admitted all 256 requests into the batch: some are
-still waiting in the queue, so the column does not describe a batch of 256 and no
-claim rests on it. It is shown because 256 is the batch size the prediction names.
-The refutation is stated at n=64, where queue time is 0.1 ms and the batch is
-genuinely full.
+The n=256 cell is deliberately not tabulated. At that offered concurrency the
+server has not admitted all 256 requests into the batch — some are still queued —
+so the column would not describe a batch of 256, and a contaminated cell in a
+table outlives the sentence disclaiming it. For the record it read 5.1% MFU and
+11.1% HBM utilization, both further from the predicted 49% than n=64 is, so
+excluding it costs the refutation nothing. The refutation is stated at n=64,
+where queue time is 0.1 ms and the batch is genuinely full.
 
 MFU here is `2 × parameters × tokens` against the chip's 197 TFLOP/s bf16 peak,
 with attention FLOPs excluded, which is the same dense weight-stationary accounting
@@ -1614,11 +1591,14 @@ At n=1, the same three boundaries §4.2 establishes on v5e replicate in directio
 2048/4096, against v5e's single-boundary ~85% figure at n≤2. The fourth boundary,
 4096/8192, could not be tested: this boot's `max_model_len` was 4096 rather than
 the 8192 its own config declared — a configuration-forwarding gap caught after the
-fact, since no controlled-variable check in this pipeline verifies a config
-against the live server it actually produced, only against itself — so a
-4104-token prompt exceeds the context window outright, a boot-configuration fact
-rather than a padding measurement, and it does not affect the other three
-boundaries. At n=4, the paid share falls to 6.9% at the 512/1024 boundary, the
+fact, because at the time no check in this pipeline verified a config against the
+live server it actually produced, only against itself — so a 4104-token prompt
+exceeds the context window outright, a boot-configuration fact rather than a
+padding measurement, and it does not affect the other three boundaries. §2's
+executed-configuration check was written in response to this run and would have
+aborted it before any measurement was taken; this is the one instrument-definition
+failure in §6's catalog that now has a guardrail, and it got one only because a
+replication tripped over it in public. At n=4, the paid share falls to 6.9% at the 512/1024 boundary, the
 same batch-size pattern §4.2 reports on v5e (23.1% at n=4, falling toward zero by
 n=16); at n=8, every dispatch split across multiple prefill steps under chunked
 prefill and was correctly excluded rather than pooled into a misleading number,
@@ -1639,3 +1619,83 @@ This is one boot on one v6e-4 slice, not a second full sweep: it establishes
 direction, not a second interval, and the model-scale and multi-host questions §7
 raises remain exactly as open on this generation as on the first.
 
+
+### 10.13 What the GPU position statistic's reference point actually is
+
+§4.5 reports a position-of-n=9 statistic on the L4 and the abstract reports a
+67 µs / 4.0% figure from the same arms. Read carelessly these look like two
+normalizations of one quantity, and 16.0% looks like the same order as §4.2's
+23.1% on the token dimension — the number this paper calls the surviving
+exception. They are not the same quantity, and the difference is entirely in
+the denominator.
+
+The statistic is `(c9 − c8) / (c16 − c8)`. Its numerator is what a ninth request
+adds. Its denominator is what eight more requests add, and those eight are
+*real*: they carry real tokens, real key–value state and real arithmetic. A
+batch whose padding costs nothing, and whose cost is otherwise linear in real
+work, therefore does not sit at 0 on this scale. It sits at one eighth:
+
+- fully paid (n=9 costs what n=16 costs) → 100%
+- padding free, cost linear in real work → **12.5%**
+- n=9 costs exactly what n=8 costs → 0%, which would mean the ninth request's
+  *own real work* were also free, and is not the free hypothesis
+
+Graphs measures 16.0% [15.0%, 17.1%], which is 3.5 points above the free
+reference rather than 16 above it. Differencing the two arms' increments
+instead — `(0.283 − 0.215) / 1.693` — removes the shared real-work term
+directly and gives 4.0%. The two estimators agree to within half a point, which
+is the check that the reading above is right rather than a rationalization.
+
+§4.2's paid share is a ratio whose denominator is nominal padding alone, with no
+real-work term in it. So 23.1% there and 16.0% here are not comparable
+magnitudes, and the cross-architecture claim does not rest on their similarity
+— it rests on 4.0% and 3.5 points being small.
+
+`scripts/g1_analyze_repeats.py` reported this statistic under a docstring that
+called 0% "free". That gloss is wrong for the reason above and has been
+corrected in the script; no reported number changes, since every GPU figure in
+the paper was computed from the formula rather than the gloss. It is, though,
+exactly the instrument-definition failure §6 names as the class no guardrail
+covers: the estimator was right and its stated meaning was not, which no
+recomputation would have caught.
+
+### 10.14 The BucketServe-objective comparison, with its provenance stated
+
+§4.4 reports the direction of this comparison and sends the margin here, because
+the margin is smaller than the noise floor its own provenance would have to clear.
+
+Neither ladder is expressible through `VLLM_TPU_BUCKET_PADDING_GAP`, whose family
+is "double while the doubling step is no larger than the gap, then step linearly".
+Both were compiled by patching `get_token_paddings` to accept an explicit ladder,
+which leaves the function unchanged when the variable is unset. Both carry fixed
+entries at 16, 32, 64 and 128: BucketServe's boundaries derive from prompt lengths
+and begin at 208, and a ladder without small entries pads a two-token decode step
+to 208. Both arms therefore spend fourteen shapes and differ only in where the ten
+free entries sit.
+
+At equal shape count, replaying [tab:fit]'s sampled lengths: the stock ladder
+(10 shapes) pads 602 tokens/req for a mean end-to-end of 226.2 ms; gap-1024 pads
+389 tokens/req for 215.6 ms; BucketServe's relative-waste objective pads 328
+tokens/req for 209.0 ms; the padded-token objective pads 248 tokens/req for
+207.4 ms. The padded-token objective is faster by 1.61 ms, 95% interval
+[1.04, 2.17], p < 0.001 over nine replays per arm; both objectives beat the stock
+ladder by 17.2 and 18.8 ms.
+
+**Why that 1.61 ms is not quoted in the abstract.** The stock and gap-1024 rows
+here read 6.4 and 2.9 ms above [tab:fit]'s own values for nominally the same
+arms. That is inside the 4–11 ms between-instance offset [tab:isolated] measures
+directly, and it means these two tables were not produced by one boot. Whether
+the four rows *within* this comparison were measured together — which is what a
+1.61 ms difference with a [1.04, 2.17] interval would require to mean what it
+says — is not established by the record this paper has: the run is not in
+`captured/`, and `scripts/paper_numbers.py` does not regenerate it, so it is
+outside the provenance contract §2 describes. A within-boot interval an order of
+magnitude tighter than the between-boot floor is exactly the shape of a number
+that has not been asked the right question. The comparison's direction survives
+this, since it agrees with the cost model; the margin should not be relied on
+until the four arms are re-run interleaved in a single boot with the placebo cell
+re-measured, which is the experiment this section is short of.
+
+Two further qualifications, and Appendix §10.11 has both in full: at three replays
+the same comparison gave [-5.39, +1.83] and did not resolve, and the measured gap
+is about half what the linear model predicts from 80 padded tokens.
